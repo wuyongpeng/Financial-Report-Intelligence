@@ -66,10 +66,21 @@ export async function runIngestion(env: Bindings, options: { days?: number; down
     await updateSourceHealth(env.DB, fetched.health, startedAt);
 
     const relevant = fetched.announcements.filter((item) => companyByCode.has(item.code));
+    const cutoff = new Date(Date.now() - (days + 1) * 86400000).toISOString();
+    const existing = await env.DB.prepare('SELECT id, source, source_id FROM announcements WHERE published_at >= ?').bind(cutoff).all<{
+      id: string; source: string; source_id: string;
+    }>();
+    const existingIds = new Set(existing.results.map((item) => item.id));
+    const existingSourceIds = new Set(existing.results.map((item) => `${item.source}:${item.source_id}`));
     relevant.sort((a, b) => (a.source === 'CNINFO' ? 1 : 0) - (b.source === 'CNINFO' ? 1 : 0));
     const logical = new Map<string, Announcement>();
+    let skippedCount = 0;
     for (const item of relevant) {
       const id = await logicalId(item);
+      if (existingIds.has(id) || existingSourceIds.has(`${item.source}:${item.sourceId}`)) {
+        skippedCount += 1;
+        continue;
+      }
       // Exchange-direct records are sorted first; CNINFO only fills a missing logical report.
       if (!logical.has(id)) logical.set(id, item);
     }
@@ -125,7 +136,7 @@ export async function runIngestion(env: Bindings, options: { days?: number; down
     const finishedAt = new Date().toISOString();
     await env.DB.prepare(`UPDATE ingest_runs SET finished_at=?, status='success', discovered_count=?, inserted_count=?, downloaded_count=?, source_health=? WHERE id=?`)
       .bind(finishedAt, relevant.length, inserted.length, downloadedCount, JSON.stringify(fetched.health), runId).run();
-    return { runId, startedAt, finishedAt, sourceHealth: fetched.health, fetched: fetched.announcements.length, relevant: relevant.length, inserted: inserted.length, downloaded: downloadedCount, parsed: parsedCount };
+    return { runId, startedAt, finishedAt, sourceHealth: fetched.health, fetched: fetched.announcements.length, relevant: relevant.length, skipped: skippedCount, inserted: inserted.length, downloaded: downloadedCount, parsed: parsedCount };
   } catch (error) {
     await env.DB.prepare(`UPDATE ingest_runs SET finished_at=?, status='failed', error=? WHERE id=?`).bind(new Date().toISOString(), String(error), runId).run();
     throw error;

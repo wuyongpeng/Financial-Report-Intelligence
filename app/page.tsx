@@ -5,6 +5,7 @@ import companiesJson from '@/data/companies.json';
 import seedReportsJson from '@/data/seed-reports.json';
 
 type View = 'lane' | 'report';
+type ReportFilter = 'all' | 'online' | 'pending';
 type Evidence = { title: string; value: string; calc: string; inference: string; quote: string; page: string };
 type OfficialReport = { id: string; source: string; code: string; company_name: string; title: string; published_at: string; discovered_at: string; pdf_url: string; industry: string; rank: number };
 
@@ -46,14 +47,45 @@ const promptAnswers: Record<string, string> = {
 export default function Home() {
   const [view, setView] = useState<View>('lane');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedOfficial, setSelectedOfficial] = useState<OfficialReport>(() => officialReports.find((item) => item.code === reports[0].code) ?? officialReports[0]);
+  const [reportFilter, setReportFilter] = useState<ReportFilter>('all');
   const [activeTab, setActiveTab] = useState('一分钟看懂');
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; text: string; compare?: boolean }[]>([]);
-  const report = reports[selectedIndex];
+  const matchedDemoIndex = reports.findIndex((item) => item.code === selectedOfficial?.code);
+  const hasDemoAnalysis = matchedDemoIndex >= 0;
+  const baseReport = reports[hasDemoAnalysis ? matchedDemoIndex : selectedIndex];
+  const selectedCompany = coverageCompanies.find((item) => item.code === selectedOfficial?.code);
+  const report = selectedOfficial ? {
+    ...baseReport,
+    name: selectedOfficial.company_name,
+    code: selectedOfficial.code,
+    exchange: selectedCompany?.exchange === 'SSE' ? '上交所' : '深交所',
+    report: selectedOfficial.title,
+    publish: dateTime(selectedOfficial.published_at),
+    revenue: hasDemoAnalysis ? baseReport.revenue : '--',
+    profit: hasDemoAnalysis ? baseReport.profit : '--',
+    eps: hasDemoAnalysis ? baseReport.eps : '--',
+    roe: hasDemoAnalysis ? baseReport.roe : '--',
+  } : baseReport;
+  const filteredOfficialReports = officialReports.filter((item) => {
+    const online = reports.some((demo) => demo.code === item.code);
+    return reportFilter === 'all' || (reportFilter === 'online' ? online : !online);
+  }).slice(0, 8);
 
   function openReport(index: number) {
     setSelectedIndex(index);
+    setSelectedOfficial(officialReports.find((item) => item.code === reports[index].code) ?? officialReports[0]);
+    setMessages([]);
+    setView('report');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function openOfficialReport(item: OfficialReport) {
+    const demoIndex = reports.findIndex((reportItem) => reportItem.code === item.code);
+    setSelectedIndex(demoIndex >= 0 ? demoIndex : 0);
+    setSelectedOfficial(item);
     setMessages([]);
     setView('report');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -78,29 +110,30 @@ export default function Home() {
       {view === 'lane' ? (
         <section className="lane-page">
           <div className="lane-hero">
-            <div className="hero-copy"><div className="kicker"><span>LIVE</span> 财报季绿色通道</div><h1>新财报发布后，<em>2 分钟级发现</em></h1><p>绕过拥堵的数据接收通路，直接从上交所、深交所发现公告，巨潮资讯交叉兜底；结构化解析后先找出关键变化，再让每个结论回到原始财报验证。</p><div className="hero-actions"><button className="primary" onClick={() => openReport(0)}>体验完整分析 <span>→</span></button><button className="secondary" onClick={() => document.getElementById('latest-reports')?.scrollIntoView({ behavior: 'smooth' })}>查看 50 家真实公告</button></div></div>
-            <div className="hero-proof"><div className="proof-head"><span>线上采集策略</span><b>交易所主源 · 巨潮兜底</b></div><ol className="timechain"><li className="complete"><i>✓</i><div><b>*/2 分钟</b><span>Cron 定时触发</span></div></li><li className="complete"><i>✓</i><div><b>SSE + SZSE</b><span>交易所批量轮询</span></div></li><li className="complete"><i>✓</i><div><b>CNINFO</b><span>巨潮交叉兜底</span></div></li><li className="live"><i>✓</i><div><b>SHA-256</b><span>跨源逻辑去重</span></div></li></ol><div className="proof-result"><span>绿色通道覆盖</span><strong>50 家</strong><small>已回填 50 份真实最新财报</small></div></div>
+            <div className="hero-copy"><div className="kicker"><span>LIVE</span> 财报季绿色通道</div><h1>新财报发布后，<em>10 分钟内发现</em></h1><p>绕过拥堵的数据接收通路，直接从上交所、深交所发现公告，巨潮资讯交叉兜底；只处理新增公告，已抓取记录自动跳过。</p><div className="hero-actions"><button className="primary" onClick={() => openReport(0)}>体验完整分析 <span>→</span></button><button className="secondary" onClick={() => document.getElementById('latest-reports')?.scrollIntoView({ behavior: 'smooth' })}>查看 50 家真实公告</button></div></div>
+            <div className="hero-proof"><div className="proof-head"><span>线上采集策略</span><b>交易所主源 · 巨潮兜底</b></div><ol className="timechain"><li className="complete"><i>✓</i><div><b>*/10 分钟</b><span>Cron 定时触发</span></div></li><li className="complete"><i>✓</i><div><b>SSE + SZSE</b><span>交易所批量轮询</span></div></li><li className="complete"><i>✓</i><div><b>CNINFO</b><span>巨潮交叉兜底</span></div></li><li className="live"><i>✓</i><div><b>增量去重</b><span>已抓取自动跳过</span></div></li></ol><div className="proof-result"><span>绿色通道覆盖</span><strong>50 家</strong><small>已回填 50 份真实最新财报</small></div></div>
           </div>
 
           <div className="lane-stats">
             <article><span>真实公告回填</span><strong>50 <small>份</small></strong><em>50 家全部命中官方财报</em></article>
-            <article><span>公告发现频率</span><strong>2 <small>分钟</small></strong><em className="positive">财报季自动轮询</em></article>
+            <article><span>公告发现频率</span><strong>10 <small>分钟</small></strong><em className="positive">增量自动轮询</em></article>
             <article><span>回填覆盖率</span><strong>100<small>%</small></strong><em>公开渠道实测 50 / 50</em></article>
             <article><span>绿色通道覆盖</span><strong>50 <small>家</small></strong><em>按关注度与代表性排序</em></article>
           </div>
 
           <div className="lane-grid" id="latest-reports">
             <section className="latest-card">
-              <div className="section-head"><div><span className="section-kicker">LATEST REPORTS</span><h2>最新财报</h2><p>时间戳完整记录从公告发布到数据上线</p></div><div className="filters"><button className="active">全部</button><button>已上线</button><button>复核中</button></div></div>
+              <div className="section-head"><div><span className="section-kicker">LATEST REPORTS</span><h2>最新财报</h2><p>点击整行进入详情；PDF 原文使用独立入口</p></div><div className="filters"><button className={reportFilter === 'all' ? 'active' : ''} onClick={() => setReportFilter('all')}>全部</button><button className={reportFilter === 'online' ? 'active' : ''} onClick={() => setReportFilter('online')}>已上线</button><button className={reportFilter === 'pending' ? 'active' : ''} onClick={() => setReportFilter('pending')}>待解析</button></div></div>
               <div className="report-table">
                 <div className="report-row table-head"><span>公司 / 报告</span><span>官方发布</span><span>发现来源</span><span>快照状态</span><span>原文</span><span>结构化</span><span /></div>
-                {officialReports.slice(0, 8).map((item, index) => <button className="report-row" key={item.id} onClick={() => window.open(item.pdf_url, '_blank', 'noopener,noreferrer')}><span className="report-company"><i className={`company-logo ${['blue','navy','red','cyan','gold'][index % 5]}`}>{item.company_name.slice(0, 1)}</i><span><b>{item.company_name} <small>{item.code}</small></b><em>{item.title}</em></span></span><span className="time-cell"><b>{dateTime(item.published_at)}</b><small>官方公告时间</small></span><span className="time-cell"><b>{item.source}</b><small>巨潮快照</small></span><span className="time-cell"><b>已回填</b><small>{item.industry}</small></span><span className="time-cell online"><b>PDF</b><small>点击查验</small></span><span><em className="signal good">待定时解析</em></span><span className="row-arrow">↗</span></button>)}
+                {filteredOfficialReports.map((item, index) => { const online = reports.some((demo) => demo.code === item.code); return <div className="report-row" role="button" tabIndex={0} key={item.id} onClick={() => openOfficialReport(item)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openOfficialReport(item); }}><span className="report-company"><i className={`company-logo ${['blue','navy','red','cyan','gold'][index % 5]}`}>{item.company_name.slice(0, 1)}</i><span><b>{item.company_name} <small>{item.code}</small></b><em>{item.title}</em></span></span><span className="time-cell"><b>{dateTime(item.published_at)}</b><small>官方公告时间</small></span><span className="time-cell"><b>{item.source}</b><small>巨潮快照</small></span><span className="time-cell"><b>已回填</b><small>{item.industry}</small></span><span className="time-cell online"><button className="pdf-link" aria-label={`打开${item.company_name}财报 PDF`} onClick={(event) => { event.stopPropagation(); window.open(item.pdf_url, '_blank', 'noopener,noreferrer'); }}>PDF ↗</button><small>官方原文</small></span><span><em className={`signal ${online ? 'good' : 'warn'}`}>{online ? '已上线' : '待解析'}</em></span><span className="row-arrow">›</span></div>; })}
+                {filteredOfficialReports.length === 0 && <div className="empty-reports">当前筛选下暂无财报</div>}
               </div>
               <div className="table-note"><span><i />官方快照 · 回填于 {snapshotAt}</span><button onClick={() => document.getElementById('coverage-50')?.scrollIntoView({ behavior: 'smooth' })}>查看全部 50 家 →</button></div>
             </section>
 
             <aside className="lane-side">
-              <article className="health-card"><div className="mini-head"><div><span className="section-kicker">PIPELINE</span><h3>数据通路配置</h3></div><span className="health-score">3源</span></div><div className="health-ring"><div><strong>50/50</strong><span>官方报告回填</span></div></div><ul><li><span>上交所公告源</span><b><i />已验证</b></li><li><span>深交所公告源</span><b><i />已验证</b></li><li><span>巨潮资讯兜底</span><b><i />已验证</b></li><li><span>定时任务</span><b className="review-count">每 2 分钟</b></li></ul></article>
+              <article className="health-card"><div className="mini-head"><div><span className="section-kicker">PIPELINE</span><h3>数据通路配置</h3></div><span className="health-score">3源</span></div><div className="health-ring"><div><strong>50/50</strong><span>官方报告回填</span></div></div><ul><li><span>上交所公告源</span><b><i />已验证</b></li><li><span>深交所公告源</span><b><i />已验证</b></li><li><span>巨潮资讯兜底</span><b><i />已验证</b></li><li><span>定时任务</span><b className="review-count">每 10 分钟</b></li></ul></article>
               <article className="quality-card"><div className="quality-icon">盾</div><div><h3>多级校验，确定性优先</h3><p>表格规则提取、勾稽关系校验、模型复杂版式兜底。结果冲突不直接上线，自动进入人工复核。</p><button onClick={() => setView('report')}>查看一条数据如何被验证 →</button></div></article>
             </aside>
           </div>
@@ -111,8 +144,9 @@ export default function Home() {
         <div className="report-layout">
           <section className="report-main">
             <button className="back-link" onClick={() => setView('lane')}>← 返回财报绿色通道</button>
-            <div className="report-titlebar"><div><div className="report-label"><span>已上线</span> {report.exchange}直连 · {report.report}</div><h1>{report.name} <small>{report.code}</small></h1><p>公告 20:03 · 上线 20:11 · 全链路 8 分钟 · <b>4 项核心指标已校验</b></p></div><div><button className="secondary">☆ 关注</button><button className="primary" onClick={() => setEvidence(alerts[0])}>查看原始财报 ↗</button></div></div>
+            <div className="report-titlebar"><div><div className="report-label"><span>{hasDemoAnalysis ? '已上线' : '待解析'}</span> {report.exchange} · {report.report}</div><h1>{report.name} <small>{report.code}</small></h1><p>官方发布 {report.publish} · 数据源 {selectedOfficial.source} · <b>{hasDemoAnalysis ? '交互分析已就绪' : '结构化解析排队中'}</b></p></div><div><button className="secondary">☆ 关注</button><button className="primary" onClick={() => window.open(selectedOfficial.pdf_url, '_blank', 'noopener,noreferrer')}>查看原始财报 ↗</button></div></div>
 
+            {hasDemoAnalysis ? <>
             <div className="detail-speed"><div><span>⚡ 本财报上线耗时</span><strong>08:17</strong><small>较原通路预计领先 47 分钟</small></div><ol>{['20:03 公告发布','20:05 系统发现','20:06 下载完成','20:09 解析校验','20:11 数据上线'].map((step) => <li key={step}><i>✓</i><span>{step}</span></li>)}</ol></div>
 
             <div className="report-tabs">{['一分钟看懂','变化雷达','多期趋势','同业对标','财报原文'].map((tab) => <button className={activeTab === tab ? 'active' : ''} key={tab} onClick={() => { setActiveTab(tab); document.getElementById(tab === '变化雷达' ? 'change-radar' : tab === '同业对标' ? 'peer-section' : 'metrics')?.scrollIntoView({ behavior: 'smooth' }); }}>{tab}</button>)}</div>
@@ -151,6 +185,7 @@ export default function Home() {
               <div className="section-head compact"><div><span className="section-kicker">TRUST & TRACEABILITY</span><h2>一个结论，四层证据</h2><p>明确区分数据、计算与 AI 推断，避免“模型说了算”</p></div></div>
               <div className="trust-flow"><article><span>01</span><i className="raw">数</i><h3>原始数据</h3><p>财报表格中的数字与单位</p></article><b>→</b><article><span>02</span><i className="cal">算</i><h3>计算结果</h3><p>同比、趋势、行业分位</p></article><b>→</b><article><span>03</span><i className="infer">析</i><h3>AI 推断</h3><p>对变化原因的谨慎总结</p></article><b>→</b><article><span>04</span><i className="source">证</i><h3>原文证据</h3><p>章节、页码与对应段落</p></article></div>
             </section>
+            </> : <section className="pending-detail"><span className="pending-icon">析</span><div><span className="section-kicker">STRUCTURING QUEUE</span><h2>公告详情已就绪，结构化分析正在排队</h2><p>这份官方财报已经进入增量队列。系统会依次完成 PDF 下载、核心指标提取、口径校验和证据定位；已抓取的公告不会重复处理。</p><div className="pending-steps"><span className="done">✓ 公告发现</span><span>PDF 下载</span><span>指标解析</span><span>校验上线</span></div><button className="primary" onClick={() => window.open(selectedOfficial.pdf_url, '_blank', 'noopener,noreferrer')}>先查看官方 PDF ↗</button></div></section>}
             <div className="demo-note">本页面为创新大赛交互 Demo，时间与财务数据用于产品流程演示。</div>
           </section>
 
@@ -158,7 +193,7 @@ export default function Home() {
             <div className="ai-head"><div><span>✦</span><div><b>双引擎财报助手</b><small><i />结构化计算 + 原文检索</small></div></div><button onClick={() => setMessages([])}>↻</button></div>
             <div className="engine-strip"><span><i>1</i>识别问题</span><b>→</b><span><i>2</i>查询/计算</span><b>→</b><span><i>3</i>检索原文</span></div>
             <div className="chat-body">
-              <div className="ai-message"><span>AI</span><div><p>我已完成{report.name}本期财报的结构化校验。你可以追问变化原因、同业位置，或直接让我生成对比图。</p><div className="answer-types"><span>✓ 指标库已连接</span><span>✓ 原文 286 页</span></div></div></div>
+              <div className="ai-message"><span>AI</span><div><p>{hasDemoAnalysis ? `我已完成${report.name}本期财报的结构化校验。你可以追问变化原因、同业位置，或直接让我生成对比图。` : `${report.name}的公告详情已载入，结构化数据仍在解析队列中。你可以先打开官方 PDF，解析完成后再进行指标问答。`}</p><div className="answer-types"><span>✓ 公告元数据已连接</span><span>{hasDemoAnalysis ? '✓ 分析数据可用' : '○ 指标解析中'}</span></div></div></div>
               {messages.map((message, index) => message.role === 'user' ? <div className="user-message" key={index}>{message.text}</div> : <div className="ai-answer" key={index}><div className="answer-source-tabs"><span className="data">结构化数据</span><span className="calc">计算结果</span><span className="rag">原文证据</span></div><p>{message.text}</p>{message.compare && <div className="mini-compare"><div><span>比亚迪</span><i style={{width:'92%'}}/></div><div><span>同行中位</span><i style={{width:'58%'}}/></div><div><span>行业分位</span><i style={{width:'81%'}}/></div></div>}<button onClick={() => setEvidence(alerts[0])}>查看数据与原文证据 ↗</button></div>)}
               <div className="prompt-title">建议追问</div>
               {Object.keys(promptAnswers).map((prompt) => <button className="prompt" key={prompt} onClick={() => ask(prompt)}>{prompt}<span>↗</span></button>)}
