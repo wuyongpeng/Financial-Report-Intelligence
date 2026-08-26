@@ -9,12 +9,16 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
+    "backfill": "node scripts/backfill-snapshot.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "unpdf": "^1.8.1"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",

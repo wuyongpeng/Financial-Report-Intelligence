@@ -13,8 +13,9 @@ const { d1, r2 } = hostingConfig;
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 
 const localBindingConfig = {
-  main: 'vinext/server/app-router-entry',
+  main: 'worker.ts',
   compatibility_flags: ['nodejs_compat'],
+  triggers: { crons: ['*/2 * * * *'] },
   d1_databases: d1
     ? [
         {

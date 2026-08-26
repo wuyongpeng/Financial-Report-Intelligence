@@ -1,9 +1,20 @@
 'use client';
 
 import { useState } from 'react';
+import companiesJson from '@/data/companies.json';
+import seedReportsJson from '@/data/seed-reports.json';
 
 type View = 'lane' | 'report';
 type Evidence = { title: string; value: string; calc: string; inference: string; quote: string; page: string };
+type OfficialReport = { id: string; source: string; code: string; company_name: string; title: string; published_at: string; discovered_at: string; pdf_url: string; industry: string; rank: number };
+
+const coverageCompanies = companiesJson;
+const officialReports = seedReportsJson as OfficialReport[];
+const snapshotAt = officialReports[0]?.discovered_at ? new Date(officialReports[0].discovered_at).toLocaleString('zh-CN', { hour12: false }) : '等待首次回填';
+
+function dateTime(value: string) {
+  return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
 
 const reports = [
   { name: '比亚迪', code: '002594', exchange: '深交所', logo: '比', color: 'red', report: '2025 年半年度报告', publish: '20:03', found: '20:05', parsed: '20:09', online: '20:11', elapsed: '8 分钟', tag: '利润增速放缓', severity: 'warn', status: '已上线', revenue: '3,712.81 亿', profit: '155.11 亿', eps: '5.32 元', roe: '11.8%' },
@@ -61,39 +72,40 @@ export default function Home() {
       <header className="topbar">
         <button className="brand plain-button" onClick={() => setView('lane')}><span className="brand-mark">财</span><strong>财报智析台</strong><span className="beta">BETA</span></button>
         <nav className="main-nav"><button className={view === 'lane' ? 'active' : ''} onClick={() => setView('lane')}>财报绿色通道</button><button className={view === 'report' ? 'active' : ''} onClick={() => setView('report')}>研究工作台</button><button>数据复核</button></nav>
-        <div className="top-actions"><button className="status-pill"><i />交易所通道正常</button><button className="profile">研</button></div>
+        <div className="top-actions"><button className="status-pill"><i />交易所 + 巨潮三源已配置</button><button className="profile">研</button></div>
       </header>
 
       {view === 'lane' ? (
         <section className="lane-page">
           <div className="lane-hero">
-            <div className="hero-copy"><div className="kicker"><span>LIVE</span> 财报季绿色通道</div><h1>新财报发布后，<em>最快 8 分钟</em>上线</h1><p>绕过拥堵的数据接收通路，直接从交易所发现公告、结构化解析并完成校验。先找出关键变化，再让每个结论回到原始财报验证。</p><div className="hero-actions"><button className="primary" onClick={() => openReport(0)}>体验最新财报 <span>→</span></button><button className="secondary" onClick={() => document.getElementById('latest-reports')?.scrollIntoView({ behavior: 'smooth' })}>查看实时处理队列</button></div></div>
-            <div className="hero-proof"><div className="proof-head"><span>今日最新上线</span><b>比亚迪 2025 半年报</b></div><ol className="timechain"><li className="complete"><i>✓</i><div><b>20:03</b><span>公告发布</span></div></li><li className="complete"><i>✓</i><div><b>20:05</b><span>系统发现</span></div></li><li className="complete"><i>✓</i><div><b>20:09</b><span>解析完成</span></div></li><li className="live"><i>✓</i><div><b>20:11</b><span>数据上线</span></div></li></ol><div className="proof-result"><span>全链路耗时</span><strong>08:17</strong><small>预计领先原通路 47 分钟</small></div></div>
+            <div className="hero-copy"><div className="kicker"><span>LIVE</span> 财报季绿色通道</div><h1>新财报发布后，<em>2 分钟级发现</em></h1><p>绕过拥堵的数据接收通路，直接从上交所、深交所发现公告，巨潮资讯交叉兜底；结构化解析后先找出关键变化，再让每个结论回到原始财报验证。</p><div className="hero-actions"><button className="primary" onClick={() => openReport(0)}>体验完整分析 <span>→</span></button><button className="secondary" onClick={() => document.getElementById('latest-reports')?.scrollIntoView({ behavior: 'smooth' })}>查看 50 家真实公告</button></div></div>
+            <div className="hero-proof"><div className="proof-head"><span>线上采集策略</span><b>交易所主源 · 巨潮兜底</b></div><ol className="timechain"><li className="complete"><i>✓</i><div><b>*/2 分钟</b><span>Cron 定时触发</span></div></li><li className="complete"><i>✓</i><div><b>SSE + SZSE</b><span>交易所批量轮询</span></div></li><li className="complete"><i>✓</i><div><b>CNINFO</b><span>巨潮交叉兜底</span></div></li><li className="live"><i>✓</i><div><b>SHA-256</b><span>跨源逻辑去重</span></div></li></ol><div className="proof-result"><span>绿色通道覆盖</span><strong>50 家</strong><small>已回填 50 份真实最新财报</small></div></div>
           </div>
 
           <div className="lane-stats">
-            <article><span>今日处理财报</span><strong>17 <small>份</small></strong><em>全部按时完成</em></article>
-            <article><span>平均上线耗时</span><strong>9.4 <small>分钟</small></strong><em className="positive">较昨日 -2.1 分钟</em></article>
-            <article><span>结构化成功率</span><strong>98.7<small>%</small></strong><em>1 份进入人工复核</em></article>
-            <article><span>绿色通道覆盖</span><strong>68 <small>家</small></strong><em>热门公司优先保障</em></article>
+            <article><span>真实公告回填</span><strong>50 <small>份</small></strong><em>50 家全部命中官方财报</em></article>
+            <article><span>公告发现频率</span><strong>2 <small>分钟</small></strong><em className="positive">财报季自动轮询</em></article>
+            <article><span>回填覆盖率</span><strong>100<small>%</small></strong><em>公开渠道实测 50 / 50</em></article>
+            <article><span>绿色通道覆盖</span><strong>50 <small>家</small></strong><em>按关注度与代表性排序</em></article>
           </div>
 
           <div className="lane-grid" id="latest-reports">
             <section className="latest-card">
               <div className="section-head"><div><span className="section-kicker">LATEST REPORTS</span><h2>最新财报</h2><p>时间戳完整记录从公告发布到数据上线</p></div><div className="filters"><button className="active">全部</button><button>已上线</button><button>复核中</button></div></div>
               <div className="report-table">
-                <div className="report-row table-head"><span>公司 / 报告</span><span>公告发布</span><span>系统发现</span><span>解析完成</span><span>数据上线</span><span>关键变化</span><span /></div>
-                {reports.map((item, index) => <button className="report-row" key={item.code} onClick={() => openReport(index)}><span className="report-company"><i className={`company-logo ${item.color}`}>{item.logo}</i><span><b>{item.name} <small>{item.code}</small></b><em>{item.report}</em></span></span><span className="time-cell"><b>{item.publish}</b><small>交易所</small></span><span className="time-cell"><b>{item.found}</b><small>+2 分钟</small></span><span className="time-cell"><b>{item.parsed}</b><small>规则 + AI</small></span><span className="time-cell online"><b>{item.online}</b><small>{item.elapsed}</small></span><span><em className={`signal ${item.severity}`}>{item.tag}</em></span><span className="row-arrow">›</span></button>)}
+                <div className="report-row table-head"><span>公司 / 报告</span><span>官方发布</span><span>发现来源</span><span>快照状态</span><span>原文</span><span>结构化</span><span /></div>
+                {officialReports.slice(0, 8).map((item, index) => <button className="report-row" key={item.id} onClick={() => window.open(item.pdf_url, '_blank', 'noopener,noreferrer')}><span className="report-company"><i className={`company-logo ${['blue','navy','red','cyan','gold'][index % 5]}`}>{item.company_name.slice(0, 1)}</i><span><b>{item.company_name} <small>{item.code}</small></b><em>{item.title}</em></span></span><span className="time-cell"><b>{dateTime(item.published_at)}</b><small>官方公告时间</small></span><span className="time-cell"><b>{item.source}</b><small>巨潮快照</small></span><span className="time-cell"><b>已回填</b><small>{item.industry}</small></span><span className="time-cell online"><b>PDF</b><small>点击查验</small></span><span><em className="signal good">待定时解析</em></span><span className="row-arrow">↗</span></button>)}
               </div>
-              <div className="table-note"><span><i />数据自动刷新 · 最近更新 20:12:08</span><button>查看全部 68 家 →</button></div>
+              <div className="table-note"><span><i />官方快照 · 回填于 {snapshotAt}</span><button onClick={() => document.getElementById('coverage-50')?.scrollIntoView({ behavior: 'smooth' })}>查看全部 50 家 →</button></div>
             </section>
 
             <aside className="lane-side">
-              <article className="health-card"><div className="mini-head"><div><span className="section-kicker">PIPELINE</span><h3>数据通路健康度</h3></div><span className="health-score">优</span></div><div className="health-ring"><div><strong>99.2%</strong><span>近 24h 成功率</span></div></div><ul><li><span>上交所公告源</span><b><i />正常</b></li><li><span>深交所公告源</span><b><i />正常</b></li><li><span>结构化解析</span><b><i />正常</b></li><li><span>人工复核队列</span><b className="review-count">1 待处理</b></li></ul></article>
+              <article className="health-card"><div className="mini-head"><div><span className="section-kicker">PIPELINE</span><h3>数据通路配置</h3></div><span className="health-score">3源</span></div><div className="health-ring"><div><strong>50/50</strong><span>官方报告回填</span></div></div><ul><li><span>上交所公告源</span><b><i />已验证</b></li><li><span>深交所公告源</span><b><i />已验证</b></li><li><span>巨潮资讯兜底</span><b><i />已验证</b></li><li><span>定时任务</span><b className="review-count">每 2 分钟</b></li></ul></article>
               <article className="quality-card"><div className="quality-icon">盾</div><div><h3>多级校验，确定性优先</h3><p>表格规则提取、勾稽关系校验、模型复杂版式兜底。结果冲突不直接上线，自动进入人工复核。</p><button onClick={() => setView('report')}>查看一条数据如何被验证 →</button></div></article>
             </aside>
           </div>
-          <div className="demo-note">本页面为创新大赛交互 Demo，时间与财务数据用于产品流程演示。</div>
+          <section className="coverage-card" id="coverage-50"><div className="section-head"><div><span className="section-kicker">GREEN LANE COVERAGE</span><h2>50 家绿色通道名单</h2><p>按市场关注度、行业代表性与研究需求排序；每家公司已回填一份真实官方财报。</p></div><span className="coverage-count">SSE {coverageCompanies.filter((item) => item.exchange === 'SSE').length} · SZSE {coverageCompanies.filter((item) => item.exchange === 'SZSE').length}</span></div><div className="coverage-grid">{coverageCompanies.map((item) => <div className="coverage-item" key={item.code}><span>{String(item.rank).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.code} · {item.industry}</small></div><i>{item.exchange}</i></div>)}</div></section>
+          <div className="demo-note">官方公告列表与 PDF 链接来自巨潮资讯真实公开数据；财务指标、异常洞察与耗时案例仍用于交互流程演示。</div>
         </section>
       ) : (
         <div className="report-layout">
