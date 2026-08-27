@@ -62,6 +62,7 @@ export default function Home() {
   const [selectedMetric, setSelectedMetric] = useState<Metric | null>(null);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [processing, setProcessing] = useState(false);
 
   const selected = reports.find((item) => item.id === selectedId) ?? reports.find((item) => item.metrics.length > 0) ?? reports[0];
   const parsedReports = reports.filter((item) => item.metrics.length > 0);
@@ -108,6 +109,24 @@ export default function Home() {
     setSelectedId(report.id); setMessages([]); setView('report'); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  async function processNext() {
+    if (processing) return;
+    setProcessing(true);
+    try {
+      const response = await fetch('/api/process', { method: 'POST', headers: { 'content-type': 'application/json' } });
+      if (!response.ok) throw new Error(`处理接口 ${response.status}`);
+      const updated = await fetch('/api/reports?limit=100', { cache: 'no-store' });
+      if (updated.ok) {
+        const payload = await updated.json() as { reports?: LiveReport[] };
+        setReports(payload.reports ?? []);
+      }
+    } catch (error) {
+      setLoadError(`本次解析未完成：${String(error)}`);
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   function answerQuestion(text: string) {
     const clean = text.trim();
     if (!clean || !selected) return;
@@ -146,7 +165,7 @@ export default function Home() {
             {!loading && filteredReports.length === 0 && <div className="empty-reports">当前筛选下暂无真实记录</div>}
           </div><div className="table-note"><span><i />共 {filteredReports.length} 份，当前展示前 30 份</span><button onClick={() => document.getElementById('coverage-50')?.scrollIntoView({ behavior: 'smooth' })}>查看覆盖公司 →</button></div></section>
 
-        <aside className="lane-side"><article className="health-card"><div className="mini-head"><div><span className="section-kicker">SOURCE HEALTH</span><h3>真实数据源状态</h3></div><span className="health-score">{sourceHealth.filter((item) => item.last_success_at).length}/3</span></div><div className="health-ring"><div><strong>{parsedReports.length}/{reports.length || 0}</strong><span>已产出指标</span></div></div><ul>{['SSE','SZSE','CNINFO'].map((source) => { const health = sourceHealth.find((item) => item.source === source); return <li key={source}><span>{sourceName(source)}</span><b className={health?.last_success_at ? '' : 'review-count'}><i />{health?.last_success_at ? `成功 · ${health.last_count ?? 0} 条` : '等待运行'}</b></li>; })}<li><span>最近任务</span><b className="review-count">{status.latestRun ? `${status.latestRun.status} · ${dateTime(status.latestRun.started_at)}` : '暂无记录'}</b></li></ul></article><article className="quality-card"><div className="quality-icon">真</div><div><h3>缺数据就显示缺数据</h3><p>本版本不再提供模拟财务数值、模拟耗时、模拟异常洞察或模拟问答。后续产品打磨可以直接围绕真实记录进行。</p></div></article></aside>
+        <aside className="lane-side"><article className="health-card"><div className="mini-head"><div><span className="section-kicker">SOURCE HEALTH</span><h3>真实数据源状态</h3></div><span className="health-score">{sourceHealth.filter((item) => item.last_success_at).length}/3</span></div><div className="health-ring"><div><strong>{parsedReports.length}/{reports.length || 0}</strong><span>已产出指标</span></div></div><ul>{['SSE','SZSE','CNINFO'].map((source) => { const health = sourceHealth.find((item) => item.source === source); return <li key={source}><span>{sourceName(source)}</span><b className={health?.last_success_at ? '' : 'review-count'}><i />{health?.last_success_at ? `成功 · ${health.last_count ?? 0} 条` : '等待运行'}</b></li>; })}<li><span>最近任务</span><b className="review-count">{status.latestRun ? `${status.latestRun.status} · ${dateTime(status.latestRun.started_at)}` : '暂无记录'}</b></li></ul><button className="process-button" disabled={processing || reports.every((item) => item.metrics.length > 0)} onClick={processNext}>{processing ? '正在下载并解析…' : '立即推进下一份真实财报 →'}</button></article><article className="quality-card"><div className="quality-icon">真</div><div><h3>缺数据就显示缺数据</h3><p>本版本不再提供模拟财务数值、模拟耗时、模拟异常洞察或模拟问答。后续产品打磨可以直接围绕真实记录进行。</p></div></article></aside>
       </div>
 
       <section className="coverage-card" id="coverage-50"><div className="section-head"><div><span className="section-kicker">GREEN LANE COVERAGE</span><h2>50 家绿色通道名单</h2><p>覆盖配置真实存在；是否已有公告和指标，以线上公告列表状态为准。</p></div><span className="coverage-count">SSE {coverageCompanies.filter((item) => item.exchange === 'SSE').length} · SZSE {coverageCompanies.filter((item) => item.exchange === 'SZSE').length}</span></div><div className="coverage-grid">{coverageCompanies.map((item) => { const count = reports.filter((report) => report.code === item.code).length; return <div className="coverage-item" key={item.code}><span>{String(item.rank).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.code} · {item.industry}</small></div><i>{count ? `${count} 份公告` : '暂无公告'}</i></div>; })}</div></section>

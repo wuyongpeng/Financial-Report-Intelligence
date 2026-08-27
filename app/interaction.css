@@ -109,6 +109,17 @@ button:disabled {
   border-color: #e3e7ed;
 }
 
+.process-button {
+  background: #2467df;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  font-size: 9px;
+  margin-top: 12px;
+  padding: 9px 11px;
+  width: 100%;
+}
+
 .pending-detail {
   align-items: flex-start;
   background: #fff;
