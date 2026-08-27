@@ -11,8 +11,8 @@ export async function GET() {
     const { DB } = bindings;
     let [health, latestRun, counts] = await Promise.all([
       DB.prepare('SELECT * FROM source_health ORDER BY source').all(),
-      DB.prepare('SELECT * FROM ingest_runs ORDER BY started_at DESC LIMIT 1').first<{ started_at: string; status: string }>(),
-      DB.prepare(`SELECT COUNT(*) AS reports, SUM(CASE WHEN status IN ('review','online') THEN 1 ELSE 0 END) AS parsed FROM announcements`).first(),
+      DB.prepare('SELECT * FROM ingest_runs ORDER BY started_at DESC LIMIT 1').first<{ started_at: string; finished_at: string | null; status: string }>(),
+      DB.prepare(`SELECT COUNT(*) AS reports, (SELECT COUNT(DISTINCT announcement_id) FROM financial_metrics) AS parsed FROM announcements`).first(),
     ]);
     let bootstrapped = false;
     if (!Number(counts?.reports ?? 0)) {
@@ -20,8 +20,8 @@ export async function GET() {
       bootstrapped = true;
       [health, latestRun, counts] = await Promise.all([
         DB.prepare('SELECT * FROM source_health ORDER BY source').all(),
-        DB.prepare('SELECT * FROM ingest_runs ORDER BY started_at DESC LIMIT 1').first<{ started_at: string; status: string }>(),
-        DB.prepare(`SELECT COUNT(*) AS reports, SUM(CASE WHEN status IN ('review','online') THEN 1 ELSE 0 END) AS parsed FROM announcements`).first(),
+        DB.prepare('SELECT * FROM ingest_runs ORDER BY started_at DESC LIMIT 1').first<{ started_at: string; finished_at: string | null; status: string }>(),
+        DB.prepare(`SELECT COUNT(*) AS reports, (SELECT COUNT(DISTINCT announcement_id) FROM financial_metrics) AS parsed FROM announcements`).first(),
       ]);
     }
     const ageMs = latestRun?.started_at ? Date.now() - Date.parse(latestRun.started_at) : Number.POSITIVE_INFINITY;
@@ -31,9 +31,9 @@ export async function GET() {
     return Response.json({ mode: 'live', coverage: companies.length, health: health.results, latestRun, counts, bootstrapped, triggered }, {
       headers: { 'cache-control': 'no-store' },
     });
-  } catch {
-    return Response.json({ mode: 'snapshot', coverage: companies.length, health: [
-      { source: 'CNINFO', status: 'configured' }, { source: 'SSE', status: 'configured' }, { source: 'SZSE', status: 'configured' },
-    ] }, { headers: { 'cache-control': 'no-store' } });
+  } catch (error) {
+    return Response.json({ mode: 'unavailable', coverage: companies.length, health: [], error: String(error) }, {
+      status: 503, headers: { 'cache-control': 'no-store' },
+    });
   }
 }

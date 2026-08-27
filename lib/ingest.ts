@@ -91,6 +91,78 @@ async function updateSourceHealth(db: D1Database, health: Record<string, { ok: b
   await db.batch(statements);
 }
 
+export async function processBacklog(env: Bindings, options: { downloadLimit?: number; parseLimit?: number } = {}) {
+  const downloadLimit = options.downloadLimit ?? 1;
+  const parseLimit = options.parseLimit ?? 1;
+  const backlog = await env.DB.prepare(`
+    SELECT id, source, source_id, code, company_name, title, report_type, published_at, pdf_url, pdf_key, status
+    FROM announcements
+    WHERE status IN ('discovered', 'download_failed', 'downloaded')
+    ORDER BY CASE status WHEN 'downloaded' THEN 0 WHEN 'discovered' THEN 1 ELSE 2 END, published_at DESC
+    LIMIT 100
+  `).all<StoredAnnouncement>();
+
+  let downloadedCount = 0;
+  let parsedCount = 0;
+  let failedCount = 0;
+  for (const record of backlog.results) {
+    if (downloadedCount >= downloadLimit && parsedCount >= parseLimit) break;
+    try {
+      let bytes: ArrayBuffer | null = null;
+      let pdfKey = record.pdf_key;
+      if (!pdfKey && downloadedCount < downloadLimit) {
+        const referer = record.source === 'CNINFO' ? 'https://www.cninfo.com.cn/' : record.source === 'SSE' ? 'https://www.sse.com.cn/' : 'https://www.szse.cn/';
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15000);
+        let response: Response;
+        try {
+          response = await fetch(record.pdf_url, { signal: controller.signal, headers: {
+            accept: 'application/pdf,*/*;q=0.8', referer,
+            'user-agent': 'FinanceReportIntelligence/1.0 (+https://financial-report-intelligence.wuyongpeng.chatgpt.site)',
+          } });
+        } finally {
+          clearTimeout(timer);
+        }
+        if (!response.ok) throw new Error(`PDF ${response.status}`);
+        bytes = await response.arrayBuffer();
+        const signature = new TextDecoder().decode(bytes.slice(0, 4));
+        if (signature !== '%PDF') throw new Error('Downloaded object is not a PDF');
+        const digest = await sha256(bytes);
+        pdfKey = `reports/${record.code}/${record.id}.pdf`;
+        await env.REPORTS.put(pdfKey, bytes, { httpMetadata: { contentType: 'application/pdf' }, customMetadata: { source: record.source, sourceUrl: record.pdf_url } });
+        const downloadedAt = new Date().toISOString();
+        await env.DB.prepare(`UPDATE announcements SET status='downloaded', downloaded_at=?, pdf_key=?, pdf_sha256=?, parse_error=NULL, updated_at=? WHERE id=?`)
+          .bind(downloadedAt, pdfKey, digest, downloadedAt, record.id).run();
+        downloadedCount += 1;
+      } else if (pdfKey && parsedCount < parseLimit) {
+        const object = await env.REPORTS.get(pdfKey);
+        if (object) bytes = await object.arrayBuffer();
+      }
+
+      if (bytes && parsedCount < parseLimit && bytes.byteLength < 25 * 1024 * 1024) {
+        const parsed = await parseCoreMetrics(bytes);
+        const period = periodFromTitle(record.title, record.published_at);
+        const metricStatements = parsed.metrics.map((metric) => env.DB.prepare(`
+          INSERT INTO financial_metrics (announcement_id, code, period, metric, value, unit, source_page, source_label, confidence, verified, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+          ON CONFLICT(announcement_id, metric) DO UPDATE SET value=excluded.value, unit=excluded.unit,
+            source_page=excluded.source_page, source_label=excluded.source_label, confidence=excluded.confidence
+        `).bind(record.id, record.code, period, metric.metric, metric.value, metric.unit, metric.page, metric.sourceLabel, metric.confidence, new Date().toISOString()));
+        if (metricStatements.length) await env.DB.batch(metricStatements);
+        const parsedAt = new Date().toISOString();
+        await env.DB.prepare(`UPDATE announcements SET status=?, parsed_at=?, parse_error=NULL, updated_at=? WHERE id=?`)
+          .bind(parsed.metrics.length === 4 ? 'review' : 'parse_partial', parsedAt, parsedAt, record.id).run();
+        parsedCount += 1;
+      }
+    } catch (error) {
+      failedCount += 1;
+      await env.DB.prepare(`UPDATE announcements SET status='download_failed', parse_error=?, updated_at=? WHERE id=?`)
+        .bind(String(error), new Date().toISOString(), record.id).run();
+    }
+  }
+  return { backlog: backlog.results.length, downloaded: downloadedCount, parsed: parsedCount, failed: failedCount };
+}
+
 export async function runIngestion(env: Bindings, options: { days?: number; downloadLimit?: number; parseLimit?: number } = {}) {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
@@ -135,64 +207,12 @@ export async function runIngestion(env: Bindings, options: { days?: number; down
       if ((result.meta?.changes ?? 0) > 0) inserted.push({ id, item });
     }
 
-    const backlog = await env.DB.prepare(`
-      SELECT id, source, source_id, code, company_name, title, report_type, published_at, pdf_url, pdf_key, status
-      FROM announcements
-      WHERE status IN ('discovered', 'download_failed', 'downloaded', 'parse_partial')
-      ORDER BY published_at DESC
-      LIMIT 100
-    `).all<StoredAnnouncement>();
-
-    let downloadedCount = 0;
-    let parsedCount = 0;
-    for (const record of backlog.results) {
-      if (downloadedCount >= downloadLimit && parsedCount >= parseLimit) break;
-      try {
-        let bytes: ArrayBuffer | null = null;
-        let pdfKey = record.pdf_key;
-        if (!pdfKey && downloadedCount < downloadLimit) {
-          const response = await fetch(record.pdf_url, { headers: { 'user-agent': 'FinanceAnalysisV1/0.2 (+https://financial-report-intelligence.wuyongpeng.chatgpt.site)' } });
-          if (!response.ok) throw new Error(`PDF ${response.status}`);
-          bytes = await response.arrayBuffer();
-          const signature = new TextDecoder().decode(bytes.slice(0, 4));
-          if (signature !== '%PDF') throw new Error('Downloaded object is not a PDF');
-          const digest = await sha256(bytes);
-          pdfKey = `reports/${record.code}/${record.id}.pdf`;
-          await env.REPORTS.put(pdfKey, bytes, { httpMetadata: { contentType: 'application/pdf' }, customMetadata: { source: record.source, sourceUrl: record.pdf_url } });
-          const downloadedAt = new Date().toISOString();
-          await env.DB.prepare(`UPDATE announcements SET status='downloaded', downloaded_at=?, pdf_key=?, pdf_sha256=?, parse_error=NULL, updated_at=? WHERE id=?`)
-            .bind(downloadedAt, pdfKey, digest, downloadedAt, record.id).run();
-          downloadedCount += 1;
-        } else if (pdfKey && parsedCount < parseLimit) {
-          const object = await env.REPORTS.get(pdfKey);
-          if (object) bytes = await object.arrayBuffer();
-        }
-
-        if (bytes && parsedCount < parseLimit && bytes.byteLength < 25 * 1024 * 1024) {
-          const parsed = await parseCoreMetrics(bytes);
-          const period = periodFromTitle(record.title, record.published_at);
-          const metricStatements = parsed.metrics.map((metric) => env.DB.prepare(`
-            INSERT INTO financial_metrics (announcement_id, code, period, metric, value, unit, source_page, source_label, confidence, verified, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-            ON CONFLICT(announcement_id, metric) DO UPDATE SET value=excluded.value, unit=excluded.unit,
-              source_page=excluded.source_page, source_label=excluded.source_label, confidence=excluded.confidence
-          `).bind(record.id, record.code, period, metric.metric, metric.value, metric.unit, metric.page, metric.sourceLabel, metric.confidence, new Date().toISOString()));
-          if (metricStatements.length) await env.DB.batch(metricStatements);
-          const parsedAt = new Date().toISOString();
-          await env.DB.prepare(`UPDATE announcements SET status=?, parsed_at=?, parse_error=NULL, updated_at=? WHERE id=?`)
-            .bind(parsed.metrics.length === 4 ? 'review' : 'parse_partial', parsedAt, parsedAt, record.id).run();
-          parsedCount += 1;
-        }
-      } catch (error) {
-        await env.DB.prepare(`UPDATE announcements SET status='download_failed', parse_error=?, updated_at=? WHERE id=?`)
-          .bind(String(error), new Date().toISOString(), record.id).run();
-      }
-    }
+    const processed = await processBacklog(env, { downloadLimit, parseLimit });
 
     const finishedAt = new Date().toISOString();
     await env.DB.prepare(`UPDATE ingest_runs SET finished_at=?, status='success', discovered_count=?, inserted_count=?, downloaded_count=?, source_health=? WHERE id=?`)
-      .bind(finishedAt, relevant.length, inserted.length, downloadedCount, JSON.stringify(fetched.health), runId).run();
-    return { runId, startedAt, finishedAt, sourceHealth: fetched.health, seeded: seededCount, fetched: fetched.announcements.length, relevant: relevant.length, skipped: skippedCount, inserted: inserted.length, backlog: backlog.results.length, downloaded: downloadedCount, parsed: parsedCount };
+      .bind(finishedAt, relevant.length, inserted.length, processed.downloaded, JSON.stringify(fetched.health), runId).run();
+    return { runId, startedAt, finishedAt, sourceHealth: fetched.health, seeded: seededCount, fetched: fetched.announcements.length, relevant: relevant.length, skipped: skippedCount, inserted: inserted.length, ...processed };
   } catch (error) {
     await env.DB.prepare(`UPDATE ingest_runs SET finished_at=?, status='failed', error=? WHERE id=?`).bind(new Date().toISOString(), String(error), runId).run();
     throw error;

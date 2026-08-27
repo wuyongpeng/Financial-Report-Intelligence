@@ -27,6 +27,88 @@
   text-align: center;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.data-error {
+  background: #fff2f3;
+  border: 1px solid #f1ccd1;
+  border-radius: 10px;
+  color: #b23847;
+  font-size: 10px;
+  margin-top: 16px;
+  padding: 12px 15px;
+}
+
+.detail-speed li.pending i {
+  background: #416b9f;
+  color: #b9c8dc;
+}
+
+.metric-card.metric-empty {
+  background: #f8f9fb;
+  border-style: dashed;
+  color: #8c96a6;
+}
+
+.metric-card.metric-empty strong {
+  color: #8c96a6;
+}
+
+.honest-empty {
+  background: #f7f9fc;
+  border: 1px dashed #d8dee8;
+  border-radius: 9px;
+  color: #69768a;
+  margin-top: 14px;
+  padding: 22px;
+  text-align: center;
+}
+
+.honest-empty b {
+  color: #344158;
+  font-size: 11px;
+}
+
+.honest-empty p {
+  font-size: 9px;
+  line-height: 1.7;
+  margin: 7px auto 0;
+  max-width: 620px;
+}
+
+.real-history {
+  margin-bottom: 14px;
+}
+
+.history-table {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.history-table > div {
+  align-items: center;
+  background: #f7f9fc;
+  border-radius: 7px;
+  display: grid;
+  font-size: 8px;
+  gap: 9px;
+  grid-template-columns: 65px repeat(4, 1fr);
+  padding: 10px;
+}
+
+.history-table span {
+  color: #68758a;
+}
+
+.prompt:disabled:hover {
+  background: #fff;
+  border-color: #e3e7ed;
+}
+
 .pending-detail {
   align-items: flex-start;
   background: #fff;

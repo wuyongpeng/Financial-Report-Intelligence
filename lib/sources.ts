@@ -1,6 +1,6 @@
 import type { Announcement } from './types';
 
-const USER_AGENT = 'FinanceAnalysisDemo/0.1 (+https://financial-report-intelligence.wuyongpeng.chatgpt.site)';
+const USER_AGENT = 'FinanceReportIntelligence/1.0 (+https://financial-report-intelligence.wuyongpeng.chatgpt.site)';
 
 function dateOnly(daysAgo = 0) {
   const date = new Date(Date.now() - daysAgo * 86400000);
@@ -8,8 +8,8 @@ function dateOnly(daysAgo = 0) {
 }
 
 function classify(title: string): Announcement['reportType'] {
-  if (/年度报告(?!摘要)/.test(title)) return 'annual';
   if (/半年度报告(?!摘要)/.test(title)) return 'semiannual';
+  if (/年度报告(?!摘要)/.test(title)) return 'annual';
   if (/(第一季度|第三季度|季度)报告(?!摘要)/.test(title)) return 'quarterly';
   return 'other';
 }
