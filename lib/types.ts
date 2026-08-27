@@ -17,9 +17,3 @@ export type Announcement = {
   pdfUrl: string;
   reportType: 'annual' | 'semiannual' | 'quarterly' | 'other';
 };
-
-export type Bindings = {
-  DB: D1Database;
-  REPORTS: R2Bucket;
-  CRON_SECRET?: string;
-};

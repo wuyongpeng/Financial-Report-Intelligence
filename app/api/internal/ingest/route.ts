@@ -1,12 +1,13 @@
 import { runIngestion } from '@/lib/ingest';
-import { getBindings } from '@/lib/runtime';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
-  const bindings = getBindings();
-  if (!bindings.CRON_SECRET) return Response.json({ error: 'CRON_SECRET is not configured; use the scheduled trigger.' }, { status: 503 });
-  if (request.headers.get('authorization') !== `Bearer ${bindings.CRON_SECRET}`) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-  const result = await runIngestion(bindings, { days: 2, downloadLimit: 4, parseLimit: 2 });
-  return Response.json(result);
+  const token = process.env.INTERNAL_INGEST_TOKEN;
+  if (!token || request.headers.get('authorization') !== `Bearer ${token}`) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    return Response.json(await runIngestion({ days: 2, downloadLimit: 5, parseLimit: 3 }), { headers: { 'cache-control': 'no-store' } });
+  } catch (error) {
+    return Response.json({ error: String(error) }, { status: 500 });
+  }
 }
