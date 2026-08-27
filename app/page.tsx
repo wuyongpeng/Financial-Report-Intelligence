@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import companiesJson from '@/data/companies.json';
 import seedReportsJson from '@/data/seed-reports.json';
 
@@ -8,6 +8,7 @@ type View = 'lane' | 'report';
 type ReportFilter = 'all' | 'online' | 'pending';
 type Evidence = { title: string; value: string; calc: string; inference: string; quote: string; page: string };
 type OfficialReport = { id: string; source: string; code: string; company_name: string; title: string; published_at: string; discovered_at: string; pdf_url: string; industry: string; rank: number };
+type LiveCounts = { reports: number; parsed: number | null };
 
 const coverageCompanies = companiesJson;
 const officialReports = seedReportsJson as OfficialReport[];
@@ -53,6 +54,7 @@ export default function Home() {
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; text: string; compare?: boolean }[]>([]);
+  const [liveCounts, setLiveCounts] = useState<LiveCounts | null>(null);
   const matchedDemoIndex = reports.findIndex((item) => item.code === selectedOfficial?.code);
   const hasDemoAnalysis = matchedDemoIndex >= 0;
   const baseReport = reports[hasDemoAnalysis ? matchedDemoIndex : selectedIndex];
@@ -73,6 +75,27 @@ export default function Home() {
     const online = reports.some((demo) => demo.code === item.code);
     return reportFilter === 'all' || (reportFilter === 'online' ? online : !online);
   }).slice(0, 8);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const response = await fetch('/api/status', { cache: 'no-store' });
+        const payload = await response.json() as { counts?: LiveCounts };
+        if (active && payload.counts) setLiveCounts(payload.counts);
+      } catch {
+        // The checked-in official snapshot remains available while the live pipeline starts.
+      }
+    };
+    void refresh();
+    const firstFollowUp = window.setTimeout(refresh, 30000);
+    const interval = window.setInterval(refresh, 10 * 60 * 1000);
+    return () => {
+      active = false;
+      window.clearTimeout(firstFollowUp);
+      window.clearInterval(interval);
+    };
+  }, []);
 
   function openReport(index: number) {
     setSelectedIndex(index);
@@ -104,7 +127,7 @@ export default function Home() {
       <header className="topbar">
         <button className="brand plain-button" onClick={() => setView('lane')}><span className="brand-mark">财</span><strong>财报智析台</strong><span className="beta">BETA</span></button>
         <nav className="main-nav"><button className={view === 'lane' ? 'active' : ''} onClick={() => setView('lane')}>财报绿色通道</button><button className={view === 'report' ? 'active' : ''} onClick={() => setView('report')}>研究工作台</button><button>数据复核</button></nav>
-        <div className="top-actions"><button className="status-pill"><i />交易所 + 巨潮三源已配置</button><button className="profile">研</button></div>
+        <div className="top-actions"><button className="status-pill"><i />{liveCounts ? `后台已入库 ${liveCounts.reports} 份` : '正在连接真实数据管道'}</button><button className="profile">研</button></div>
       </header>
 
       {view === 'lane' ? (

@@ -7,7 +7,7 @@ const worker = {
     return app.fetch(request, env, ctx);
   },
   scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
-    ctx.waitUntil(runIngestion(env, { days: 2, downloadLimit: 4, parseLimit: 1 }));
+    ctx.waitUntil(runIngestion(env, { days: 2, downloadLimit: 4, parseLimit: 2 }));
   },
 };
 
