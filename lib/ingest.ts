@@ -71,6 +71,13 @@ async function seedSnapshotAnnouncements(db: D1Database, now: string) {
   return results.reduce((sum, result) => sum + (result.meta?.changes ?? 0), 0);
 }
 
+export async function bootstrapLiveData(env: Bindings) {
+  const now = new Date().toISOString();
+  await seedCompanies(env.DB, now);
+  const seeded = await seedSnapshotAnnouncements(env.DB, now);
+  return { companies: companies.length, announcements: seedReports.length, seeded, at: now };
+}
+
 async function updateSourceHealth(db: D1Database, health: Record<string, { ok: boolean; count: number; error?: string }>, now: string) {
   const statements = Object.entries(health).map(([source, state]) => db.prepare(`
     INSERT INTO source_health (source, last_success_at, last_failure_at, consecutive_failures, last_count, last_error, updated_at)
@@ -93,8 +100,8 @@ export async function runIngestion(env: Bindings, options: { days?: number; down
   await env.DB.prepare('INSERT INTO ingest_runs (id, started_at, status) VALUES (?, ?, ?)').bind(runId, startedAt, 'running').run();
 
   try {
-    await seedCompanies(env.DB, startedAt);
-    const seededCount = await seedSnapshotAnnouncements(env.DB, startedAt);
+    const bootstrap = await bootstrapLiveData(env);
+    const seededCount = bootstrap.seeded;
     const fetched = await fetchAllSources(days);
     await updateSourceHealth(env.DB, fetched.health, startedAt);
 
