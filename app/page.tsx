@@ -65,6 +65,10 @@ export default function Home() {
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [analysis, setAnalysis] = useState<Analysis>({});
+  const [adminDialogOpen, setAdminDialogOpen] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminError, setAdminError] = useState('');
+  const [adminSubmitting, setAdminSubmitting] = useState(false);
 
   const selected = reports.find((item) => item.id === selectedId) ?? reports.find((item) => item.metrics.length > 0) ?? reports[0];
   const parsedReports = reports.filter((item) => item.metrics.length > 0);
@@ -108,19 +112,29 @@ export default function Home() {
     setSelectedId(report.id); setMessages([]); setView('report'); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  async function approveReport() {
-    if (!selected || !window.confirm('确认已核对 PDF 原文、数值、单位和页码，并正式上线这份财报？')) return;
+  function approveReport() {
+    if (!selected) return;
+    setAdminPassword(''); setAdminError(''); setAdminDialogOpen(true);
+  }
+
+  async function loginAndApprove() {
+    if (!selected || !adminPassword) { setAdminError('请输入管理员密码。'); return; }
+    setAdminSubmitting(true); setAdminError('');
     const submit = () => fetch(`/api/admin/reports/${encodeURIComponent(selected.id)}/review`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve' }) });
-    let response = await submit();
-    if (response.status === 401) {
-      const password = window.prompt('请输入管理员密码');
-      if (!password) return;
-      const login = await fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
-      if (!login.ok) { setLoadError('管理员密码错误，未执行复核。'); return; }
-      response = await submit();
+    try {
+      const login = await fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: adminPassword }) });
+      const loginPayload = await login.json() as { error?: string };
+      if (!login.ok) { setAdminError(loginPayload.error ?? '登录失败。'); return; }
+      const response = await submit();
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) { setAdminError(payload.error ?? '复核状态更新失败，请稍后重试。'); return; }
+      setReports((items) => items.map((item) => item.id === selected.id ? { ...item, status: 'online', online_at: new Date().toISOString(), metrics: item.metrics.map((metric) => ({ ...metric, verified: 1 })) } : item));
+      setAdminDialogOpen(false);
+    } catch {
+      setAdminError('网络或服务暂时不可用，请稍后重试。');
+    } finally {
+      setAdminSubmitting(false);
     }
-    if (!response.ok) { setLoadError('复核状态更新失败，请稍后重试。'); return; }
-    setReports((items) => items.map((item) => item.id === selected.id ? { ...item, status: 'online', online_at: new Date().toISOString(), metrics: item.metrics.map((metric) => ({ ...metric, verified: 1 })) } : item));
   }
 
   async function answerQuestion(text: string) {
@@ -193,6 +207,7 @@ export default function Home() {
       <aside className="ai-panel advanced-ai"><div className="ai-head"><div><span>数</span><div><b>财报数据助手 V1.1</b><small><i />结构化数据 + 原文证据检索</small></div></div><button onClick={() => setMessages([])}>↻</button></div><div className="engine-strip"><span><i>1</i>识别指标</span><b>→</b><span><i>2</i>检索原文</span><b>→</b><span><i>3</i>返回页码</span></div><div className="chat-body"><div className="ai-message"><span>V1</span><div><p>{selected.metrics.length ? `已载入${selected.company_name}这份财报的 ${selected.metrics.length} 个真实指标。可查询核心指标，或追问“管理层如何解释利润变化”等原文问题。` : '这份财报尚未产出结构化指标，目前不提供模拟回答。'}</p></div></div>{messages.map((message,index) => message.role === 'user' ? <div className="user-message" key={index}>{message.text}</div> : <div className="ai-answer" key={index}><div className="answer-source-tabs"><span className="data">结构化数据 / 原文证据</span><span className="calc">可追溯回答</span></div><p>{message.text}</p></div>)}<div className="prompt-title">可查询</div>{metricOrder.map((name) => <button className="prompt" disabled={!selected.metrics.some((item) => item.metric === name)} key={name} onClick={() => answerQuestion(`${metricLabels[name]}是多少？`)}>{metricLabels[name]}是多少？<span>↗</span></button>)}</div><div className="chat-input"><div><textarea aria-label="查询财报指标" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void answerQuestion(question); } }} placeholder="例如：管理层如何解释利润变化？" rows={2}/><button aria-label="发送" onClick={() => void answerQuestion(question)}>↑</button></div><small>回答仅使用数据库指标与财报原文证据，不提供投资建议</small></div></aside>
     </div> : <section className="lane-page"><div className="honest-empty"><b>暂无可用公告</b><p>请等待真实数据管道完成首次运行。</p></div></section>}
 
+    {adminDialogOpen && <div className="drawer-backdrop" onClick={() => !adminSubmitting && setAdminDialogOpen(false)}><section onClick={(event) => event.stopPropagation()} style={{ width: 'min(400px, calc(100% - 32px))', height: 'max-content', margin: 'auto', padding: 24, background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px #13213b40' }}><span className="section-kicker">ADMIN REVIEW</span><h2 style={{ margin: '7px 0', fontSize: 20 }}>复核并正式上线</h2><p style={{ fontSize: 12, color: '#68758a', lineHeight: 1.65 }}>请确认已核对 PDF 原文、指标数值、单位与页码。操作会记录复核事件。</p><label style={{ display: 'block', fontSize: 12, marginTop: 16 }}>管理员密码<input autoFocus type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void loginAndApprove(); }} style={{ width: '100%', marginTop: 7, padding: '10px 11px', border: '1px solid #dce2eb', borderRadius: 7 }} /></label>{adminError && <p style={{ margin: '10px 0 0', color: '#c94756', fontSize: 11 }}>{adminError}</p>}<div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}><button className="secondary" disabled={adminSubmitting} onClick={() => setAdminDialogOpen(false)}>取消</button><button className="primary" disabled={adminSubmitting} onClick={() => void loginAndApprove()}>{adminSubmitting ? '正在提交…' : '确认上线'}</button></div></section></div>}
     {selectedMetric && selected && <div className="drawer-backdrop" onClick={() => setSelectedMetric(null)}><aside className="evidence-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><div><span>REAL DATA EVIDENCE</span><h2>{metricLabels[selectedMetric.metric]}</h2></div><button onClick={() => setSelectedMetric(null)}>×</button></div><div className="evidence-summary"><span>已入库数值</span><strong>{metricValue(selectedMetric)}</strong><small>解析置信度 {Math.round(selectedMetric.confidence * 100)}% · {selectedMetric.verified ? '已复核' : '待人工复核'}</small></div><ol className="evidence-layers"><li><i className="raw">1</i><div><span>公告来源</span><h3>{sourceName(selected.source)}官方公告</h3><p>{selected.title}</p></div></li><li><i className="cal">2</i><div><span>原始字段</span><h3>{selectedMetric.source_label ?? metricLabels[selectedMetric.metric]}</h3><p>原始入库值：{selectedMetric.value}；原始单位：{selectedMetric.unit}</p></div></li><li><i className="source">3</i><div><span>财报位置</span><h3>第 {selectedMetric.source_page ?? '—'} 页</h3><p>点击下方按钮打开归档 PDF 或官方原文进行人工核验。</p><button className="primary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf`, '_blank', 'noopener,noreferrer')}>打开财报原文 ↗</button></div></li></ol><div className="drawer-foot"><span>报告期 {selectedMetric.period} · 数据状态 {reportState?.label}</span></div></aside></div>}
   </main>;
 }
