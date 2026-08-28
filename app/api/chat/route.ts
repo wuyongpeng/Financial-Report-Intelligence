@@ -11,11 +11,12 @@ async function optionalGenerate(question: string, evidence: Chunk[], structuredC
   const baseUrl = process.env.LLM_BASE_URL;
   const model = process.env.LLM_MODEL;
   const maxTokens = Number(process.env.LLM_MAX_TOKENS ?? 1600);
+  const timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? 60_000);
   if (!baseUrl || !model || (!evidence.length && !structuredContext)) return { answer: null, status: 'not-attempted' as const };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    console.info('[chat] LLM request', { model, evidenceCount: evidence.length, hasStructuredContext: Boolean(structuredContext), maxTokens });
+    console.info('[chat] LLM request', { model, evidenceCount: evidence.length, hasStructuredContext: Boolean(structuredContext), maxTokens, timeoutMs });
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST', signal: controller.signal,
       headers: { 'content-type': 'application/json', ...(process.env.LLM_API_KEY ? { authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}) },
