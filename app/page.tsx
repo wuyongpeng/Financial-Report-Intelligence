@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import companiesJson from '@/data/companies.json';
 
 type View = 'lane' | 'report';
@@ -142,7 +143,8 @@ export default function Home() {
           const raw = event.split('\n').find((line) => line.startsWith('data: '))?.slice(6);
           if (!raw || raw === '[DONE]') continue;
           try { answer += (JSON.parse(raw) as { content?: string }).content ?? ''; } catch { /* ignore malformed event */ }
-          setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { role: 'assistant', text: answer }; return next; });
+          flushSync(() => setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { role: 'assistant', text: answer }; return next; }));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         }
         if (done) break;
       }
