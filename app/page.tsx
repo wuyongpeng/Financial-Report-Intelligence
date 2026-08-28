@@ -125,14 +125,30 @@ export default function Home() {
   async function answerQuestion(text: string) {
     const clean = text.trim();
     if (!clean || !selected) return;
-    setMessages((items) => [...items, { role: 'user', text: clean }]); setQuestion('');
+    setMessages((items) => [...items, { role: 'user', text: clean }, { role: 'assistant', text: '' }]); setQuestion('');
     let answer: string;
     try {
-      const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: selected.id, question: clean }) });
-      const payload = await response.json() as { answer?: string };
-      answer = response.ok ? (payload.answer ?? '未返回可核验答案。') : 'AI 问答暂时不可用，请稍后重试。';
+      const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: selected.id, question: clean, stream: true }) });
+      if (!response.ok || !response.body) throw new Error(`chat ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = ''; answer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+        for (const event of events) {
+          const raw = event.split('\n').find((line) => line.startsWith('data: '))?.slice(6);
+          if (!raw || raw === '[DONE]') continue;
+          try { answer += (JSON.parse(raw) as { content?: string }).content ?? ''; } catch { /* ignore malformed event */ }
+          setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { role: 'assistant', text: answer }; return next; });
+        }
+        if (done) break;
+      }
+      if (!answer) answer = '未返回可核验答案。';
     } catch { answer = 'AI 问答暂时不可用，请稍后重试。'; }
-    setMessages((items) => [...items, { role: 'assistant', text: answer }]);
+    setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { role: 'assistant', text: answer }; return next; });
   }
 
   const sourceHealth = status.health ?? [];
