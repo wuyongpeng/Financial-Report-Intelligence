@@ -44,7 +44,12 @@ export function isAdmin(request: Request) {
 }
 
 export function adminCookieHeader(value: string, expires?: Date) {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  // IP + HTTP verification cannot persist a Secure cookie. Keep the production
+  // default, but allow the VM bootstrap environment to opt out explicitly.
+  const secureCookie = process.env.COOKIE_SECURE
+    ? process.env.COOKIE_SECURE === 'true'
+    : process.env.NODE_ENV === 'production';
+  const secure = secureCookie ? '; Secure' : '';
   return `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${expires ? 0 : maxAgeSeconds}${secure}`;
 }
 

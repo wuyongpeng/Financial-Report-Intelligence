@@ -53,7 +53,7 @@ docker compose restart worker
 docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select status, count(*) from announcements group by status;"
 ```
 
-如果某个公开源短暂限流或变更格式，Worker 会保留失败原因并继续处理其他源；不要通过提高频率或伪造浏览器特征来规避限制。生产时先将域名 A/AAAA 记录指向 VM，再在 `.env` 设置 `DOMAIN=你的域名`，执行 `docker compose up -d`；Caddy 会自动申请并续期 HTTPS 证书。可选设置 `ALERT_WEBHOOK_URL` 接收任务或数据源失败告警。
+如果某个公开源短暂限流或变更格式，Worker 会保留失败原因并继续处理其他源；不要通过提高频率或伪造浏览器特征来规避限制。生产时先将域名 A/AAAA 记录指向 VM，再在 `.env` 设置 `DOMAIN=你的域名`、`COOKIE_SECURE=true`，执行 `docker compose up -d`；Caddy 会自动申请并续期 HTTPS 证书。以 IP + HTTP 做内网验证时可设置 `COOKIE_SECURE=false`，但不应作为公网正式环境的配置。可选设置 `ALERT_WEBHOOK_URL` 接收任务或数据源失败告警。
 
 ## 后续平移边界
 
