@@ -73,6 +73,13 @@ function highlightedText(text: string, term?: string) {
   return <>{text.slice(0, position)}<mark>{term}</mark>{text.slice(position + term.length)}</>;
 }
 
+function evidenceParagraphs(text: string) {
+  const sentences = text.match(/[^。！？；]+[。！？；]?/g)?.map((item) => item.trim()).filter(Boolean) ?? [text];
+  const paragraphs: string[] = [];
+  for (let index = 0; index < sentences.length; index += 2) paragraphs.push(sentences.slice(index, index + 2).join(''));
+  return paragraphs.filter(Boolean);
+}
+
 export default function Home() {
   const [view, setView] = useState<View>('lane');
   const [reports, setReports] = useState<LiveReport[]>([]);
@@ -89,6 +96,7 @@ export default function Home() {
   const [readerOpen, setReaderOpen] = useState(false);
   const [readerPage, setReaderPage] = useState<number | null>(null);
   const [readerHighlight, setReaderHighlight] = useState('');
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
   const [trendMetric, setTrendMetric] = useState<ChartMetric>('revenue');
   const [peerMetric, setPeerMetric] = useState<'revenue' | 'net_profit' | 'roe'>('roe');
   const [adminDialogOpen, setAdminDialogOpen] = useState(false);
@@ -139,6 +147,7 @@ export default function Home() {
     setOutlineData({ indexedPages: 0, outline: [], pages: [] });
     setReaderPage(null);
     setReaderHighlight('');
+    setPdfPreviewOpen(false);
     void fetch(`/api/reports/${encodeURIComponent(selectedId)}/outline`, { cache: 'no-store' })
       .then(async (response) => response.ok ? response.json() as Promise<OutlinePayload> : { indexedPages: 0, outline: [], pages: [] })
       .then(setOutlineData).catch(() => setOutlineData({ indexedPages: 0, outline: [], pages: [] }));
@@ -258,9 +267,21 @@ export default function Home() {
           <div className="section-head compact"><div><span className="section-kicker">EVIDENCE READER</span><h2>结论与证据阅读</h2><p>先选关心的结论，再定位到可核验的 PDF 页与原文文本。</p></div><button className="secondary" onClick={() => setReaderOpen(false)}>收起阅读器</button></div>
           {outlineData.indexedPages ? <>
             <div className="evidence-cards" aria-label="关键结论与证据">
-              {evidenceCards.map((card) => <button className={card.page === currentReaderPage ? 'active' : ''} key={card.id} onClick={() => { setReaderPage(card.page); setReaderHighlight(card.highlight); }}><span>证据页 P{card.page}</span><b>{card.title}</b><small>{card.detail}</small></button>)}
+              {evidenceCards.map((card) => <button className={card.page === currentReaderPage ? 'active' : ''} key={card.id} onClick={() => { setReaderPage(card.page); setReaderHighlight(card.highlight); setPdfPreviewOpen(false); }}><span>证据页 P{card.page}</span><b>{card.title}</b><small>{card.detail}</small></button>)}
             </div>
-            <div className="reader-grid"><nav className="outline-nav" aria-label="财报提纲">{outlineData.outline.length ? outlineData.outline.map((item) => <button className={item.page === currentReaderPage ? 'active' : ''} key={item.id} onClick={() => { setReaderPage(item.page); setReaderHighlight(item.highlight); }}><span>{item.level === 1 ? '章节' : '小节'} · P{item.page}{item.endPage > item.page ? `–${item.endPage}` : ''}</span><b>{item.title}</b></button>) : <p>未能从当前 PDF 文本识别标准章节；可按已解析页浏览原文。</p>}{outlineData.pages.slice(0, 18).map((item) => <button className={`page-jump ${item.page === currentReaderPage ? 'active' : ''}`} key={item.page} onClick={() => { setReaderPage(item.page); setReaderHighlight(''); }}>第 {item.page} 页</button>)}</nav><article className="reader-content"><div className="reader-content-head"><div><span>当前证据</span><h3>{currentReaderSection?.title ?? `PDF 第 ${currentReaderPage} 页`}</h3><small>原文索引第 {currentReaderPage} 页 · 共 {outlineData.indexedPages} 页已建立检索索引</small></div><button className="secondary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf#page=${currentReaderPage}`, '_blank', 'noopener,noreferrer')}>跳至 PDF 本页 ↗</button></div>{currentReaderSection?.excerpt && <div className="reader-excerpt"><b>证据定位</b><p>{highlightedText(currentReaderSection.excerpt, effectiveHighlight)}</p></div>}<p className="reader-page-text">{highlightedText(currentReaderText ?? '该页文本尚未成功提取。可打开原 PDF 查看排版原文。', effectiveHighlight)}</p><p className="reader-hint">黄色高亮为应用内已提取页文本中的命中字段；下方 PDF 同步跳至该页，便于核验版式原文。</p><iframe title={`${selected.title} 第 ${currentReaderPage} 页`} src={`/api/reports/${encodeURIComponent(selected.id)}/pdf#page=${currentReaderPage}`} className="pdf-frame" /></article></div>
+            <div className="reader-grid">
+              <nav className="outline-nav" aria-label="财报提纲">
+                {outlineData.outline.length ? outlineData.outline.map((item) => <button className={item.page === currentReaderPage ? 'active' : ''} key={item.id} onClick={() => { setReaderPage(item.page); setReaderHighlight(item.highlight); setPdfPreviewOpen(false); }}><span>{item.level === 1 ? '章节' : '小节'} · P{item.page}{item.endPage > item.page ? `–${item.endPage}` : ''}</span><b>{item.title}</b></button>) : <p>未能从当前 PDF 文本识别标准章节；可按已解析页浏览原文。</p>}
+                {outlineData.pages.slice(0, 18).map((item) => <button className={`page-jump ${item.page === currentReaderPage ? 'active' : ''}`} key={item.page} onClick={() => { setReaderPage(item.page); setReaderHighlight(''); setPdfPreviewOpen(false); }}>第 {item.page} 页</button>)}
+              </nav>
+              <article className="reader-content">
+                <div className="reader-content-head"><div><span>当前证据 · PDF 第 {currentReaderPage} 页</span><h3>{currentReaderSection?.title ?? `PDF 第 ${currentReaderPage} 页`}</h3><small>该页已建立文本索引，可直接阅读和追问</small></div><button className="secondary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf#page=${currentReaderPage}`, '_blank', 'noopener,noreferrer')}>打开 PDF 第 {currentReaderPage} 页 ↗</button></div>
+                {currentReaderSection?.excerpt && <div className="reader-excerpt"><b>命中位置</b><p>{highlightedText(currentReaderSection.excerpt, effectiveHighlight)}</p></div>}
+                <section className="reader-source"><div className="reader-source-head"><span>原文证据</span><small>PDF 第 {currentReaderPage} 页 · 提取文本</small></div><div className="reader-page-text">{evidenceParagraphs(currentReaderText ?? '该页文本尚未成功提取。可打开原 PDF 查看排版原文。').map((paragraph, index) => <p key={index}>{highlightedText(paragraph, effectiveHighlight)}</p>)}</div></section>
+                <div className="pdf-proof"><div><b>需要核验原始版式？</b><span>PDF 会直接定位到第 {currentReaderPage} 页。</span></div><button className="secondary" onClick={() => setPdfPreviewOpen((open) => !open)}>{pdfPreviewOpen ? '收起 PDF' : '页内查看 PDF'}</button></div>
+                {pdfPreviewOpen && <iframe key={currentReaderPage} title={`${selected.title} 第 ${currentReaderPage} 页`} src={`/api/reports/${encodeURIComponent(selected.id)}/pdf#page=${currentReaderPage}&zoom=page-width`} className="pdf-frame" />}
+              </article>
+            </div>
           </> : <div className="honest-empty"><b>原文提纲正在建立</b><p>这份 PDF 尚未产生页文本索引。完成解析后，章节导航、页码跳转和原文摘录会自动出现；原 PDF 已可直接打开。</p></div>}
         </section>}
         <section id="metrics" className="minute-section"><div className="section-head compact"><div><span className="section-kicker">REAL STRUCTURED DATA</span><h2>核心财务指标</h2><p>仅展示数据库中已经解析的值</p></div><span className="verified-badge">{selected.metrics.some((item) => item.verified) ? '✓ 已人工复核' : '机器提取 · 待复核'}</span></div><div className="metric-grid">{metricOrder.map((name) => { const metric = selected.metrics.find((item) => item.metric === name); return <button className={`metric-card ${metric ? '' : 'metric-empty'}`} disabled={!metric} key={name} onClick={() => metric && setSelectedMetric(metric)}><div><span>{metricLabels[name]}</span><i>{metric ? '查看来源 ↗' : '未提取'}</i></div><strong>{metricValue(metric)}</strong><p>{metric ? `置信度 ${Math.round(metric.confidence * 100)}%` : '等待解析任务'}</p>{metric && <div className="rank"><span>{metric.source_label ?? metricLabels[name]} · 第 {metric.source_page ?? '—'} 页</span></div>}</button>; })}</div>{!selected.metrics.length && <div className="honest-empty"><b>这份财报还没有结构化数据</b><p>官方公告与 PDF 已可用；指标解析完成前，系统不会展示任何替代数字或 AI 结论。</p></div>}</section>
