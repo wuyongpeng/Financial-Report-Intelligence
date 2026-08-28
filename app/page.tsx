@@ -125,22 +125,14 @@ export default function Home() {
   async function answerQuestion(text: string) {
     const clean = text.trim();
     if (!clean || !selected) return;
-    const matchedName = metricOrder.find((name) => clean.includes(metricLabels[name]) || (name === 'eps' && /EPS|每股/.test(clean)));
-    const metric = matchedName ? selected.metrics.find((item) => item.metric === matchedName) : undefined;
+    setMessages((items) => [...items, { role: 'user', text: clean }]); setQuestion('');
     let answer: string;
-    if (metric) answer = `${selected.company_name}${metric.period || '本期'}${metricLabels[metric.metric]}为 ${metricValue(metric)}。数据来自财报“${metric.source_label ?? metricLabels[metric.metric]}”字段${metric.source_page ? `，位于第 ${metric.source_page} 页` : ''}，解析置信度 ${Math.round(metric.confidence * 100)}%。`;
-    else if (/指标|数据/.test(clean) && selected.metrics.length) answer = `当前已从这份财报解析 ${selected.metrics.length} 个核心指标：${selected.metrics.map((item) => `${metricLabels[item.metric]} ${metricValue(item)}`).join('；')}。`;
-    else {
-      setMessages((items) => [...items, { role: 'user', text: clean }]); setQuestion('');
-      try {
-        const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: selected.id, question: clean }) });
-        const payload = await response.json() as { answer?: string };
-        answer = response.ok ? (payload.answer ?? '未返回可核验答案。') : '原文检索暂时不可用，请稍后重试。';
-      } catch { answer = '原文检索暂时不可用，请稍后重试。'; }
-      setMessages((items) => [...items, { role: 'assistant', text: answer }]);
-      return;
-    }
-    setMessages((items) => [...items, { role: 'user', text: clean }, { role: 'assistant', text: answer }]); setQuestion('');
+    try {
+      const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: selected.id, question: clean }) });
+      const payload = await response.json() as { answer?: string };
+      answer = response.ok ? (payload.answer ?? '未返回可核验答案。') : 'AI 问答暂时不可用，请稍后重试。';
+    } catch { answer = 'AI 问答暂时不可用，请稍后重试。'; }
+    setMessages((items) => [...items, { role: 'assistant', text: answer }]);
   }
 
   const sourceHealth = status.health ?? [];

@@ -14,6 +14,7 @@ async function optionalGenerate(question: string, evidence: Chunk[], structuredC
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
+    console.info('[chat] LLM request', { model, evidenceCount: evidence.length, hasStructuredContext: Boolean(structuredContext) });
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST', signal: controller.signal,
       headers: { 'content-type': 'application/json', ...(process.env.LLM_API_KEY ? { authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}) },
@@ -44,12 +45,14 @@ export async function POST(request: Request) {
     SELECT metric, value, unit, source_page, source_label FROM financial_metrics WHERE announcement_id=${body.reportId}
   `;
   const chunks = await db<Chunk[]>`SELECT page, content FROM report_chunks WHERE announcement_id=${body.reportId} ORDER BY page LIMIT 120`;
-  const evidence = chunks.map((item) => ({ ...item, score: score(body.question!, item.content) })).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || a.page - b.page).slice(0, 3);
+  // All matched page chunks are passed to the model. A report is capped at 120 pages during parsing.
+  const evidence = chunks.map((item) => ({ ...item, score: score(body.question!, item.content) })).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || a.page - b.page);
   const peerIntent = /竞品|同行|同业|对标|可比公司/.test(body.question);
   const peers = peerIntent ? await db<Array<{ code: string; name: string }>>`
     SELECT code, name FROM companies WHERE industry=${report.industry} AND code<>${report.code} AND enabled=true ORDER BY rank LIMIT 12
   ` : [];
-  const structuredContext = peers.length ? `当前公司：${report.company_name}（${report.code}）；行业：${report.industry}；当前绿色通道内同业覆盖公司：${peers.map((peer) => `${peer.name}（${peer.code}）`).join('、')}。` : '';
+  const metricContext = metrics.length ? metrics.map((metric) => `${metric.metric}=${metric.value}${metric.unit}${metric.source_page ? `（第${metric.source_page}页）` : ''}`).join('；') : '当前无已入库核心指标。';
+  const structuredContext = `当前公司：${report.company_name}（${report.code}）；行业：${report.industry}；本报告已入库指标：${metricContext}。${peers.length ? `当前绿色通道内同业覆盖公司：${peers.map((peer) => `${peer.name}（${peer.code}）`).join('、')}。` : '当前绿色通道内没有可确认的同业覆盖公司。'}`;
   const generated = await optionalGenerate(body.question, evidence, structuredContext);
   const fallbackPeerAnswer = peers.length ? `按当前绿色通道覆盖范围，${report.company_name}所属“${report.industry}”的可比公司包括：${peers.map((peer) => `${peer.name}（${peer.code}）`).join('、')}。这是覆盖名单中的同行，不代表完整行业竞品或投资推荐。` : null;
   const answer = generated.answer ?? fallbackPeerAnswer ?? (evidence.length
