@@ -56,5 +56,9 @@ export async function parseCoreMetrics(bytes: ArrayBuffer) {
     }
     if (found) results.push(found);
   }
-  return { totalPages: pages.length, metrics: results };
+  const chunks = pages.slice(0, 120).map((content, index) => ({
+    page: index + 1,
+    content: content.replace(/\s+/g, ' ').trim().slice(0, 3000),
+  })).filter((chunk) => chunk.content.length >= 40);
+  return { totalPages: pages.length, metrics: results, chunks };
 }

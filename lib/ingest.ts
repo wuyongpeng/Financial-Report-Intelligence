@@ -4,6 +4,7 @@ import { getDb } from './db';
 import { parseCoreMetrics } from './parser';
 import { fetchAllSources } from './sources';
 import { putReport, readReport } from './storage';
+import { sendAlert } from './alerts';
 import type { Announcement, Company } from './types';
 
 const companies = companiesJson as Company[];
@@ -112,7 +113,9 @@ export async function processBacklog(options: { downloadLimit?: number; parseLim
     SELECT id, source, source_id, code, company_name, title, report_type, published_at, pdf_url, pdf_key, status
     FROM announcements
     WHERE status IN ('discovered', 'download_failed', 'downloaded')
-    ORDER BY CASE status WHEN 'downloaded' THEN 0 WHEN 'discovered' THEN 1 ELSE 2 END, published_at DESC
+      OR (status IN ('review', 'online', 'parse_partial') AND pdf_key IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM report_chunks WHERE report_chunks.announcement_id=announcements.id))
+    ORDER BY CASE status WHEN 'downloaded' THEN 0 WHEN 'discovered' THEN 1 WHEN 'review' THEN 2 WHEN 'online' THEN 3 ELSE 4 END, published_at DESC
     LIMIT 100
   `;
 
@@ -167,8 +170,16 @@ export async function processBacklog(options: { downloadLimit?: number; parseLim
                 source_page=EXCLUDED.source_page, source_label=EXCLUDED.source_label, confidence=EXCLUDED.confidence
             `;
           }
+          await tx`DELETE FROM report_chunks WHERE announcement_id=${record.id}`;
+          for (const chunk of extracted.chunks) {
+            await tx`
+              INSERT INTO report_chunks (announcement_id, page, content, created_at)
+              VALUES (${record.id}, ${chunk.page}, ${chunk.content}, ${createdAt})
+              ON CONFLICT (announcement_id, page) DO UPDATE SET content=EXCLUDED.content, created_at=EXCLUDED.created_at
+            `;
+          }
           await tx`
-            UPDATE announcements SET status=${extracted.metrics.length === 4 ? 'review' : 'parse_partial'}, parsed_at=${createdAt}, parse_error=NULL, updated_at=${createdAt}
+            UPDATE announcements SET status=${record.status === 'online' ? 'online' : extracted.metrics.length === 4 ? 'review' : 'parse_partial'}, parsed_at=${createdAt}, parse_error=NULL, updated_at=${createdAt}
             WHERE id=${record.id}
           `;
         });
@@ -196,6 +207,8 @@ export async function runIngestion(options: { days?: number; downloadLimit?: num
     const bootstrap = await bootstrapLiveData();
     const fetched = await fetchAllSources(days);
     await updateSourceHealth(fetched.health, startedAt);
+    const failedSources = Object.entries(fetched.health).filter(([, state]) => !state.ok);
+    if (failedSources.length) await sendAlert('财报公告源采集异常', { sources: failedSources.map(([source, state]) => ({ source, error: state.error })) });
     const relevant = fetched.announcements.filter((item) => companyByCode.has(item.code));
     const cutoff = new Date(Date.now() - (days + 1) * 86400000).toISOString();
     const existing = await db<Array<{ id: string; source: string; source_id: string }>>`

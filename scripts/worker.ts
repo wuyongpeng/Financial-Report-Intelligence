@@ -1,5 +1,7 @@
 import { bootstrapLiveData, runIngestion } from '../lib/ingest';
 import { closeDb } from '../lib/db';
+import { ensureSchema } from '../lib/migrate';
+import { sendAlert } from '../lib/alerts';
 
 const intervalMs = Number(process.env.INGEST_INTERVAL_MS ?? 600_000);
 const days = Number(process.env.INGEST_DAYS ?? 2);
@@ -16,6 +18,7 @@ async function tick() {
     console.info('[worker] ingestion finished', result);
   } catch (error) {
     console.error('[worker] ingestion failed', error);
+    await sendAlert('财报采集任务失败', { error: String(error) });
   } finally {
     running = false;
   }
@@ -29,6 +32,7 @@ async function shutdown(signal: string) {
 }
 
 async function main() {
+  await ensureSchema();
   await bootstrapLiveData();
   await tick();
   timer = setInterval(() => void tick(), intervalMs);

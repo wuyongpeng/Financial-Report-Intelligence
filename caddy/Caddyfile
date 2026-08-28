@@ -1,4 +1,5 @@
-:80 {
+# Set DOMAIN to the DNS name pointing to this VM. Caddy then obtains and renews HTTPS automatically.
+{$DOMAIN:localhost} {
   encode zstd gzip
   reverse_proxy app:3000
 }

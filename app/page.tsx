@@ -15,6 +15,7 @@ type LiveReport = {
 type Health = { source: string; last_success_at?: string; last_failure_at?: string; last_count?: number; last_error?: string };
 type StatusPayload = { counts?: { reports: number; parsed: number | null }; health?: Health[]; latestRun?: { started_at: string; finished_at: string | null; status: string } | null };
 type ChatMessage = { role: 'user' | 'assistant'; text: string };
+type Analysis = { period?: string; industry?: string; peers?: Array<{ code: string; company_name: string; metric: string; value: number; unit: string }>; anomalies?: Array<{ level: 'risk' | 'info'; title: string; detail: string }> };
 
 const coverageCompanies = companiesJson;
 const metricOrder: MetricName[] = ['revenue', 'net_profit', 'eps', 'roe'];
@@ -62,6 +63,7 @@ export default function Home() {
   const [selectedMetric, setSelectedMetric] = useState<Metric | null>(null);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [analysis, setAnalysis] = useState<Analysis>({});
 
   const selected = reports.find((item) => item.id === selectedId) ?? reports.find((item) => item.metrics.length > 0) ?? reports[0];
   const parsedReports = reports.filter((item) => item.metrics.length > 0);
@@ -94,11 +96,33 @@ export default function Home() {
     return () => { active = false; window.clearInterval(timer); };
   }, []);
 
+  useEffect(() => {
+    if (!selectedId) return;
+    void fetch(`/api/reports/${encodeURIComponent(selectedId)}/analysis`, { cache: 'no-store' })
+      .then(async (response) => response.ok ? response.json() as Promise<Analysis> : {})
+      .then(setAnalysis).catch(() => setAnalysis({}));
+  }, [selectedId]);
+
   function openReport(report: LiveReport) {
     setSelectedId(report.id); setMessages([]); setView('report'); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function answerQuestion(text: string) {
+  async function approveReport() {
+    if (!selected || !window.confirm('确认已核对 PDF 原文、数值、单位和页码，并正式上线这份财报？')) return;
+    const submit = () => fetch(`/api/admin/reports/${encodeURIComponent(selected.id)}/review`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'approve' }) });
+    let response = await submit();
+    if (response.status === 401) {
+      const password = window.prompt('请输入管理员密码');
+      if (!password) return;
+      const login = await fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
+      if (!login.ok) { setLoadError('管理员密码错误，未执行复核。'); return; }
+      response = await submit();
+    }
+    if (!response.ok) { setLoadError('复核状态更新失败，请稍后重试。'); return; }
+    setReports((items) => items.map((item) => item.id === selected.id ? { ...item, status: 'online', online_at: new Date().toISOString(), metrics: item.metrics.map((metric) => ({ ...metric, verified: 1 })) } : item));
+  }
+
+  async function answerQuestion(text: string) {
     const clean = text.trim();
     if (!clean || !selected) return;
     const matchedName = metricOrder.find((name) => clean.includes(metricLabels[name]) || (name === 'eps' && /EPS|每股/.test(clean)));
@@ -106,8 +130,16 @@ export default function Home() {
     let answer: string;
     if (metric) answer = `${selected.company_name}${metric.period || '本期'}${metricLabels[metric.metric]}为 ${metricValue(metric)}。数据来自财报“${metric.source_label ?? metricLabels[metric.metric]}”字段${metric.source_page ? `，位于第 ${metric.source_page} 页` : ''}，解析置信度 ${Math.round(metric.confidence * 100)}%。`;
     else if (/指标|数据/.test(clean) && selected.metrics.length) answer = `当前已从这份财报解析 ${selected.metrics.length} 个核心指标：${selected.metrics.map((item) => `${metricLabels[item.metric]} ${metricValue(item)}`).join('；')}。`;
-    else if (!selected.metrics.length) answer = '这份财报尚未完成结构化解析。目前只能查看官方公告与 PDF 原文，系统不会在没有真实指标时生成答案。';
-    else answer = '当前交付版只回答已入库的结构化指标。原因归因、同行对比和原文 RAG 尚未启用，避免把推测展示成事实。';
+    else {
+      setMessages((items) => [...items, { role: 'user', text: clean }]); setQuestion('');
+      try {
+        const response = await fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: selected.id, question: clean }) });
+        const payload = await response.json() as { answer?: string };
+        answer = response.ok ? (payload.answer ?? '未返回可核验答案。') : '原文检索暂时不可用，请稍后重试。';
+      } catch { answer = '原文检索暂时不可用，请稍后重试。'; }
+      setMessages((items) => [...items, { role: 'assistant', text: answer }]);
+      return;
+    }
     setMessages((items) => [...items, { role: 'user', text: clean }, { role: 'assistant', text: answer }]); setQuestion('');
   }
 
@@ -141,13 +173,14 @@ export default function Home() {
 
       <section className="coverage-card" id="coverage-50"><div className="section-head"><div><span className="section-kicker">GREEN LANE COVERAGE</span><h2>50 家绿色通道名单</h2><p>覆盖配置真实存在；是否已有公告和指标，以线上公告列表状态为准。</p></div><span className="coverage-count">SSE {coverageCompanies.filter((item) => item.exchange === 'SSE').length} · SZSE {coverageCompanies.filter((item) => item.exchange === 'SZSE').length}</span></div><div className="coverage-grid">{coverageCompanies.map((item) => { const count = reports.filter((report) => report.code === item.code).length; return <div className="coverage-item" key={item.code}><span>{String(item.rank).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.code} · {item.industry}</small></div><i>{count ? `${count} 份公告` : '暂无公告'}</i></div>; })}</div></section>
     </section> : selected ? <div className="report-layout">
-      <section className="report-main"><button className="back-link" onClick={() => setView('lane')}>← 返回财报绿色通道</button><div className="report-titlebar"><div><div className="report-label"><span>{reportState?.label}</span> {sourceName(selected.source)} · {selected.title}</div><h1>{selected.company_name} <small>{selected.code}</small></h1><p>官方发布 {dateTime(selected.published_at)} · 系统发现 {dateTime(selected.discovered_at)} · <b>{selected.metrics.length ? `已入库 ${selected.metrics.length} 个指标` : '尚无结构化指标'}</b></p></div><div><button className="primary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf`, '_blank', 'noopener,noreferrer')}>查看原始财报 ↗</button></div></div>
+      <section className="report-main"><button className="back-link" onClick={() => setView('lane')}>← 返回财报绿色通道</button><div className="report-titlebar"><div><div className="report-label"><span>{reportState?.label}</span> {sourceName(selected.source)} · {selected.title}</div><h1>{selected.company_name} <small>{selected.code}</small></h1><p>官方发布 {dateTime(selected.published_at)} · 系统发现 {dateTime(selected.discovered_at)} · <b>{selected.metrics.length ? `已入库 ${selected.metrics.length} 个指标` : '尚无结构化指标'}</b></p></div><div>{selected.status !== 'online' && selected.metrics.length > 0 && <button className="secondary" onClick={approveReport}>管理员复核上线</button>}<button className="primary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf`, '_blank', 'noopener,noreferrer')}>查看原始财报 ↗</button></div></div>
         <div className="detail-speed"><div><span>真实处理状态</span><strong>{reportState?.label}</strong><small>公告至系统发现：{elapsed(selected.published_at, selected.discovered_at)}</small></div><ol>{[['公告发布',selected.published_at],['系统发现',selected.discovered_at],['PDF 下载',selected.downloaded_at],['指标解析',selected.parsed_at],['正式上线',selected.online_at]].map(([label,time]) => <li key={label} className={time ? '' : 'pending'}><i>{time ? '✓' : '○'}</i><span>{label}<br />{dateTime(time)}</span></li>)}</ol></div>
         <section id="metrics" className="minute-section"><div className="section-head compact"><div><span className="section-kicker">REAL STRUCTURED DATA</span><h2>核心财务指标</h2><p>仅展示数据库中已经解析的值</p></div><span className="verified-badge">{selected.metrics.some((item) => item.verified) ? '✓ 已人工复核' : '机器提取 · 待复核'}</span></div><div className="metric-grid">{metricOrder.map((name) => { const metric = selected.metrics.find((item) => item.metric === name); return <button className={`metric-card ${metric ? '' : 'metric-empty'}`} disabled={!metric} key={name} onClick={() => metric && setSelectedMetric(metric)}><div><span>{metricLabels[name]}</span><i>{metric ? '查看来源 ↗' : '未提取'}</i></div><strong>{metricValue(metric)}</strong><p>{metric ? `置信度 ${Math.round(metric.confidence * 100)}%` : '等待解析任务'}</p>{metric && <div className="rank"><span>{metric.source_label ?? metricLabels[name]} · 第 {metric.source_page ?? '—'} 页</span></div>}</button>; })}</div>{!selected.metrics.length && <div className="honest-empty"><b>这份财报还没有结构化数据</b><p>官方公告与 PDF 已可用；指标解析完成前，系统不会展示任何替代数字或 AI 结论。</p></div>}</section>
         <section className="trend-card real-history"><div className="card-head"><div><span className="section-kicker">AVAILABLE HISTORY</span><h3>已入库多期数据</h3></div><span className="coverage-count">{companyHistory.length} 个报告期</span></div>{companyHistory.length > 1 ? <div className="history-table">{companyHistory.map((item) => <div key={item.id}><b>{item.metrics[0]?.period ?? item.title}</b>{metricOrder.map((name) => <span key={name}>{metricLabels[name]}：{metricValue(item.metrics.find((metric) => metric.metric === name))}</span>)}</div>)}</div> : <div className="honest-empty"><b>暂不足以生成趋势图</b><p>当前只有 {companyHistory.length} 个真实报告期。至少两个报告期入库后再展示趋势，避免用模拟序列补图。</p></div>}</section>
+        <section className="trend-card real-history"><div className="card-head"><div><span className="section-kicker">CHANGE RADAR</span><h3>主动变化与同行数据</h3></div><span className="coverage-count">{analysis.industry ?? '待加载行业'}</span></div>{analysis.anomalies?.length ? <div className="history-table">{analysis.anomalies.map((item, index) => <div key={index}><b>{item.level === 'risk' ? '风险' : '提示'} · {item.title}</b><span>{item.detail}</span></div>)}</div> : <div className="honest-empty"><b>暂无可判定异常</b><p>需至少两个已入库报告期，系统才会计算增收不增利和显著利润波动。</p></div>}{analysis.peers?.length ? <div className="history-table"><div><b>{analysis.period} 同行业已入库对比</b><span>{[...new Set(analysis.peers.map((item) => item.company_name))].slice(0, 8).join('、')}</span></div></div> : null}</section>
         <section className="trust-section"><div className="section-head compact"><div><span className="section-kicker">TRACEABILITY</span><h2>真实数据可追溯</h2></div></div><div className="trust-flow"><article><span>01</span><i className="raw">源</i><h3>官方公告</h3><p>{sourceName(selected.source)} · {selected.title}</p></article><b>→</b><article><span>02</span><i className="cal">存</i><h3>PDF 归档</h3><p>{selected.pdf_key ? '已存入本地磁盘' : '使用官方原文地址'}</p></article><b>→</b><article><span>03</span><i className="infer">析</i><h3>规则提取</h3><p>{selected.metrics.length} 个核心指标</p></article><b>→</b><article><span>04</span><i className="source">证</i><h3>页码证据</h3><p>点击指标查看来源标签和页码</p></article></div></section>
       </section>
-      <aside className="ai-panel advanced-ai"><div className="ai-head"><div><span>数</span><div><b>财报数据助手 V1</b><small><i />只查询真实结构化指标</small></div></div><button onClick={() => setMessages([])}>↻</button></div><div className="engine-strip"><span><i>1</i>识别指标</span><b>→</b><span><i>2</i>查询 PostgreSQL</span><b>→</b><span><i>3</i>返回页码</span></div><div className="chat-body"><div className="ai-message"><span>V1</span><div><p>{selected.metrics.length ? `已载入${selected.company_name}这份财报的 ${selected.metrics.length} 个真实指标。可以询问营收、归母净利润、每股收益或净资产收益率。` : '这份财报尚未产出结构化指标，目前不提供模拟回答。'}</p></div></div>{messages.map((message,index) => message.role === 'user' ? <div className="user-message" key={index}>{message.text}</div> : <div className="ai-answer" key={index}><div className="answer-source-tabs"><span className="data">PostgreSQL 数据</span><span className="calc">确定性格式化</span></div><p>{message.text}</p></div>)}<div className="prompt-title">可查询</div>{metricOrder.map((name) => <button className="prompt" disabled={!selected.metrics.some((item) => item.metric === name)} key={name} onClick={() => answerQuestion(`${metricLabels[name]}是多少？`)}>{metricLabels[name]}是多少？<span>↗</span></button>)}</div><div className="chat-input"><div><textarea aria-label="查询财报指标" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); answerQuestion(question); } }} placeholder="例如：营业收入是多少？" rows={2}/><button aria-label="发送" onClick={() => answerQuestion(question)}>↑</button></div><small>原因分析、同行对比与 RAG 尚未启用</small></div></aside>
+      <aside className="ai-panel advanced-ai"><div className="ai-head"><div><span>数</span><div><b>财报数据助手 V1.1</b><small><i />结构化数据 + 原文证据检索</small></div></div><button onClick={() => setMessages([])}>↻</button></div><div className="engine-strip"><span><i>1</i>识别指标</span><b>→</b><span><i>2</i>检索原文</span><b>→</b><span><i>3</i>返回页码</span></div><div className="chat-body"><div className="ai-message"><span>V1</span><div><p>{selected.metrics.length ? `已载入${selected.company_name}这份财报的 ${selected.metrics.length} 个真实指标。可查询核心指标，或追问“管理层如何解释利润变化”等原文问题。` : '这份财报尚未产出结构化指标，目前不提供模拟回答。'}</p></div></div>{messages.map((message,index) => message.role === 'user' ? <div className="user-message" key={index}>{message.text}</div> : <div className="ai-answer" key={index}><div className="answer-source-tabs"><span className="data">结构化数据 / 原文证据</span><span className="calc">可追溯回答</span></div><p>{message.text}</p></div>)}<div className="prompt-title">可查询</div>{metricOrder.map((name) => <button className="prompt" disabled={!selected.metrics.some((item) => item.metric === name)} key={name} onClick={() => answerQuestion(`${metricLabels[name]}是多少？`)}>{metricLabels[name]}是多少？<span>↗</span></button>)}</div><div className="chat-input"><div><textarea aria-label="查询财报指标" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void answerQuestion(question); } }} placeholder="例如：管理层如何解释利润变化？" rows={2}/><button aria-label="发送" onClick={() => void answerQuestion(question)}>↑</button></div><small>回答仅使用数据库指标与财报原文证据，不提供投资建议</small></div></aside>
     </div> : <section className="lane-page"><div className="honest-empty"><b>暂无可用公告</b><p>请等待真实数据管道完成首次运行。</p></div></section>}
 
     {selectedMetric && selected && <div className="drawer-backdrop" onClick={() => setSelectedMetric(null)}><aside className="evidence-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><div><span>REAL DATA EVIDENCE</span><h2>{metricLabels[selectedMetric.metric]}</h2></div><button onClick={() => setSelectedMetric(null)}>×</button></div><div className="evidence-summary"><span>已入库数值</span><strong>{metricValue(selectedMetric)}</strong><small>解析置信度 {Math.round(selectedMetric.confidence * 100)}% · {selectedMetric.verified ? '已复核' : '待人工复核'}</small></div><ol className="evidence-layers"><li><i className="raw">1</i><div><span>公告来源</span><h3>{sourceName(selected.source)}官方公告</h3><p>{selected.title}</p></div></li><li><i className="cal">2</i><div><span>原始字段</span><h3>{selectedMetric.source_label ?? metricLabels[selectedMetric.metric]}</h3><p>原始入库值：{selectedMetric.value}；原始单位：{selectedMetric.unit}</p></div></li><li><i className="source">3</i><div><span>财报位置</span><h3>第 {selectedMetric.source_page ?? '—'} 页</h3><p>点击下方按钮打开归档 PDF 或官方原文进行人工核验。</p><button className="primary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf`, '_blank', 'noopener,noreferrer')}>打开财报原文 ↗</button></div></li></ol><div className="drawer-foot"><span>报告期 {selectedMetric.period} · 数据状态 {reportState?.label}</span></div></aside></div>}

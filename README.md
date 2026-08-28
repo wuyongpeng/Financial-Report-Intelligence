@@ -17,7 +17,7 @@
 
 ## 在 Ubuntu VM 启动
 
-前提：安装 Docker Engine 和 Docker Compose Plugin，并在云安全组/防火墙放行 TCP 80。
+前提：安装 Docker Engine 和 Docker Compose Plugin，并在云安全组/防火墙放行 TCP 80、443。
 
 ```bash
 git clone git@github.com:wuyongpeng/Financial-Report-Intelligence.git
@@ -25,7 +25,7 @@ cd Financial-Report-Intelligence
 cp .env.example .env
 ```
 
-编辑 `.env`，至少替换 `POSTGRES_PASSWORD` 和 `INTERNAL_INGEST_TOKEN` 为长随机值；随后启动：
+编辑 `.env`，至少替换 `POSTGRES_PASSWORD`、`INTERNAL_INGEST_TOKEN`、`ADMIN_PASSWORD` 和 `ADMIN_SESSION_SECRET` 为长随机值；随后启动：
 
 ```bash
 mkdir -p data/postgres data/reports
@@ -43,6 +43,8 @@ curl http://127.0.0.1/api/reports?limit=10
 
 浏览器访问 `http://<VM公网IP>/`。列表整行进入详情页；只有 `PDF ↗` 打开 PDF 原文。Worker 会在启动时先跑一轮，之后每 10 分钟只增量处理未入库公告和失败/待解析项。
 
+管理员在财报详情点击“管理员复核上线”，首次操作输入 `.env` 的 `ADMIN_PASSWORD`。系统会将四项指标标为已复核、记录复核事件并正式上线。升级到本版后，Worker 会按小批次为历史已解析 PDF 补建原文检索索引。
+
 ## 运行与排障
 
 ```bash
@@ -51,7 +53,7 @@ docker compose restart worker
 docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select status, count(*) from announcements group by status;"
 ```
 
-如果某个公开源短暂限流或变更格式，Worker 会保留失败原因并继续处理其他源；不要通过提高频率或伪造浏览器特征来规避限制。生产建议为域名配置 HTTPS（将 `caddy/Caddyfile` 的 `:80` 换为你的域名后，Caddy 可自动申请证书）。
+如果某个公开源短暂限流或变更格式，Worker 会保留失败原因并继续处理其他源；不要通过提高频率或伪造浏览器特征来规避限制。生产时先将域名 A/AAAA 记录指向 VM，再在 `.env` 设置 `DOMAIN=你的域名`，执行 `docker compose up -d`；Caddy 会自动申请并续期 HTTPS 证书。可选设置 `ALERT_WEBHOOK_URL` 接收任务或数据源失败告警。
 
 ## 后续平移边界
 
