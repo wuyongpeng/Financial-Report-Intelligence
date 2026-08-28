@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const cookieName = 'fri_admin_session';
+const appCookieName = 'fri_app_session';
 const maxAgeSeconds = 8 * 60 * 60;
 
 function secret() {
@@ -13,17 +14,60 @@ function sign(payload: string) {
   return createHmac('sha256', secret()).update(payload).digest('base64url');
 }
 
+function appSecret() {
+  const value = process.env.APP_SESSION_SECRET || process.env.ADMIN_SESSION_SECRET;
+  if (!value || value.length < 24) throw new Error('APP_SESSION_SECRET must be at least 24 characters');
+  return value;
+}
+
+function signApp(payload: string) {
+  return createHmac('sha256', appSecret()).update(payload).digest('base64url');
+}
+
 function cookieValue(request: Request) {
   const header = request.headers.get('cookie') ?? '';
   return header.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
 }
 
+function namedCookieValue(request: Request, name: string) {
+  const header = request.headers.get('cookie') ?? '';
+  return header.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1);
+}
+
+function safeEqual(leftValue: string, rightValue: string) {
+  const left = Buffer.from(leftValue);
+  const right = Buffer.from(rightValue);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
 export function validAdminPassword(candidate: string) {
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) return false;
-  const left = Buffer.from(candidate);
-  const right = Buffer.from(expected);
-  return left.length === right.length && timingSafeEqual(left, right);
+  return safeEqual(candidate, expected);
+}
+
+export function validAppCredentials(username: string, password: string) {
+  const expectedUsername = process.env.APP_USERNAME;
+  const expectedPassword = process.env.APP_PASSWORD;
+  return Boolean(expectedUsername && expectedPassword && safeEqual(username, expectedUsername) && safeEqual(password, expectedPassword));
+}
+
+export function createAppCookie(username: string) {
+  const expiresAt = Math.floor(Date.now() / 1000) + maxAgeSeconds;
+  const encodedUsername = Buffer.from(username).toString('base64url');
+  const payload = `user.${encodedUsername}.${expiresAt}`;
+  return `${payload}.${signApp(payload)}`;
+}
+
+export function isAppUser(request: Request) {
+  const value = namedCookieValue(request, appCookieName);
+  if (!value) return false;
+  const [role, encodedUsername, expiresAt, signature] = value.split('.');
+  if (role !== 'user' || !encodedUsername || !expiresAt || !signature || Number(expiresAt) < Math.floor(Date.now() / 1000)) return false;
+  const expectedUsername = process.env.APP_USERNAME;
+  const username = Buffer.from(encodedUsername, 'base64url').toString();
+  const payload = `${role}.${encodedUsername}.${expiresAt}`;
+  return Boolean(expectedUsername && safeEqual(username, expectedUsername) && safeEqual(signature, signApp(payload)));
 }
 
 export function createAdminCookie() {
@@ -51,6 +95,19 @@ export function adminCookieHeader(value: string, expires?: Date) {
     : process.env.NODE_ENV === 'production';
   const secure = secureCookie ? '; Secure' : '';
   return `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${expires ? 0 : maxAgeSeconds}${secure}`;
+}
+
+export function appCookieHeader(value: string, expires?: Date) {
+  const secureCookie = process.env.COOKIE_SECURE
+    ? process.env.COOKIE_SECURE === 'true'
+    : process.env.NODE_ENV === 'production';
+  const secure = secureCookie ? '; Secure' : '';
+  return `${appCookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${expires ? 0 : maxAgeSeconds}${secure}`;
+}
+
+export function requireAppUser(request: Request) {
+  if (!isAppUser(request)) return Response.json({ error: '请先登录' }, { status: 401 });
+  return null;
 }
 
 export function requireAdmin(request: Request) {

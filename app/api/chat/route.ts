@@ -1,4 +1,5 @@
 import { getDb } from '@/lib/db';
+import { requireAppUser } from '@/lib/auth';
 
 type Chunk = { page: number; content: string };
 const encoder = new TextEncoder();
@@ -117,6 +118,8 @@ async function streamGenerate(question: string, evidence: Chunk[], structuredCon
 }
 
 export async function POST(request: Request) {
+  const denied = requireAppUser(request);
+  if (denied) return denied;
   const body = await request.json().catch(() => ({})) as { reportId?: string; question?: string; stream?: boolean };
   if (!body.reportId || !body.question?.trim()) return Response.json({ error: '缺少 reportId 或 question' }, { status: 400 });
   const db = getDb();

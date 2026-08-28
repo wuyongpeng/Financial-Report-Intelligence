@@ -1,6 +1,8 @@
-import { adminCookieHeader, createAdminCookie, validAdminPassword } from '@/lib/auth';
+import { adminCookieHeader, createAdminCookie, requireAppUser, validAdminPassword } from '@/lib/auth';
 
 export async function POST(request: Request) {
+  const denied = requireAppUser(request);
+  if (denied) return denied;
   const body = await request.json().catch(() => ({})) as { password?: string };
   if (!body.password || !validAdminPassword(body.password)) return Response.json({ error: '账号或密码错误' }, { status: 401 });
   try {
@@ -10,6 +12,8 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  const denied = requireAppUser(request);
+  if (denied) return denied;
   return Response.json({ ok: true }, { headers: { 'set-cookie': adminCookieHeader('', new Date(0)) } });
 }

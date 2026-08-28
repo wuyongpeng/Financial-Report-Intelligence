@@ -88,6 +88,11 @@ export default function Home() {
   const [status, setStatus] = useState<StatusPayload>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [authState, setAuthState] = useState<'checking' | 'anonymous' | 'authenticated'>('checking');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState<Metric | null>(null);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -112,6 +117,16 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
+    void fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => response.ok ? response.json() as Promise<{ authenticated?: boolean }> : { authenticated: false })
+      .then((payload) => { if (active) setAuthState(payload.authenticated ? 'authenticated' : 'anonymous'); })
+      .catch(() => { if (active) setAuthState('anonymous'); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (authState !== 'authenticated') return;
+    let active = true;
     async function refresh() {
       try {
         const [reportsResponse, statusResponse] = await Promise.all([fetch('/api/reports?limit=100', { cache: 'no-store' }), fetch('/api/status', { cache: 'no-store' })]);
@@ -133,7 +148,7 @@ export default function Home() {
     void refresh();
     const timer = window.setInterval(refresh, 10 * 60 * 1000);
     return () => { active = false; window.clearInterval(timer); };
-  }, []);
+  }, [authState]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -155,6 +170,22 @@ export default function Home() {
 
   function openReport(report: LiveReport) {
     setSelectedId(report.id); setMessages([]); setReaderOpen(false); setView('report'); window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function loginApp() {
+    if (!loginUsername || !loginPassword) { setLoginError('请输入账号和密码。'); return; }
+    setLoginSubmitting(true); setLoginError('');
+    try {
+      const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: loginUsername, password: loginPassword }) });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) { setLoginError(payload.error ?? '登录失败，请稍后重试。'); return; }
+      setLoginPassword(''); setAuthState('authenticated');
+    } catch { setLoginError('网络或服务暂时不可用，请稍后重试。'); } finally { setLoginSubmitting(false); }
+  }
+
+  async function logoutApp() {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+    setReports([]); setSelectedId(null); setAuthState('anonymous'); setView('lane');
   }
 
   function approveReport() {
@@ -234,11 +265,13 @@ export default function Home() {
   const peerRows = [...new Map(analysis.peers?.filter((item) => item.metric === peerMetric).map((item) => [item.code, item]) ?? []).values()].sort((a, b) => b.value - a.value).slice(0, 8);
   const peerMax = Math.max(...peerRows.map((item) => Math.abs(item.value)), 1);
 
+  if (authState !== 'authenticated') return <main className="login-shell"><section className="login-card"><div className="login-mark">财</div><span className="section-kicker">FINANCIAL REPORT INTELLIGENCE</span><h1>财报智析台</h1><p>{authState === 'checking' ? '正在验证访问权限…' : '登录后访问财报绿色通道、研究分析与原文证据。'}</p>{authState === 'anonymous' && <form onSubmit={(event) => { event.preventDefault(); void loginApp(); }}><label>账号<input autoFocus autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} /></label><label>密码<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label>{loginError && <small className="login-error">{loginError}</small>}<button className="primary login-submit" disabled={loginSubmitting} type="submit">{loginSubmitting ? '正在登录…' : '登录进入系统'}</button></form>}<small className="login-note">账号与密码由部署环境配置，不在浏览器保存。</small></section></main>;
+
   return <main className="app-shell">
     <header className="topbar">
       <button className="brand plain-button" onClick={() => setView('lane')}><span className="brand-mark">财</span><strong>财报智析台</strong><span className="beta">V1</span></button>
       <nav className="main-nav"><button className={view === 'lane' ? 'active' : ''} onClick={() => setView('lane')}>财报绿色通道</button><button className={view === 'report' ? 'active' : ''} onClick={() => selected && setView('report')}>财报详情</button><button disabled>数据复核 · 下一版</button></nav>
-      <div className="top-actions"><span className="status-pill"><i />{loading ? '正在读取真实数据' : `${reports.length} 份真实公告 · ${parsedReports.length} 份已解析`}</span><button className="profile">研</button></div>
+      <div className="top-actions"><span className="status-pill"><i />{loading ? '正在读取真实数据' : `${reports.length} 份真实公告 · ${parsedReports.length} 份已解析`}</span><button className="profile" title="退出登录" onClick={() => void logoutApp()}>退</button></div>
     </header>
 
     {view === 'lane' ? <section className="lane-page">

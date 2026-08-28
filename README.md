@@ -27,7 +27,7 @@ cd Financial-Report-Intelligence
 cp .env.example .env
 ```
 
-编辑 `.env`，至少替换 `POSTGRES_PASSWORD`、`INTERNAL_INGEST_TOKEN`、`ADMIN_PASSWORD` 和 `ADMIN_SESSION_SECRET` 为长随机值；随后启动：
+编辑 `.env`，至少替换 `POSTGRES_PASSWORD`、`INTERNAL_INGEST_TOKEN`、`APP_USERNAME`、`APP_PASSWORD`、`APP_SESSION_SECRET`、`ADMIN_PASSWORD` 和 `ADMIN_SESSION_SECRET` 为长随机值；随后启动：
 
 ```bash
 mkdir -p data/postgres data/reports
@@ -43,7 +43,7 @@ curl http://127.0.0.1/api/status
 curl http://127.0.0.1/api/reports?limit=10
 ```
 
-浏览器访问 `http://<VM公网IP>/`。列表整行进入详情页；只有 `PDF ↗` 打开 PDF 原文。Worker 会在启动时先跑一轮，之后每 10 分钟只增量处理未入库公告和失败/待解析项。
+浏览器访问 `http://<VM公网IP>/`，先使用 `.env` 中的 `APP_USERNAME` 和 `APP_PASSWORD` 登录。列表整行进入详情页；只有 `PDF ↗` 打开 PDF 原文。Worker 会在启动时先跑一轮，之后每 10 分钟只增量处理未入库公告和失败/待解析项。
 
 管理员在财报详情点击“管理员复核上线”，首次操作输入 `.env` 的 `ADMIN_PASSWORD`。系统会将四项指标标为已复核、记录复核事件并正式上线。升级到本版后，Worker 会按小批次为历史已解析 PDF 补建原文检索索引。
 

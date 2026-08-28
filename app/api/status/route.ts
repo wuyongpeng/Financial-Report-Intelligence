@@ -1,10 +1,13 @@
 import companies from '@/data/companies.json';
 import { getDb } from '@/lib/db';
 import { bootstrapLiveData } from '@/lib/ingest';
+import { requireAppUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = requireAppUser(request);
+  if (denied) return denied;
   try {
     const db = getDb();
     let [counts] = await db<Array<{ reports: number; parsed: number }>>`

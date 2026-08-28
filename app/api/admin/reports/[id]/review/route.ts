@@ -1,7 +1,9 @@
-import { requireAdmin } from '@/lib/auth';
+import { requireAdmin, requireAppUser } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const appDenied = requireAppUser(request);
+  if (appDenied) return appDenied;
   const denied = requireAdmin(request);
   if (denied) return denied;
   const { id } = await context.params;

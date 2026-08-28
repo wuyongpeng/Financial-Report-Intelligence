@@ -1,4 +1,5 @@
 import { getDb } from '@/lib/db';
+import { requireAppUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -6,6 +7,8 @@ type ReportRow = Record<string, unknown> & { id: string };
 type MetricRow = Record<string, unknown> & { announcement_id: string };
 
 export async function GET(request: Request) {
+  const denied = requireAppUser(request);
+  if (denied) return denied;
   const url = new URL(request.url);
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50), 1), 100);
   const code = url.searchParams.get('code');

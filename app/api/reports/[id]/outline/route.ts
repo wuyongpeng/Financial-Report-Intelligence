@@ -1,9 +1,12 @@
 import { getDb } from '@/lib/db';
 import { buildOutline } from '@/lib/outline';
+import { requireAppUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const denied = requireAppUser(request);
+  if (denied) return denied;
   const { id } = await context.params;
   const db = getDb();
   const chunks = await db<Array<{ page: number; content: string }>>`
