@@ -190,6 +190,37 @@ button:disabled {
   margin-top: 15px;
 }
 
+.evidence-cards {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.evidence-cards button {
+  background: #f8faff;
+  border: 1px solid #dfe8f6;
+  border-radius: 8px;
+  color: #526176;
+  min-width: 160px;
+  padding: 10px;
+  text-align: left;
+}
+
+.evidence-cards button:hover, .evidence-cards button.active {
+  background: #edf4ff;
+  border-color: #91b8f4;
+}
+
+.evidence-cards span, .evidence-cards b, .evidence-cards small {
+  display: block;
+}
+
+.evidence-cards span { color: #3670d4; font-size: 8px; }
+.evidence-cards b { font-size: 10px; line-height: 1.45; margin: 5px 0 3px; }
+.evidence-cards small { color: #8894a6; font-size: 8px; }
+
 .outline-nav {
   background: #f7f9fc;
   border: 1px solid #e8edf4;
@@ -294,6 +325,20 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.reader-page-text mark, .reader-excerpt mark {
+  background: #ffe78d;
+  border-radius: 2px;
+  color: inherit;
+  padding: 1px 2px;
+}
+
+.reader-hint {
+  color: #8b96a6;
+  font-size: 8px;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+
 .pdf-frame {
   border: 1px solid #dfe5ed;
   border-radius: 7px;
@@ -382,6 +427,14 @@ button:disabled {
 
   .reader-grid {
     grid-template-columns: 1fr;
+  }
+
+  .evidence-cards {
+    display: flex;
+  }
+
+  .evidence-cards button {
+    flex: 0 0 190px;
   }
 
   .outline-nav {

@@ -6,6 +6,7 @@ export type OutlineSection = {
   page: number;
   endPage: number;
   excerpt: string;
+  highlight: string;
   source: 'detected' | 'standard';
 };
 
@@ -34,7 +35,7 @@ export function buildOutline(chunks: ReportChunk[]): OutlineSection[] {
     const hit = chunks.find((chunk) => rule.terms.some((term) => chunk.content.includes(term)));
     if (!hit) continue;
     const term = rule.terms.find((item) => hit.content.includes(item)) ?? rule.title;
-    output.push({ id: rule.id, title: rule.title, level: 1, page: hit.page, endPage: hit.page, excerpt: cleanExcerpt(hit.content, term), source: 'standard' });
+    output.push({ id: rule.id, title: rule.title, level: 1, page: hit.page, endPage: hit.page, excerpt: cleanExcerpt(hit.content, term), highlight: term, source: 'standard' });
   }
   // Annual reports commonly contain numbered "第X节" headings. Preserve a
   // limited number as a second-level navigation aid, without inventing names.
@@ -43,7 +44,7 @@ export function buildOutline(chunks: ReportChunk[]): OutlineSection[] {
     if (!match) continue;
     const title = `第${match[0].split('第')[1]}`.replace(/\s+/g, ' ').trim();
     if (output.some((item) => item.page === chunk.page || item.title.includes(title))) continue;
-    output.push({ id: `detected-${chunk.page}`, title, level: 2, page: chunk.page, endPage: chunk.page, excerpt: cleanExcerpt(chunk.content, match[0]), source: 'detected' });
+    output.push({ id: `detected-${chunk.page}`, title, level: 2, page: chunk.page, endPage: chunk.page, excerpt: cleanExcerpt(chunk.content, match[0]), highlight: match[0], source: 'detected' });
     if (output.filter((item) => item.source === 'detected').length >= 12) break;
   }
   return output.sort((a, b) => a.page - b.page || a.level - b.level).map((item, index, all) => ({
