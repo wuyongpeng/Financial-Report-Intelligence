@@ -175,6 +175,132 @@ button:disabled {
   color: #07875f;
 }
 
+.report-reader {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  margin: 14px 0;
+  padding: 19px 20px;
+}
+
+.reader-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 230px minmax(0, 1fr);
+  margin-top: 15px;
+}
+
+.outline-nav {
+  background: #f7f9fc;
+  border: 1px solid #e8edf4;
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 700px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.outline-nav button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #556277;
+  padding: 9px;
+  text-align: left;
+}
+
+.outline-nav button:hover, .outline-nav button.active {
+  background: #eaf2ff;
+  color: #1d61ce;
+}
+
+.outline-nav button span, .outline-nav button b {
+  display: block;
+}
+
+.outline-nav button span {
+  font-size: 8px;
+  margin-bottom: 3px;
+}
+
+.outline-nav button b {
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.outline-nav .page-jump {
+  border: 1px solid #e2e7ef;
+  display: inline-block;
+  font-size: 8px;
+  margin-top: 2px;
+  padding: 6px 7px;
+}
+
+.outline-nav p {
+  color: #778396;
+  font-size: 9px;
+  line-height: 1.6;
+  padding: 7px;
+}
+
+.reader-content {
+  min-width: 0;
+}
+
+.reader-content-head {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.reader-content-head span, .reader-content-head small {
+  color: #8390a4;
+  display: block;
+  font-size: 8px;
+}
+
+.reader-content-head h3 {
+  font-size: 15px;
+  margin: 5px 0;
+}
+
+.reader-excerpt {
+  background: #f4f8ff;
+  border-left: 3px solid #3978e6;
+  border-radius: 0 7px 7px 0;
+  color: #536178;
+  font-size: 10px;
+  line-height: 1.7;
+  margin: 14px 0 10px;
+  padding: 10px 12px;
+}
+
+.reader-excerpt b { color: #2867d5; font-size: 9px; }
+.reader-excerpt p { margin: 5px 0 0; }
+
+.reader-page-text {
+  border: 1px solid #edf0f4;
+  border-radius: 7px;
+  color: #5d697b;
+  font-size: 10px;
+  line-height: 1.75;
+  margin: 0 0 10px;
+  max-height: 130px;
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.pdf-frame {
+  border: 1px solid #dfe5ed;
+  border-radius: 7px;
+  height: 540px;
+  width: 100%;
+}
+
 @media (max-width: 640px) {
   .pending-detail {
     display: block;
@@ -188,5 +314,25 @@ button:disabled {
 
   .pending-steps {
     flex-wrap: wrap;
+  }
+
+  .reader-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .outline-nav {
+    max-height: 260px;
+  }
+
+  .reader-content-head {
+    display: block;
+  }
+
+  .reader-content-head button {
+    margin-top: 10px;
+  }
+
+  .pdf-frame {
+    height: 420px;
   }
 }
