@@ -15,6 +15,8 @@
 - 解析：PDF 文本/表格解析后以规则提取营收、归母净利润、EPS、ROE，数值、字段名和页码存库。
 - 存储：`db` 服务的数据在 `data/postgres`，PDF 在 `data/reports`。后续把这两个适配层换为公司 PostgreSQL/S3 即可，不影响页面和采集流程。
 
+评委操作路径见 [使用说明](docs/user-guide.md)，实现、数据流与边界见 [技术架构说明](docs/technical-architecture.md)。
+
 ## 在 Ubuntu VM 启动
 
 前提：安装 Docker Engine 和 Docker Compose Plugin，并在云安全组/防火墙放行 TCP 80、443。

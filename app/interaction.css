@@ -301,6 +301,70 @@ button:disabled {
   width: 100%;
 }
 
+.chart-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 13px;
+}
+
+.chart-tabs button {
+  background: #f5f7fa;
+  border: 1px solid #e0e6ee;
+  border-radius: 6px;
+  color: #6a7689;
+  font-size: 9px;
+  padding: 6px 9px;
+}
+
+.chart-tabs button.active {
+  background: #eaf2ff;
+  border-color: #a8c5f4;
+  color: #1f63cf;
+  font-weight: 700;
+}
+
+.trend-figure {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.trend-figure svg {
+  display: block;
+  min-width: 520px;
+  width: 100%;
+}
+
+.chart-axis { stroke: #cfd7e2; stroke-width: 1; }
+.chart-grid { stroke: #edf1f5; stroke-dasharray: 4 4; stroke-width: 1; }
+.trend-line { fill: none; stroke: #286ce0; stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; }
+.trend-dot { fill: #fff; stroke: #286ce0; stroke-width: 3; }
+.chart-value { fill: #2456a5; font-size: 10px; font-weight: 700; }
+.chart-label { fill: #8994a5; font-size: 9px; }
+
+.peer-bars {
+  display: grid;
+  gap: 9px;
+  margin-top: 15px;
+}
+
+.peer-bars > div {
+  align-items: center;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 18px 100px minmax(80px, 1fr) 70px;
+}
+
+.peer-bars > div > span { color: #99a3b2; font-size: 9px; }
+.peer-bars > div > b { color: #4f5d72; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peer-bars > div > b small { color: #9aa5b4; display: block; font-size: 8px; font-weight: 400; margin-top: 2px; }
+.peer-bars > div > i { background: #edf1f6; border-radius: 99px; display: block; height: 9px; overflow: hidden; }
+.peer-bars > div > i em { background: #9bb9ed; border-radius: 99px; display: block; height: 100%; }
+.peer-bars > div > strong { color: #59667a; font-size: 10px; text-align: right; }
+.peer-bars > div.self > b, .peer-bars > div.self > strong { color: #1e64d2; }
+.peer-bars > div.self > i em { background: #276ee2; }
+
+.mobile-pdf-link { display: none; text-decoration: none; }
+
 @media (max-width: 640px) {
   .pending-detail {
     display: block;
@@ -335,4 +399,15 @@ button:disabled {
   .pdf-frame {
     height: 420px;
   }
+
+  .peer-bars > div {
+    grid-template-columns: 16px 82px minmax(52px, 1fr) 58px;
+    gap: 6px;
+  }
+
+  .peer-bars > div > strong { font-size: 9px; }
+
+  .mobile-pdf-link { display: inline-block; margin-bottom: 10px; }
+
+  .pdf-frame { display: none; }
 }
