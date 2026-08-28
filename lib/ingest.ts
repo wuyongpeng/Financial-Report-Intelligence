@@ -115,7 +115,12 @@ export async function processBacklog(options: { downloadLimit?: number; parseLim
     WHERE status IN ('discovered', 'download_failed', 'downloaded')
       OR (status IN ('review', 'online', 'parse_partial') AND pdf_key IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM report_chunks WHERE report_chunks.announcement_id=announcements.id))
-    ORDER BY CASE status WHEN 'downloaded' THEN 0 WHEN 'discovered' THEN 1 WHEN 'review' THEN 2 WHEN 'online' THEN 3 ELSE 4 END, published_at DESC
+    ORDER BY CASE
+      WHEN status='downloaded' THEN 0
+      WHEN status IN ('review', 'online', 'parse_partial') THEN 1
+      WHEN status='discovered' THEN 2
+      ELSE 3
+    END, published_at DESC
     LIMIT 100
   `;
 
