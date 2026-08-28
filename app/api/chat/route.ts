@@ -10,15 +10,16 @@ function score(query: string, content: string) {
 async function optionalGenerate(question: string, evidence: Chunk[], structuredContext = '') {
   const baseUrl = process.env.LLM_BASE_URL;
   const model = process.env.LLM_MODEL;
+  const maxTokens = Number(process.env.LLM_MAX_TOKENS ?? 1600);
   if (!baseUrl || !model || (!evidence.length && !structuredContext)) return { answer: null, status: 'not-attempted' as const };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
-    console.info('[chat] LLM request', { model, evidenceCount: evidence.length, hasStructuredContext: Boolean(structuredContext) });
+    console.info('[chat] LLM request', { model, evidenceCount: evidence.length, hasStructuredContext: Boolean(structuredContext), maxTokens });
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST', signal: controller.signal,
       headers: { 'content-type': 'application/json', ...(process.env.LLM_API_KEY ? { authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}) },
-      body: JSON.stringify({ model, temperature: 0, max_tokens: 500, messages: [
+      body: JSON.stringify({ model, temperature: 0, max_tokens: maxTokens, messages: [
         { role: 'system', content: '你是严谨的财报助手。只能依据给定结构化上下文和财报原文回答；无法确认时明确说明。原文结论标注【第x页】；同行名单必须说明仅限当前覆盖范围。不提供投资建议。' },
         { role: 'user', content: `问题：${question}\n\n结构化上下文：\n${structuredContext || '无'}\n\n财报原文证据：\n${evidence.map((item) => `【第${item.page}页】${item.content}`).join('\n\n') || '无'}` },
       ] }),
