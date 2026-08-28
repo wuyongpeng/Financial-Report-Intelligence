@@ -1,5 +1,7 @@
 # DOMAIN defaults to :80 for IP-based testing. Set it to a DNS name to enable automatic HTTPS.
 {$DOMAIN} {
   encode zstd gzip
-  reverse_proxy app:3000
+  reverse_proxy app:3000 {
+    flush_interval -1
+  }
 }
