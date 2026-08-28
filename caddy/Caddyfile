@@ -1,5 +1,5 @@
-# Set DOMAIN to the DNS name pointing to this VM. Caddy then obtains and renews HTTPS automatically.
-{$DOMAIN:localhost} {
+# DOMAIN defaults to :80 for IP-based testing. Set it to a DNS name to enable automatic HTTPS.
+{$DOMAIN} {
   encode zstd gzip
   reverse_proxy app:3000
 }
