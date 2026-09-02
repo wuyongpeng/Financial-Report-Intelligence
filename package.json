@@ -11,6 +11,8 @@
     "start": "next start",
     "worker": "tsx scripts/worker.ts",
     "backfill": "node scripts/backfill-snapshot.mjs",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "audit:p0": "node --import tsx scripts/p0-audit.ts",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {

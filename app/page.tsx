@@ -15,7 +15,8 @@ type LiveReport = {
 };
 type Health = { source: string; last_success_at?: string; last_failure_at?: string; last_count?: number; last_error?: string };
 type StatusPayload = { counts?: { reports: number; parsed: number | null }; health?: Health[]; latestRun?: { started_at: string; finished_at: string | null; status: string } | null };
-type ChatMessage = { role: 'user' | 'assistant'; text: string };
+type Citation = { page: number; quote: string };
+type ChatMessage = { role: 'user' | 'assistant'; text: string; citations?: Citation[] };
 type Analysis = { period?: string; industry?: string; peers?: Array<{ code: string; company_name: string; metric: string; value: number; unit: string }>; anomalies?: Array<{ level: 'risk' | 'info'; title: string; detail: string }> };
 type OutlineSection = { id: string; title: string; level: 1 | 2; page: number; endPage: number; excerpt: string; highlight: string; source: 'detected' | 'standard' };
 type OutlinePayload = { indexedPages: number; outline: OutlineSection[]; pages: Array<{ page: number; content: string }> };
@@ -84,11 +85,13 @@ export default function Home() {
   const [view, setView] = useState<View>('lane');
   const [reports, setReports] = useState<LiveReport[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [reportFilter, setReportFilter] = useState<ReportFilter>('all');
+  const [reportFilter, setReportFilter] = useState<ReportFilter>('ready');
   const [status, setStatus] = useState<StatusPayload>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [authState, setAuthState] = useState<'checking' | 'anonymous' | 'authenticated'>('checking');
+  const [authRole, setAuthRole] = useState<'user' | 'guest' | null>(null);
+  const [demoEnabled, setDemoEnabled] = useState(false);
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -108,18 +111,27 @@ export default function Home() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
   const [adminSubmitting, setAdminSubmitting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [demoSubmitting, setDemoSubmitting] = useState(false);
 
   const selected = reports.find((item) => item.id === selectedId) ?? reports.find((item) => item.metrics.length > 0) ?? reports[0];
   const parsedReports = reports.filter((item) => item.metrics.length > 0);
   const readyReports = reports.filter((item) => item.metrics.length === 4);
-  const filteredReports = reports.filter((item) => reportFilter === 'all' || (reportFilter === 'ready' ? item.metrics.length > 0 : item.metrics.length === 0));
+  const filteredReports = reports.filter((item) => {
+    const matchesStatus = reportFilter === 'all' || (reportFilter === 'ready' ? item.metrics.length === 4 : item.metrics.length < 4);
+    const keyword = searchQuery.trim().toLowerCase();
+    return matchesStatus && (!keyword || `${item.company_name} ${item.code} ${item.title}`.toLowerCase().includes(keyword));
+  });
+  const featuredReport = reports.find((item) => item.status === 'online' && item.metrics.length === 4)
+    ?? reports.find((item) => item.metrics.length === 4)
+    ?? reports.find((item) => item.metrics.length > 0);
   const companyHistory = useMemo(() => reports.filter((item) => item.code === selected?.code && item.metrics.length > 0).sort((a, b) => Date.parse(a.published_at) - Date.parse(b.published_at)), [reports, selected?.code]);
 
   useEffect(() => {
     let active = true;
     void fetch('/api/auth/session', { cache: 'no-store' })
-      .then(async (response) => response.ok ? response.json() as Promise<{ authenticated?: boolean }> : { authenticated: false })
-      .then((payload) => { if (active) setAuthState(payload.authenticated ? 'authenticated' : 'anonymous'); })
+      .then(async (response): Promise<{ authenticated?: boolean; role?: 'user' | 'guest' | null; demoEnabled?: boolean }> => response.ok ? response.json() : { authenticated: false, role: null, demoEnabled: false })
+      .then((payload) => { if (active) { setAuthRole(payload.role ?? null); setDemoEnabled(Boolean(payload.demoEnabled)); setAuthState(payload.authenticated ? 'authenticated' : 'anonymous'); } })
       .catch(() => { if (active) setAuthState('anonymous'); });
     return () => { active = false; };
   }, []);
@@ -159,16 +171,13 @@ export default function Home() {
 
   useEffect(() => {
     if (!selectedId) return;
-    setOutlineData({ indexedPages: 0, outline: [], pages: [] });
-    setReaderPage(null);
-    setReaderHighlight('');
-    setPdfPreviewOpen(false);
     void fetch(`/api/reports/${encodeURIComponent(selectedId)}/outline`, { cache: 'no-store' })
       .then(async (response) => response.ok ? response.json() as Promise<OutlinePayload> : { indexedPages: 0, outline: [], pages: [] })
       .then(setOutlineData).catch(() => setOutlineData({ indexedPages: 0, outline: [], pages: [] }));
   }, [selectedId]);
 
   function openReport(report: LiveReport) {
+    setOutlineData({ indexedPages: 0, outline: [], pages: [] }); setReaderPage(null); setReaderHighlight(''); setPdfPreviewOpen(false);
     setSelectedId(report.id); setMessages([]); setReaderOpen(false); setView('report'); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -179,13 +188,31 @@ export default function Home() {
       const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: loginUsername, password: loginPassword }) });
       const payload = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) { setLoginError(payload.error ?? '登录失败，请稍后重试。'); return; }
-      setLoginPassword(''); setAuthState('authenticated');
+      setLoginPassword(''); setAuthRole('user'); setAuthState('authenticated');
     } catch { setLoginError('网络或服务暂时不可用，请稍后重试。'); } finally { setLoginSubmitting(false); }
+  }
+
+  async function enterDemo() {
+    setDemoSubmitting(true); setLoginError('');
+    try {
+      const response = await fetch('/api/auth/demo', { method: 'POST' });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) { setLoginError(payload.error ?? '体验入口暂时不可用。'); return; }
+      setAuthRole('guest'); setAuthState('authenticated');
+    } catch { setLoginError('网络或服务暂时不可用，请稍后重试。'); } finally { setDemoSubmitting(false); }
   }
 
   async function logoutApp() {
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
-    setReports([]); setSelectedId(null); setAuthState('anonymous'); setView('lane');
+    setReports([]); setSelectedId(null); setAuthRole(null); setAuthState('anonymous'); setView('lane');
+  }
+
+  function openEvidenceCitation(citation: Citation) {
+    setReaderOpen(true);
+    setReaderPage(citation.page);
+    setReaderHighlight(citation.quote);
+    setPdfPreviewOpen(false);
+    window.setTimeout(() => document.getElementById('report-reader')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   }
 
   function approveReport() {
@@ -232,15 +259,21 @@ export default function Home() {
         for (const event of events) {
           const raw = event.split('\n').find((line) => line.startsWith('data: '))?.slice(6);
           if (!raw || raw === '[DONE]') continue;
-          try { answer += (JSON.parse(raw) as { content?: string }).content ?? ''; } catch { /* ignore malformed event */ }
-          flushSync(() => setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { role: 'assistant', text: answer }; return next; }));
+          try {
+            const payload = JSON.parse(raw) as { content?: string; evidence?: Citation[] };
+            answer += payload.content ?? '';
+            if (payload.evidence?.length) {
+              flushSync(() => setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { ...next[index], citations: payload.evidence }; return next; }));
+            }
+          } catch { /* ignore malformed event */ }
+          flushSync(() => setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { ...next[index], role: 'assistant', text: answer }; return next; }));
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
         }
         if (done) break;
       }
       if (!answer) answer = '未返回可核验答案。';
     } catch { answer = 'AI 问答暂时不可用，请稍后重试。'; }
-    setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { role: 'assistant', text: answer }; return next; });
+    setMessages((items) => { const next = [...items]; const index = next.length - 1; if (next[index]?.role === 'assistant') next[index] = { ...next[index], text: answer }; return next; });
   }
 
   const sourceHealth = status.health ?? [];
@@ -264,26 +297,27 @@ export default function Home() {
   }).join(' ');
   const peerRows = [...new Map(analysis.peers?.filter((item) => item.metric === peerMetric).map((item) => [item.code, item]) ?? []).values()].sort((a, b) => b.value - a.value).slice(0, 8);
   const peerMax = Math.max(...peerRows.map((item) => Math.abs(item.value)), 1);
+  const adminMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('admin') === '1';
 
-  if (authState !== 'authenticated') return <main className="login-shell"><section className="login-card"><div className="login-mark">财</div><span className="section-kicker">FINANCIAL REPORT INTELLIGENCE</span><h1>财报智析台</h1><p>{authState === 'checking' ? '正在验证访问权限…' : '登录后访问财报绿色通道、研究分析与原文证据。'}</p>{authState === 'anonymous' && <form onSubmit={(event) => { event.preventDefault(); void loginApp(); }}><label>账号<input autoFocus autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} /></label><label>密码<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label>{loginError && <small className="login-error">{loginError}</small>}<button className="primary login-submit" disabled={loginSubmitting} type="submit">{loginSubmitting ? '正在登录…' : '登录进入系统'}</button></form>}<small className="login-note">账号与密码由部署环境配置，不在浏览器保存。</small></section></main>;
+  if (authState !== 'authenticated') return <main className="login-shell"><section className="login-card"><div className="login-mark">财</div><span className="section-kicker">FINANCIAL REPORT INTELLIGENCE</span><h1>一眼看懂财报，每个结论都有出处</h1><p>{authState === 'checking' ? '正在准备真实财报数据…' : '查看核心指标、变化趋势和原文证据，并基于同一份财报继续追问。'}</p>{authState === 'anonymous' && <>{demoEnabled && <button className="demo-entry" disabled={demoSubmitting} onClick={() => void enterDemo()}><span>评委一键体验</span><small>{demoSubmitting ? '正在进入…' : '无需账号 · 只读访问 · 推荐完整样本'}</small></button>}<div className="login-divider"><span>或使用项目账号</span></div><form onSubmit={(event) => { event.preventDefault(); void loginApp(); }}><label>账号<input autoFocus={!demoEnabled} autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} /></label><label>密码<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label>{loginError && <small className="login-error">{loginError}</small>}<button className="primary login-submit" disabled={loginSubmitting} type="submit">{loginSubmitting ? '正在登录…' : '登录进入系统'}</button></form></>}<small className="login-note">体验模式仅开放财报阅读和问答，不开放数据复核操作。</small></section></main>;
 
   return <main className="app-shell">
     <header className="topbar">
       <button className="brand plain-button" onClick={() => setView('lane')}><span className="brand-mark">财</span><strong>财报智析台</strong><span className="beta">V1</span></button>
       <nav className="main-nav"><button className={view === 'lane' ? 'active' : ''} onClick={() => setView('lane')}>财报绿色通道</button><button className={view === 'report' ? 'active' : ''} onClick={() => selected && setView('report')}>财报详情</button><button disabled>数据复核 · 下一版</button></nav>
-      <div className="top-actions"><span className="status-pill"><i />{loading ? '正在读取真实数据' : `${reports.length} 份真实公告 · ${parsedReports.length} 份已解析`}</span><button className="profile" title="退出登录" onClick={() => void logoutApp()}>退</button></div>
+      <div className="top-actions"><span className="status-pill"><i />{loading ? '正在读取真实数据' : authRole === 'guest' ? '评委只读体验' : `${parsedReports.length} 份财报可阅读`}</span><button className="profile" title="退出登录" onClick={() => void logoutApp()}>退</button></div>
     </header>
 
     {view === 'lane' ? <section className="lane-page">
-      <div className="lane-hero">
-        <div className="hero-copy"><div className="kicker"><span>LIVE DATA</span> 交易所公告绿色通道</div><h1>所有可见结果，<em>都来自线上数据管道</em></h1><p>直接轮询上交所、深交所与巨潮资讯，按公告标识增量去重。已解析指标展示真实数值和财报页码；尚未解析的数据明确标记状态，不生成演示结论。</p><div className="hero-actions"><button className="primary" disabled={!parsedReports.length} onClick={() => { setReportFilter('ready'); document.getElementById('latest-reports')?.scrollIntoView({ behavior: 'smooth' }); }}>查看已解析财报 <span>→</span></button><button className="secondary" onClick={() => document.getElementById('latest-reports')?.scrollIntoView({ behavior: 'smooth' })}>查看真实公告列表</button></div></div>
-        <div className="hero-proof"><div className="proof-head"><span>线上运行状态</span><b>真实来源 · 增量处理</b></div><ol className="timechain"><li className="complete"><i>✓</i><div><b>10 分钟检查</b><span>独立 Worker 定时执行</span></div></li><li className="complete"><i>✓</i><div><b>SSE + SZSE</b><span>交易所公告主源</span></div></li><li className="complete"><i>✓</i><div><b>CNINFO</b><span>巨潮资讯交叉兜底</span></div></li><li className="live"><i>✓</i><div><b>PostgreSQL + 磁盘</b><span>元数据与 PDF 持久化</span></div></li></ol><div className="proof-result"><span>线上真实公告</span><strong>{reports.length || '—'} 份</strong><small>{parsedReports.length} 份已产生结构化指标</small></div></div>
+      <div className="lane-hero consumer-hero">
+        <div className="hero-copy"><div className="kicker"><span>1 MINUTE</span> 一分钟财报速读</div><h1>先看关键变化，<em>再核验每个结论</em></h1><p>搜索公司或直接进入推荐样本。营业收入、归母净利润、每股收益与 ROE 都可回到财报原页，阅读后还能基于同一份原文继续追问。</p><label className="company-search"><span>⌕</span><input aria-label="搜索公司或股票代码" placeholder="搜索公司、股票代码或报告名称" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} /><button onClick={() => document.getElementById('latest-reports')?.scrollIntoView({ behavior: 'smooth' })}>查找财报</button></label><div className="hero-steps"><span><i>1</i>看指标</span><span><i>2</i>读原文</span><span><i>3</i>追问</span><span><i>4</i>点回证据</span></div></div>
+        <div className="featured-report">{featuredReport ? <><div className="featured-head"><span>推荐完整样本</span><b>{featuredReport.status === 'online' ? '已人工复核' : '四项指标已入库'}</b></div><h2>{featuredReport.company_name}<small>{featuredReport.code} · {reportPeriod(featuredReport)}</small></h2><div className="featured-metrics">{metricOrder.map((name) => { const metric = featuredReport.metrics.find((item) => item.metric === name); return <div key={name}><span>{metricLabels[name]}</span><strong>{metricValue(metric)}</strong></div>; })}</div><button className="featured-cta" onClick={() => openReport(featuredReport)}>开始完整体验 <span>→</span></button><small className="featured-note">指标 → 趋势 → 提纲原文 → 问答证据</small></> : <div className="featured-loading"><b>正在准备推荐财报</b><span>首份四项指标完整的财报入库后会自动出现在这里。</span></div>}</div>
       </div>
       {loadError && <div className="data-error">{loadError}</div>}
       <div className="lane-stats"><article><span>真实公告</span><strong>{reports.length || '—'} <small>份</small></strong><em>来自 PostgreSQL</em></article><article><span>已解析财报</span><strong>{parsedReports.length} <small>份</small></strong><em>{readyReports.length} 份含四项核心指标</em></article><article><span>已提取指标</span><strong>{reports.reduce((sum, item) => sum + item.metrics.length, 0)} <small>条</small></strong><em>每条保留来源页码</em></article><article><span>绿色通道覆盖</span><strong>{coverageCompanies.length} <small>家</small></strong><em>真实公司名单</em></article></div>
 
       <div className="lane-grid" id="latest-reports">
-        <section className="latest-card"><div className="section-head"><div><span className="section-kicker">LIVE REPORTS</span><h2>线上公告与解析状态</h2><p>点击整行进入真实详情；PDF 使用独立原文入口</p></div><div className="filters"><button className={reportFilter === 'all' ? 'active' : ''} onClick={() => setReportFilter('all')}>全部</button><button className={reportFilter === 'ready' ? 'active' : ''} onClick={() => setReportFilter('ready')}>有指标</button><button className={reportFilter === 'pending' ? 'active' : ''} onClick={() => setReportFilter('pending')}>待处理</button></div></div>
+        <section className="latest-card"><div className="section-head"><div><span className="section-kicker">READY TO EXPLORE</span><h2>可完整体验的财报</h2><p>默认只展示四项指标完整的报告，避免误入处理中页面</p></div><div className="filters"><button className={reportFilter === 'ready' ? 'active' : ''} onClick={() => setReportFilter('ready')}>完整体验</button><button className={reportFilter === 'all' ? 'active' : ''} onClick={() => setReportFilter('all')}>全部</button><button className={reportFilter === 'pending' ? 'active' : ''} onClick={() => setReportFilter('pending')}>处理中</button></div></div>
           <div className="report-table"><div className="report-row table-head"><span>公司 / 报告</span><span>官方发布</span><span>公告来源</span><span>发现时间</span><span>原文</span><span>真实状态</span><span /></div>
             {filteredReports.slice(0, 30).map((item, index) => { const meta = statusMeta(item.status, item.metrics.length); return <div className="report-row" role="button" tabIndex={0} key={item.id} onClick={() => openReport(item)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openReport(item); }}><span className="report-company"><i className={`company-logo ${['blue','navy','red','cyan','gold'][index % 5]}`}>{item.company_name.slice(0, 1)}</i><span><b>{item.company_name} <small>{item.code}</small></b><em>{item.title}</em></span></span><span className="time-cell"><b>{dateTime(item.published_at)}</b><small>官方时间</small></span><span className="time-cell"><b>{sourceName(item.source)}</b><small>{item.source}</small></span><span className="time-cell"><b>{dateTime(item.discovered_at)}</b><small>{elapsed(item.published_at, item.discovered_at)}</small></span><span className="time-cell online"><button className="pdf-link" aria-label={`打开${item.company_name}财报 PDF`} onClick={(event) => { event.stopPropagation(); window.open(`/api/reports/${encodeURIComponent(item.id)}/pdf`, '_blank', 'noopener,noreferrer'); }}>PDF ↗</button><small>{item.pdf_key ? '已归档本地磁盘' : '官方地址'}</small></span><span><em className={`signal ${meta.tone}`}>{meta.label} · {item.metrics.length}/4</em></span><span className="row-arrow">›</span></div>; })}
             {!loading && filteredReports.length === 0 && <div className="empty-reports">当前筛选下暂无真实记录</div>}
@@ -294,7 +328,7 @@ export default function Home() {
 
       <section className="coverage-card" id="coverage-50"><div className="section-head"><div><span className="section-kicker">GREEN LANE COVERAGE</span><h2>50 家绿色通道名单</h2><p>覆盖配置真实存在；是否已有公告和指标，以线上公告列表状态为准。</p></div><span className="coverage-count">SSE {coverageCompanies.filter((item) => item.exchange === 'SSE').length} · SZSE {coverageCompanies.filter((item) => item.exchange === 'SZSE').length}</span></div><div className="coverage-grid">{coverageCompanies.map((item) => { const count = reports.filter((report) => report.code === item.code).length; return <div className="coverage-item" key={item.code}><span>{String(item.rank).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.code} · {item.industry}</small></div><i>{count ? `${count} 份公告` : '暂无公告'}</i></div>; })}</div></section>
     </section> : selected ? <div className="report-layout">
-      <section className="report-main"><button className="back-link" onClick={() => setView('lane')}>← 返回财报绿色通道</button><div className="report-titlebar"><div><div className="report-label"><span>{reportState?.label}</span> {sourceName(selected.source)} · {selected.title}</div><h1>{selected.company_name} <small>{selected.code}</small></h1><p>官方发布 {dateTime(selected.published_at)} · 系统发现 {dateTime(selected.discovered_at)} · <b>{selected.metrics.length ? `已入库 ${selected.metrics.length} 个指标` : '尚无结构化指标'}</b></p></div><div>{selected.status !== 'online' && selected.metrics.length > 0 && <button className="secondary" onClick={approveReport}>管理员复核上线</button>}<button className="secondary" onClick={() => { setReaderOpen(true); document.getElementById('report-reader')?.scrollIntoView({ behavior: 'smooth' }); }}>提纲阅读原文</button><button className="primary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf`, '_blank', 'noopener,noreferrer')}>查看原始财报 ↗</button></div></div>
+      <section className="report-main"><button className="back-link" onClick={() => setView('lane')}>← 返回财报绿色通道</button><div className="report-titlebar"><div><div className="report-label"><span>{reportState?.label}</span> {sourceName(selected.source)} · {selected.title}</div><h1>{selected.company_name} <small>{selected.code}</small></h1><p>官方发布 {dateTime(selected.published_at)} · 系统发现 {dateTime(selected.discovered_at)} · <b>{selected.metrics.length ? `已入库 ${selected.metrics.length} 个指标` : '尚无结构化指标'}</b></p></div><div>{adminMode && selected.status !== 'online' && selected.metrics.length > 0 && <button className="secondary" onClick={approveReport}>管理员复核上线</button>}<button className="secondary" onClick={() => { setReaderOpen(true); document.getElementById('report-reader')?.scrollIntoView({ behavior: 'smooth' }); }}>提纲阅读原文</button><button className="primary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf`, '_blank', 'noopener,noreferrer')}>查看原始财报 ↗</button></div></div>
         <div className="detail-speed"><div><span>真实处理状态</span><strong>{reportState?.label}</strong><small>公告至系统发现：{elapsed(selected.published_at, selected.discovered_at)}</small></div><ol>{[['公告发布',selected.published_at],['系统发现',selected.discovered_at],['PDF 下载',selected.downloaded_at],['指标解析',selected.parsed_at],['正式上线',selected.online_at]].map(([label,time]) => <li key={label} className={time ? '' : 'pending'}><i>{time ? '✓' : '○'}</i><span>{label}<br />{dateTime(time)}</span></li>)}</ol></div>
         {readerOpen && <section id="report-reader" className="report-reader">
           <div className="section-head compact"><div><span className="section-kicker">EVIDENCE READER</span><h2>结论与证据阅读</h2><p>先选关心的结论，再定位到可核验的 PDF 页与原文文本。</p></div><button className="secondary" onClick={() => setReaderOpen(false)}>收起阅读器</button></div>
@@ -308,7 +342,7 @@ export default function Home() {
                 {outlineData.pages.slice(0, 18).map((item) => <button className={`page-jump ${item.page === currentReaderPage ? 'active' : ''}`} key={item.page} onClick={() => { setReaderPage(item.page); setReaderHighlight(''); setPdfPreviewOpen(false); }}>第 {item.page} 页</button>)}
               </nav>
               <article className="reader-content">
-                <div className="reader-content-head"><div><span>当前证据 · PDF 第 {currentReaderPage} 页</span><h3>{currentReaderSection?.title ?? `PDF 第 ${currentReaderPage} 页`}</h3><small>该页已建立文本索引，可直接阅读和追问</small></div><button className="secondary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf#page=${currentReaderPage}`, '_blank', 'noopener,noreferrer')}>打开 PDF 第 {currentReaderPage} 页 ↗</button></div>
+                <div className="reader-content-head"><div><span>当前证据 · PDF 第 {currentReaderPage} 页</span><h3>{currentReaderSection?.title ?? `PDF 第 ${currentReaderPage} 页`}</h3><small>该页已建立文本索引，可直接阅读和追问</small></div><div className="reader-actions"><button className="ask-page" onClick={() => void answerQuestion(`请结合第${currentReaderPage}页原文，解释“${currentReaderSection?.title ?? '本页内容'}”的核心信息。`)}>追问本页</button><button className="secondary" onClick={() => window.open(`/api/reports/${encodeURIComponent(selected.id)}/pdf#page=${currentReaderPage}`, '_blank', 'noopener,noreferrer')}>打开 PDF 第 {currentReaderPage} 页 ↗</button></div></div>
                 {currentReaderSection?.excerpt && <div className="reader-excerpt"><b>命中位置</b><p>{highlightedText(currentReaderSection.excerpt, effectiveHighlight)}</p></div>}
                 <section className="reader-source"><div className="reader-source-head"><span>原文证据</span><small>PDF 第 {currentReaderPage} 页 · 提取文本</small></div><div className="reader-page-text">{evidenceParagraphs(currentReaderText ?? '该页文本尚未成功提取。可打开原 PDF 查看排版原文。').map((paragraph, index) => <p key={index}>{highlightedText(paragraph, effectiveHighlight)}</p>)}</div></section>
                 <div className="pdf-proof"><div><b>需要核验原始版式？</b><span>PDF 会直接定位到第 {currentReaderPage} 页。</span></div><button className="secondary" onClick={() => setPdfPreviewOpen((open) => !open)}>{pdfPreviewOpen ? '收起 PDF' : '页内查看 PDF'}</button></div>
@@ -323,7 +357,7 @@ export default function Home() {
         <section className="trend-card real-history peer-visual"><div className="card-head"><div><span className="section-kicker">PEER COMPARISON</span><h3>同行业真实数据对比</h3><p>仅比较绿色通道内、同一报告期、已入库的公司数据。</p></div><span className="coverage-count">{analysis.period ?? '暂无同报告期数据'}</span></div><div className="chart-tabs">{(['roe', 'revenue', 'net_profit'] as const).map((name) => <button className={peerMetric === name ? 'active' : ''} key={name} onClick={() => setPeerMetric(name)}>{metricLabels[name]}</button>)}</div>{peerRows.length ? <div className="peer-bars">{peerRows.map((item, index) => <div className={item.code === selected.code ? 'self' : ''} key={item.code}><span>{index + 1}</span><b>{item.company_name}<small>{item.code}{item.code === selected.code ? ' · 当前公司' : ''}</small></b><i><em style={{ width: `${Math.max(4, Math.abs(item.value) / peerMax * 100)}%` }} /></i><strong>{peerMetric === 'roe' ? `${item.value.toFixed(2)}%` : `${(item.value / 100000000).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} 亿`}</strong></div>)}</div> : <div className="honest-empty"><b>暂无可比同行数据</b><p>需要同行公司在同一报告期完成结构化解析后才绘制，避免跨期或虚构对比。</p></div>}</section>
         <section className="trust-section"><div className="section-head compact"><div><span className="section-kicker">TRACEABILITY</span><h2>真实数据可追溯</h2></div></div><div className="trust-flow"><article><span>01</span><i className="raw">源</i><h3>官方公告</h3><p>{sourceName(selected.source)} · {selected.title}</p></article><b>→</b><article><span>02</span><i className="cal">存</i><h3>PDF 归档</h3><p>{selected.pdf_key ? '已存入本地磁盘' : '使用官方原文地址'}</p></article><b>→</b><article><span>03</span><i className="infer">析</i><h3>规则提取</h3><p>{selected.metrics.length} 个核心指标</p></article><b>→</b><article><span>04</span><i className="source">证</i><h3>页码证据</h3><p>点击指标查看来源标签和页码</p></article></div></section>
       </section>
-      <aside className="ai-panel advanced-ai"><div className="ai-head"><div><span>数</span><div><b>财报数据助手 V1.1</b><small><i />结构化数据 + 原文证据检索</small></div></div><button onClick={() => setMessages([])}>↻</button></div><div className="engine-strip"><span><i>1</i>识别指标</span><b>→</b><span><i>2</i>检索原文</span><b>→</b><span><i>3</i>返回页码</span></div><div className="chat-body"><div className="ai-message"><span>V1</span><div><p>{selected.metrics.length ? `已载入${selected.company_name}这份财报的 ${selected.metrics.length} 个真实指标。可查询核心指标，或追问“管理层如何解释利润变化”等原文问题。` : '这份财报尚未产出结构化指标，目前不提供模拟回答。'}</p></div></div>{messages.map((message,index) => message.role === 'user' ? <div className="user-message" key={index}>{message.text}</div> : <div className="ai-answer" key={index}><div className="answer-source-tabs"><span className="data">结构化数据 / 原文证据</span><span className="calc">可追溯回答</span></div><p>{message.text}</p></div>)}<div className="prompt-title">可查询</div>{metricOrder.map((name) => <button className="prompt" disabled={!selected.metrics.some((item) => item.metric === name)} key={name} onClick={() => answerQuestion(`${metricLabels[name]}是多少？`)}>{metricLabels[name]}是多少？<span>↗</span></button>)}</div><div className="chat-input"><div><textarea aria-label="查询财报指标" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void answerQuestion(question); } }} placeholder="例如：管理层如何解释利润变化？" rows={2}/><button aria-label="发送" onClick={() => void answerQuestion(question)}>↑</button></div><small>回答仅使用数据库指标与财报原文证据，不提供投资建议</small></div></aside>
+      <aside className="ai-panel advanced-ai" id="report-chat"><div className="ai-head"><div><span>数</span><div><b>财报数据助手 V1.2</b><small><i />结构化数据 + 可点击原文证据</small></div></div><button aria-label="清空对话" onClick={() => setMessages([])}>↻</button></div><div className="engine-strip"><span><i>1</i>识别指标</span><b>→</b><span><i>2</i>检索原文</span><b>→</b><span><i>3</i>点回证据</span></div><div className="chat-body"><div className="ai-message"><span>V1</span><div><p>{selected.metrics.length ? `已载入${selected.company_name}这份财报的 ${selected.metrics.length} 个真实指标。可查询核心指标，或追问“管理层如何解释利润变化”等原文问题。` : '这份财报尚未产出结构化指标，目前不提供模拟回答。'}</p></div></div>{messages.map((message,index) => message.role === 'user' ? <div className="user-message" key={index}>{message.text}</div> : <div className="ai-answer" key={index}><div className="answer-source-tabs"><span className="data">结构化数据 / 原文证据</span><span className="calc">可追溯回答</span></div><p>{message.text}</p>{message.citations?.length ? <div className="citation-list"><span>原文依据</span>{message.citations.map((citation) => <button key={`${citation.page}-${citation.quote}`} onClick={() => openEvidenceCitation(citation)}><b>第 {citation.page} 页</b><small>{citation.quote || '打开对应原文证据'}</small><i>→</i></button>)}</div> : null}</div>)}<div className="prompt-title">推荐问题</div>{metricOrder.map((name) => <button className="prompt" disabled={!selected.metrics.some((item) => item.metric === name)} key={name} onClick={() => answerQuestion(`${metricLabels[name]}是多少？`)}>{metricLabels[name]}是多少？<span>↗</span></button>)}<button className="prompt" disabled={!outlineData.indexedPages} onClick={() => answerQuestion('管理层如何解释本期利润变化？')}>管理层如何解释利润变化？<span>↗</span></button></div><div className="chat-input"><div><textarea aria-label="查询财报指标" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void answerQuestion(question); } }} placeholder="例如：管理层如何解释利润变化？" rows={2}/><button aria-label="发送" onClick={() => void answerQuestion(question)}>↑</button></div><small>回答仅使用数据库指标与财报原文证据，不提供投资建议</small></div></aside>
     </div> : <section className="lane-page"><div className="honest-empty"><b>暂无可用公告</b><p>请等待真实数据管道完成首次运行。</p></div></section>}
 
     {adminDialogOpen && <div className="drawer-backdrop" onClick={() => !adminSubmitting && setAdminDialogOpen(false)}><section onClick={(event) => event.stopPropagation()} style={{ width: 'min(400px, calc(100% - 32px))', height: 'max-content', margin: 'auto', padding: 24, background: '#fff', borderRadius: 14, boxShadow: '0 20px 60px #13213b40' }}><span className="section-kicker">ADMIN REVIEW</span><h2 style={{ margin: '7px 0', fontSize: 20 }}>复核并正式上线</h2><p style={{ fontSize: 12, color: '#68758a', lineHeight: 1.65 }}>请确认已核对 PDF 原文、指标数值、单位与页码。操作会记录复核事件。</p><label style={{ display: 'block', fontSize: 12, marginTop: 16 }}>管理员密码<input autoFocus type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void loginAndApprove(); }} style={{ width: '100%', marginTop: 7, padding: '10px 11px', border: '1px solid #dce2eb', borderRadius: 7 }} /></label>{adminError && <p style={{ margin: '10px 0 0', color: '#c94756', fontSize: 11 }}>{adminError}</p>}<div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}><button className="secondary" disabled={adminSubmitting} onClick={() => setAdminDialogOpen(false)}>取消</button><button className="primary" disabled={adminSubmitting} onClick={() => void loginAndApprove()}>{adminSubmitting ? '正在提交…' : '确认上线'}</button></div></section></div>}

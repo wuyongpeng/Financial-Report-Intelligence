@@ -36,4 +36,9 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
-/data/
+/data/*
+!/data/companies.json
+!/data/seed-reports.json
+!/data/golden-samples.json
+!/data/golden-questions.json
+!/data/metric-ground-truth.json

@@ -3,6 +3,12 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Poppler is the deterministic fallback for Chinese PDFs whose embedded fonts
+# do not expose usable Unicode text to PDF.js.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends poppler-utils \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
 RUN npm ci
 

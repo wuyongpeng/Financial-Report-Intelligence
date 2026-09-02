@@ -1,0 +1,10 @@
+[
+  {"code":"600519","name":"贵州茅台","targetPeriods":4,"reason":"消费龙头，财报格式稳定"},
+  {"code":"300750","name":"宁德时代","targetPeriods":4,"reason":"制造业代表，管理层讨论信息丰富"},
+  {"code":"002594","name":"比亚迪","targetPeriods":4,"reason":"汽车行业代表，关注度高"},
+  {"code":"000333","name":"美的集团","targetPeriods":4,"reason":"家电行业代表，指标可比性强"},
+  {"code":"600036","name":"招商银行","targetPeriods":4,"reason":"银行业代表，财报结构差异明显"},
+  {"code":"601318","name":"中国平安","targetPeriods":4,"reason":"非银金融代表，复杂财报验证样本"},
+  {"code":"601899","name":"紫金矿业","targetPeriods":4,"reason":"周期行业代表，利润变化明显"},
+  {"code":"600276","name":"恒瑞医药","targetPeriods":4,"reason":"医药行业代表，研发讨论丰富"}
+]

@@ -59,15 +59,32 @@ export function createAppCookie(username: string) {
   return `${payload}.${signApp(payload)}`;
 }
 
-export function isAppUser(request: Request) {
+export function demoAccessEnabled() {
+  return process.env.APP_DEMO_ACCESS === 'true';
+}
+
+export function createDemoCookie() {
+  const expiresAt = Math.floor(Date.now() / 1000) + maxAgeSeconds;
+  const payload = `guest.demo.${expiresAt}`;
+  return `${payload}.${signApp(payload)}`;
+}
+
+export function appUserRole(request: Request): 'user' | 'guest' | null {
   const value = namedCookieValue(request, appCookieName);
-  if (!value) return false;
+  if (!value) return null;
   const [role, encodedUsername, expiresAt, signature] = value.split('.');
-  if (role !== 'user' || !encodedUsername || !expiresAt || !signature || Number(expiresAt) < Math.floor(Date.now() / 1000)) return false;
+  if (!encodedUsername || !expiresAt || !signature || Number(expiresAt) < Math.floor(Date.now() / 1000)) return null;
+  const payload = `${role}.${encodedUsername}.${expiresAt}`;
+  if (!safeEqual(signature, signApp(payload))) return null;
+  if (role === 'guest') return encodedUsername === 'demo' && demoAccessEnabled() ? 'guest' : null;
+  if (role !== 'user') return null;
   const expectedUsername = process.env.APP_USERNAME;
   const username = Buffer.from(encodedUsername, 'base64url').toString();
-  const payload = `${role}.${encodedUsername}.${expiresAt}`;
-  return Boolean(expectedUsername && safeEqual(username, expectedUsername) && safeEqual(signature, signApp(payload)));
+  return expectedUsername && safeEqual(username, expectedUsername) ? 'user' : null;
+}
+
+export function isAppUser(request: Request) {
+  return appUserRole(request) !== null;
 }
 
 export function createAdminCookie() {

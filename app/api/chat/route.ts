@@ -48,8 +48,23 @@ function sse(content: string) {
   return encoder.encode(`data: ${JSON.stringify({ content })}\n\n`);
 }
 
-function streamFallback(answer: string) {
-  return new Response(new ReadableStream({ start(controller) { controller.enqueue(sse(answer)); controller.enqueue(encoder.encode('data: [DONE]\n\n')); controller.close(); } }), {
+function queryTerms(query: string) {
+  return [...new Set(query.match(/[\u4e00-\u9fa5]{2,8}|[A-Za-z0-9]+/g) ?? [])].sort((a, b) => b.length - a.length);
+}
+
+function evidenceQuote(query: string, content: string) {
+  const terms = queryTerms(query);
+  const sentences = content.match(/[^。！？；]+[。！？；]?/g)?.map((item) => item.trim()).filter(Boolean) ?? [];
+  const hit = sentences.find((sentence) => terms.some((term) => sentence.includes(term))) ?? sentences[0] ?? content;
+  return hit.replace(/\s+/g, ' ').slice(0, 88);
+}
+
+function citationPayload(question: string, evidence: Chunk[]) {
+  return [...new Map(evidence.slice(0, 5).map((item) => [item.page, { page: item.page, quote: evidenceQuote(question, item.content) }])).values()].slice(0, 3);
+}
+
+function streamFallback(answer: string, citations: Array<{ page: number; quote: string }>) {
+  return new Response(new ReadableStream({ start(controller) { controller.enqueue(sse(answer)); if (citations.length) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ evidence: citations })}\n\n`)); controller.enqueue(encoder.encode('data: [DONE]\n\n')); controller.close(); } }), {
     headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive' },
   });
 }
@@ -59,7 +74,8 @@ async function streamGenerate(question: string, evidence: Chunk[], structuredCon
   const model = process.env.LLM_MODEL;
   const maxTokens = Number(process.env.LLM_MAX_TOKENS ?? 1600);
   const timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? 60_000);
-  if (!baseUrl || !model) return streamFallback(fallback);
+  const citations = citationPayload(question, evidence);
+  if (!baseUrl || !model) return streamFallback(fallback, citations);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -72,7 +88,7 @@ async function streamGenerate(question: string, evidence: Chunk[], structuredCon
     if (!upstream.ok || !upstream.body) {
       console.warn('[chat] LLM stream unavailable', { status: upstream.status, model });
       clearTimeout(timer);
-      return streamFallback(fallback);
+      return streamFallback(fallback, citations);
     }
     const body = new ReadableStream<Uint8Array>({
       async start(output) {
@@ -98,11 +114,13 @@ async function streamGenerate(question: string, evidence: Chunk[], structuredCon
             if (done) break;
           }
           if (!emitted) output.enqueue(sse(fallback));
+          if (citations.length) output.enqueue(encoder.encode(`data: ${JSON.stringify({ evidence: citations })}\n\n`));
           output.enqueue(encoder.encode('data: [DONE]\n\n'));
           output.close();
         } catch (error) {
           console.warn('[chat] LLM stream failed', { message: String(error), model });
           if (!emitted) output.enqueue(sse(fallback));
+          if (citations.length) output.enqueue(encoder.encode(`data: ${JSON.stringify({ evidence: citations })}\n\n`));
           output.enqueue(encoder.encode('data: [DONE]\n\n'));
           output.close();
         } finally { clearTimeout(timer); }
@@ -113,7 +131,7 @@ async function streamGenerate(question: string, evidence: Chunk[], structuredCon
   } catch (error) {
     clearTimeout(timer);
     console.warn('[chat] LLM stream setup failed', { message: String(error), model });
-    return streamFallback(fallback);
+    return streamFallback(fallback, citations);
   }
 }
 

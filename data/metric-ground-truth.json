@@ -1,0 +1,20 @@
+[
+  {
+    "announcementId":"CNINFO:1225475868",
+    "code":"600519",
+    "companyName":"贵州茅台",
+    "period":"2026H1",
+    "sourceUrl":"https://static.cninfo.com.cn/finalpage/2026-08-15/1225475868.PDF",
+    "sourcePage":5,
+    "metrics":{"revenue":90703260964.48,"net_profit":44516880421.86,"eps":35.57,"roe":16.75}
+  },
+  {
+    "announcementId":"CNINFO:1225530237",
+    "code":"600036",
+    "companyName":"招商银行",
+    "period":"2026H1",
+    "sourceUrl":"https://static.cninfo.com.cn/finalpage/2026-08-29/1225530237.PDF",
+    "sourcePage":7,
+    "metrics":{"revenue":178181000000,"net_profit":76445000000,"eps":2.98,"roe":13.42}
+  }
+]
