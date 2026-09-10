@@ -1,5 +1,9 @@
+export const parsedMetricNames = ['revenue', 'net_profit', 'eps', 'roe', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost'] as const;
+// Currency rows share one scaling path; ratios and per-share values must not be scaled.
+const currencyMetrics = new Set(['revenue', 'net_profit', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost']);
+
 export type ParsedMetric = {
-  metric: 'revenue' | 'net_profit' | 'eps' | 'roe';
+  metric: typeof parsedMetricNames[number];
   value: number;
   unit: string;
   page: number;
@@ -22,6 +26,11 @@ const LABELS: MetricDefinition[] = [
   { metric: 'net_profit', labels: ['归属于上市公司股东的净利润', '归属于母公司股东的净利润', '归属于本行股东的净利润', '归属于本公司股东的净利润'], unit: '元', minAbs: 1, maxAbs: 1e15 },
   { metric: 'eps', labels: ['基本每股收益'], unit: '元/股', minAbs: 0, maxAbs: 1000 },
   { metric: 'roe', labels: ['归属于本行普通股股东的加权平均净资产收益率', '归属于本公司普通股股东的加权平均净资产收益率', '加权平均净资产收益率'], unit: '%', minAbs: 0, maxAbs: 1000 },
+  { metric: 'total_assets', labels: ['资产总计', '资产总额', '总资产'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
+  { metric: 'total_liabilities', labels: ['负债合计', '负债总额'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
+  // Operating cash flow is legitimately negative, so no lower bound on magnitude.
+  { metric: 'operating_cash_flow', labels: ['经营活动产生的现金流量净额', '经营活动现金流量净额'], unit: '元', minAbs: 0, maxAbs: 1e16 },
+  { metric: 'operating_cost', labels: ['营业成本'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
 ];
 
 function pageCurrencyUnit(text: string) {
@@ -42,14 +51,18 @@ function normalizePageText(text: string) {
 function candidateAfterLabel(pageText: string, label: string, definition: MetricDefinition, fallbackCurrencyUnit = '') {
   const index = pageText.indexOf(label);
   if (index < 0) return null;
-  const nearby = pageText.slice(index + label.length, index + label.length + 180).replace(/[,，]/g, '').replace(/^\s*\(\d+\)\s*/, '');
-  const valueMatch = nearby.match(/(?:人民币)?\s*\(?\s*(-?\d+(?:\.\d+)?)\s*\)?\s*(%|亿元|百万元|万元|元\/股|元)?/);
+  let nearby = pageText.slice(index + label.length, index + label.length + 180).replace(/[,，]/g, '').replace(/（/g, '(').replace(/）/g, ')');
+  // Only ratio/per-share summary rows use the small footnote markers handled
+  // here. Parenthesized currency amounts are values, not footnotes.
+  if (!currencyMetrics.has(definition.metric)) nearby = nearby.replace(/^\s*\([1-9]\)\s+(?=-?\d)/, '');
+  const valueMatch = nearby.match(/(?:人民币)?\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*(%|亿元|百万元|万元|元\/股|元)?/);
   if (!valueMatch) return null;
-  let value = Number(valueMatch[1]);
+  let value = Number(valueMatch[2]);
+  if (valueMatch[1] && valueMatch[3]) value = -Math.abs(value);
   if (!Number.isFinite(value)) return null;
-  const detectedUnit = valueMatch[2] ?? '';
+  const detectedUnit = valueMatch[4] ?? '';
 
-  if (definition.metric === 'revenue' || definition.metric === 'net_profit') {
+  if (currencyMetrics.has(definition.metric)) {
     value = scaleCurrency(value, detectedUnit || fallbackCurrencyUnit || pageCurrencyUnit(pageText) || '元');
   }
   if (Math.abs(value) < definition.minAbs || Math.abs(value) > definition.maxAbs) return null;
@@ -73,11 +86,14 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
   for (let pageIndex = 0; pageIndex < Math.min(pages.length, 120); pageIndex += 1) {
     const page = normalizePageText(pages[pageIndex]);
     const isSummary = /主要会计数据|主要财务指标|报告摘要/.test(page);
-    const isPrimaryStatement = /合并利润表|利润表/.test(page);
+    const statement = definition.metric === 'total_assets' || definition.metric === 'total_liabilities' ? /合并资产负债表|资产负债表/
+      : definition.metric === 'operating_cash_flow' ? /合并现金流量表|现金流量表/
+      : /合并利润表|利润表/;
+    const isPrimaryStatement = statement.test(page);
     const hasPageUnit = Boolean(pageCurrencyUnit(page));
     for (const [labelIndex, label] of definition.labels.entries()) {
       for (const position of allLabelPositions(page, label)) {
-        const scopedPage = `${page.slice(Math.max(0, position - 90), position)}${page.slice(position)}`;
+        const scopedPage = page.slice(position);
         const parsed = candidateAfterLabel(scopedPage, label, definition, pageCurrencyUnit(page));
         if (!parsed) continue;
         let score = 0.68;
@@ -134,7 +150,9 @@ async function extractWithPoppler(bytes: ArrayBuffer) {
       maxBuffer: 32 * 1024 * 1024,
       timeout: 60_000,
     });
-    return output.split('\f').map((page) => page.trim()).filter(Boolean);
+    const pages = output.split('\f').map((page) => page.trim());
+    if (pages.at(-1) === '') pages.pop();
+    return pages;
   } catch (error) {
     console.warn('[parser] Poppler fallback unavailable', { message: String(error) });
     return [];
@@ -147,11 +165,11 @@ export async function parseCoreMetrics(bytes: ArrayBuffer) {
   // the Poppler fallback before handing bytes to PDF.js.
   const fallbackBytes = bytes.slice(0);
   const pdf = await getDocumentProxy(new Uint8Array(bytes));
-  const extracted = await extractText(pdf, { mergePages: false });
+  const extracted = await extractText(pdf, { mergePages: false }).finally(() => pdf.loadingTask.destroy());
   const primaryPages = Array.isArray(extracted.text) ? extracted.text : [extracted.text];
   let pages = primaryPages;
   let metrics = parseCoreMetricPages(pages);
-  if (metrics.length < 4) {
+  if (metrics.length < LABELS.length) {
     const fallbackPages = await extractWithPoppler(fallbackBytes);
     const fallbackMetrics = parseCoreMetricPages(fallbackPages);
     if (fallbackMetrics.length > metrics.length) {

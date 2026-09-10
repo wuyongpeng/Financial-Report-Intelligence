@@ -5,6 +5,7 @@ import { parseCoreMetrics } from './parser';
 import { fetchAllSources } from './sources';
 import { putReport, readReport } from './storage';
 import { sendAlert } from './alerts';
+import { hasCoreMetrics } from './metric-quality';
 import type { Announcement, Company } from './types';
 
 const companies = companiesJson as Company[];
@@ -105,16 +106,18 @@ export async function recoverStaleRuns() {
   `;
 }
 
-export async function processBacklog(options: { downloadLimit?: number; parseLimit?: number } = {}) {
+export async function processBacklog(options: { downloadLimit?: number; parseLimit?: number; codes?: string[] } = {}) {
   const db = getDb();
   const downloadLimit = options.downloadLimit ?? 1;
   const parseLimit = options.parseLimit ?? 1;
+  const codes = options.codes ?? [];
   const backlog = await db<StoredAnnouncement[]>`
     SELECT id, source, source_id, code, company_name, title, report_type, published_at, pdf_url, pdf_key, status
     FROM announcements
-    WHERE status IN ('discovered', 'download_failed', 'downloaded')
+    WHERE (status IN ('discovered', 'download_failed', 'downloaded')
       OR (status IN ('review', 'online', 'parse_partial') AND pdf_key IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM report_chunks WHERE report_chunks.announcement_id=announcements.id))
+        AND NOT EXISTS (SELECT 1 FROM report_chunks WHERE report_chunks.announcement_id=announcements.id)))
+      AND (${codes.length === 0} OR code=ANY(${codes}::text[]))
     ORDER BY CASE
       WHEN status='downloaded' THEN 0
       WHEN status IN ('review', 'online', 'parse_partial') THEN 1
@@ -162,7 +165,11 @@ export async function processBacklog(options: { downloadLimit?: number; parseLim
         if (object) bytes = object.buffer.slice(object.byteOffset, object.byteOffset + object.byteLength);
       }
 
-      if (bytes && parsed < parseLimit && bytes.byteLength < 25 * 1024 * 1024) {
+      if (bytes && bytes.byteLength > 50 * 1024 * 1024) {
+        await db`UPDATE announcements SET status='parse_partial', parse_error='PDF exceeds the 50 MB parser limit', updated_at=NOW() WHERE id=${record.id}`;
+        continue;
+      }
+      if (bytes && parsed < parseLimit) {
         const extracted = await parseCoreMetrics(bytes);
         const period = periodFromTitle(record.title, record.published_at);
         const createdAt = new Date().toISOString();
@@ -172,7 +179,11 @@ export async function processBacklog(options: { downloadLimit?: number; parseLim
               INSERT INTO financial_metrics (announcement_id, code, period, metric, value, unit, source_page, source_label, confidence, verified, created_at)
               VALUES (${record.id}, ${record.code}, ${period}, ${metric.metric}, ${metric.value}, ${metric.unit}, ${metric.page}, ${metric.sourceLabel}, ${metric.confidence}, false, ${createdAt})
               ON CONFLICT (announcement_id, metric) DO UPDATE SET value=EXCLUDED.value, unit=EXCLUDED.unit,
-                source_page=EXCLUDED.source_page, source_label=EXCLUDED.source_label, confidence=EXCLUDED.confidence
+                source_page=EXCLUDED.source_page, source_label=EXCLUDED.source_label, confidence=EXCLUDED.confidence,
+                verified=CASE WHEN financial_metrics.value=EXCLUDED.value AND financial_metrics.unit=EXCLUDED.unit
+                  AND financial_metrics.source_page IS NOT DISTINCT FROM EXCLUDED.source_page
+                  AND financial_metrics.source_label IS NOT DISTINCT FROM EXCLUDED.source_label
+                  THEN financial_metrics.verified ELSE false END
             `;
           }
           await tx`DELETE FROM report_chunks WHERE announcement_id=${record.id}`;
@@ -184,7 +195,8 @@ export async function processBacklog(options: { downloadLimit?: number; parseLim
             `;
           }
           await tx`
-            UPDATE announcements SET status=${record.status === 'online' ? 'online' : extracted.metrics.length === 4 ? 'review' : 'parse_partial'}, parsed_at=${createdAt}, parse_error=NULL, updated_at=${createdAt}
+            UPDATE announcements SET status=${hasCoreMetrics(extracted.metrics) ? 'review' : 'parse_partial'}, online_at=NULL,
+              parsed_at=${createdAt}, parse_error=NULL, updated_at=${createdAt}
             WHERE id=${record.id}
           `;
         });

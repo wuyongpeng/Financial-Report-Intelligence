@@ -1,4 +1,5 @@
 import { getDb } from '@/lib/db';
+import { buildPageLabels } from '@/lib/pdf-pages';
 import { buildOutline } from '@/lib/outline';
 import { requireAppUser } from '@/lib/auth';
 
@@ -15,7 +16,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   return Response.json({
     source: 'parsed_pdf_text',
     indexedPages: chunks.length,
+    pageLabels: buildPageLabels(chunks),
     outline: buildOutline(chunks),
-    pages: chunks.map((chunk) => ({ page: chunk.page, content: chunk.content.slice(0, 1200) })),
+    pages: chunks.map((chunk) => ({ page: chunk.page, content: chunk.content })),
   }, { headers: { 'cache-control': 'no-store' } });
 }

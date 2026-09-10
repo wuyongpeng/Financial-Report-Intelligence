@@ -13,7 +13,12 @@
     "backfill": "node scripts/backfill-snapshot.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "audit:p0": "node --import tsx scripts/p0-audit.ts",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "db:migrate": "tsx scripts/migrate.ts",
+    "test:backend": "node --env-file=.env.development.local --import tsx scripts/check-backend.ts",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "local:db": "node scripts/local-db.mjs",
+    "local:import": "node --env-file=.env.development.local --import tsx scripts/setup-local-data.ts",
+    "test:integration": "node --env-file=.env.development.local scripts/check-local.mjs"
   },
   "dependencies": {
     "drizzle-kit": "^0.31.10",

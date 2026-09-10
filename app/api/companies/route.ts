@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   try {
     const db = getDb();
     const rows = await db`
-      SELECT c.*, COUNT(a.id)::int AS report_count,
+      SELECT c.*, COUNT(DISTINCT a.id)::int AS report_count,
         COUNT(DISTINCT m.announcement_id)::int AS parsed_count
       FROM companies c
       LEFT JOIN announcements a ON a.code=c.code

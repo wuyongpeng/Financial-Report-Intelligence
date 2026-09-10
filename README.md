@@ -72,3 +72,14 @@ docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select sta
 ## 后续平移边界
 
 应用只有两处基础设施适配：`lib/db.ts`（PostgreSQL 连接）和 `lib/storage.ts`（本地文件系统）。迁移到公司 PostgreSQL 与 S3 时替换这些适配层、迁移数据目录即可；采集、解析、API 和页面不需要重写。
+
+## 本机开发与真实数据验收
+
+本机 PostgreSQL 16 安装后，执行 `npm run local:db`，会创建项目独立数据库（仅监听 `127.0.0.1:55432`），将连接配置写入被 Git 忽略的 `.env.development.local`。该文件还需配置 `APP_USERNAME`、`APP_PASSWORD` 和至少 24 位的 `APP_SESSION_SECRET`。
+
+- 快速准备四家公司样本：`LOCAL_SAMPLE_ONLY=true npm run local:import`
+- 导入全部官方快照：`npm run local:import`
+- 启动网页：`npm run dev`
+- 对运行中的服务验收：`npm run test:integration`
+
+样本包含茅台、招商银行及同行的历年中报，用于真实趋势、同比和原文溯源。每项指标均由 PDF 解析，导入不会标记为人工复核。未配置模型接口时，问答以结构化指标和原文检索模式运行，不能视为已完成模型问答准确率验收。

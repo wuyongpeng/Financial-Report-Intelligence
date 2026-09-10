@@ -36,3 +36,21 @@ test('handles bank-specific labels, footnotes and RMB million units', () => {
   assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 2.98);
   assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 13.42);
 });
+
+test('extracts balance sheet, cash flow and cost rows with statement-aware scoring', () => {
+  const metrics = parseCoreMetricPages([
+    '合并资产负债表 单位：人民币百万元 资产总计 4,200,000 负债合计 3,600,000',
+    '合并现金流量表 单位：人民币百万元 经营活动产生的现金流量净额 -12,500',
+    '合并利润表 单位：人民币百万元 营业收入 178,181 营业总成本 120,000 营业成本 110,000',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'total_assets')?.value, 4_200_000_000_000);
+  assert.equal(metrics.find((item) => item.metric === 'total_liabilities')?.value, 3_600_000_000_000);
+  assert.equal(metrics.find((item) => item.metric === 'operating_cash_flow')?.value, -12_500_000_000);
+  assert.equal(metrics.find((item) => item.metric === 'operating_cost')?.value, 110_000_000_000);
+});
+
+test('parenthesized currency amounts do not skip to the prior-period column', () => {
+  const metrics = parseCoreMetricPages(['合并现金流量表 单位：元 经营活动产生的现金流量净额 (500000) 1000000']);
+  assert.equal(metrics.find(m => m.metric === 'operating_cash_flow')?.value, -500000);
+  assert.equal(parseCoreMetricPages(['合并利润表 单位：元 营业总成本 80000']).some(m => m.metric === 'operating_cost'), false);
+});

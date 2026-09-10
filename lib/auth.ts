@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 const cookieName = 'fri_admin_session';
 const appCookieName = 'fri_app_session';
@@ -55,7 +55,7 @@ export function validAppCredentials(username: string, password: string) {
 export function createAppCookie(username: string) {
   const expiresAt = Math.floor(Date.now() / 1000) + maxAgeSeconds;
   const encodedUsername = Buffer.from(username).toString('base64url');
-  const payload = `user.${encodedUsername}.${expiresAt}`;
+  const payload = `user.${encodedUsername}.${expiresAt}.${randomUUID()}`;
   return `${payload}.${signApp(payload)}`;
 }
 
@@ -65,22 +65,34 @@ export function demoAccessEnabled() {
 
 export function createDemoCookie() {
   const expiresAt = Math.floor(Date.now() / 1000) + maxAgeSeconds;
-  const payload = `guest.demo.${expiresAt}`;
+  const payload = `guest.demo.${expiresAt}.${randomUUID()}`;
   return `${payload}.${signApp(payload)}`;
 }
 
 export function appUserRole(request: Request): 'user' | 'guest' | null {
   const value = namedCookieValue(request, appCookieName);
   if (!value) return null;
-  const [role, encodedUsername, expiresAt, signature] = value.split('.');
-  if (!encodedUsername || !expiresAt || !signature || Number(expiresAt) < Math.floor(Date.now() / 1000)) return null;
-  const payload = `${role}.${encodedUsername}.${expiresAt}`;
-  if (!safeEqual(signature, signApp(payload))) return null;
+  const parts = value.split('.');
+  if (parts.length !== 4 && parts.length !== 5) return null;
+  const [role, encodedUsername, expiresAt] = parts;
+  const signature = parts.at(-1)!;
+  if (!encodedUsername || !/^\d+$/.test(expiresAt) || !signature || Number(expiresAt) <= Math.floor(Date.now() / 1000)) return null;
+  const payload = parts.slice(0, -1).join('.');
+  try { if (!safeEqual(signature, signApp(payload))) return null; } catch { return null; }
   if (role === 'guest') return encodedUsername === 'demo' && demoAccessEnabled() ? 'guest' : null;
   if (role !== 'user') return null;
   const expectedUsername = process.env.APP_USERNAME;
   const username = Buffer.from(encodedUsername, 'base64url').toString();
   return expectedUsername && safeEqual(username, expectedUsername) ? 'user' : null;
+}
+
+// Private conversations belong to one signed browser login session. Legacy
+// cookies remain valid for reading but must be refreshed before enabling memory.
+export function appSessionOwner(request: Request) {
+  if (!appUserRole(request)) return null;
+  const value = namedCookieValue(request, appCookieName)!;
+  if (value.split('.').length !== 5) return null;
+  return createHmac('sha256', appSecret()).update(`conversation:${value}`).digest('hex');
 }
 
 export function isAppUser(request: Request) {

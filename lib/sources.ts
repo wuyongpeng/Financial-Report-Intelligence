@@ -1,5 +1,7 @@
 import type { Announcement } from './types';
 
+export type SourcePage = { items: Announcement[]; rawCount: number };
+
 const USER_AGENT = 'FinanceReportIntelligence/1.0 (+https://financial-report-intelligence.wuyongpeng.chatgpt.site)';
 
 function dateOnly(daysAgo = 0) {
@@ -30,7 +32,7 @@ async function safeFetch(url: string, init: RequestInit, timeoutMs = 12000) {
   }
 }
 
-export async function fetchCninfo(days = 2, page = 1, pageSize = 200): Promise<Announcement[]> {
+export async function fetchCninfo(days = 2, page = 1, pageSize = 200): Promise<SourcePage> {
   const form = new URLSearchParams({
     pageNum: String(page), pageSize: String(pageSize), column: 'szse', tabName: 'fulltext',
     plate: '', stock: '', searchkey: '', secid: '',
@@ -41,7 +43,8 @@ export async function fetchCninfo(days = 2, page = 1, pageSize = 200): Promise<A
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8', referer: 'https://www.cninfo.com.cn/', 'user-agent': USER_AGENT }, body: form,
   });
   const payload = await response.json() as { announcements?: Array<Record<string, unknown>> };
-  return (payload.announcements ?? []).map((item) => {
+  const raw = payload.announcements ?? [];
+  const items = raw.map((item) => {
     const title = String(item.announcementTitle ?? '').replace(/<[^>]+>/g, '');
     return {
       source: 'CNINFO' as const,
@@ -51,19 +54,21 @@ export async function fetchCninfo(days = 2, page = 1, pageSize = 200): Promise<A
       reportType: classify(title),
     };
   }).filter((item) => item.sourceId && item.code && isFullFinancialReport(item.title));
+  return { items, rawCount: raw.length };
 }
 
-export async function fetchSse(days = 2, pageSize = 200): Promise<Announcement[]> {
+export async function fetchSse(days = 2, page = 1, pageSize = 200): Promise<SourcePage> {
   const params = new URLSearchParams({
     isPagination: 'true', productId: '', keyWord: '报告', securityType: '0101,120100,020100,020200,120200',
-    'pageHelp.pageSize': String(pageSize), 'pageHelp.pageCount': '50', 'pageHelp.pageNo': '1',
+    'pageHelp.pageSize': String(pageSize), 'pageHelp.pageCount': '50', 'pageHelp.pageNo': String(page),
     'pageHelp.beginPage': '1', 'pageHelp.cacheSize': '1', 'pageHelp.endPage': '5', beginDate: dateOnly(days), endDate: dateOnly(),
   });
   const response = await safeFetch(`https://query.sse.com.cn/security/stock/queryCompanyBulletin.do?${params}`, {
     headers: { referer: 'https://www.sse.com.cn/', 'user-agent': USER_AGENT },
   });
   const payload = await response.json() as { result?: Array<Record<string, unknown>>; pageHelp?: { data?: Array<Record<string, unknown>> } };
-  return (payload.result ?? payload.pageHelp?.data ?? []).map((item) => {
+  const raw = payload.result ?? payload.pageHelp?.data ?? [];
+  const items = raw.map((item) => {
     const title = String(item.TITLE ?? '');
     const path = String(item.URL ?? '');
     return {
@@ -73,16 +78,18 @@ export async function fetchSse(days = 2, pageSize = 200): Promise<Announcement[]
       pdfUrl: `https://www.sse.com.cn${path}`, reportType: classify(title),
     };
   }).filter((item) => item.code && item.pdfUrl && isFullFinancialReport(item.title));
+  return { items, rawCount: raw.length };
 }
 
-export async function fetchSzse(days = 2, pageSize = 200): Promise<Announcement[]> {
+export async function fetchSzse(days = 2, page = 1, pageSize = 200): Promise<SourcePage> {
   const response = await safeFetch('https://www.szse.cn/api/disc/announcement/annList', {
     method: 'POST',
     headers: { 'content-type': 'application/json', referer: 'https://www.szse.cn/disclosure/listed/notice/index.html', 'user-agent': USER_AGENT },
-    body: JSON.stringify({ seDate: [dateOnly(days), dateOnly()], channelCode: ['listedNotice_disc'], pageSize, pageNum: 1 }),
+    body: JSON.stringify({ seDate: [dateOnly(days), dateOnly()], channelCode: ['listedNotice_disc'], pageSize, pageNum: page }),
   });
   const payload = await response.json() as { data?: Array<Record<string, unknown>> };
-  return (payload.data ?? []).map((item) => {
+  const raw = payload.data ?? [];
+  const items = raw.map((item) => {
     const title = String(item.title ?? '');
     const codes = Array.isArray(item.secCode) ? item.secCode : [];
     const names = Array.isArray(item.secName) ? item.secName : [];
@@ -93,20 +100,44 @@ export async function fetchSzse(days = 2, pageSize = 200): Promise<Announcement[
       pdfUrl: `https://disc.static.szse.cn/download${path}`, reportType: classify(title),
     };
   }).filter((item) => item.sourceId && item.code && isFullFinancialReport(item.title));
+  return { items, rawCount: raw.length };
 }
 
 export async function fetchAllSources(days = 2) {
-  const results = await Promise.allSettled([fetchSse(days), fetchSzse(days), fetchCninfo(days)]);
+  const budget = Number(process.env.INGEST_MAX_PAGES ?? 20);
+  const maxPages = Number.isInteger(budget) ? Math.min(Math.max(budget, 1), 100) : 20;
+  const results = await Promise.allSettled([
+    collectPages(page => fetchSse(days, page), maxPages),
+    collectPages(page => fetchSzse(days, page), maxPages),
+    collectPages(page => fetchCninfo(days, page), maxPages),
+  ]);
   const announcements: Announcement[] = [];
   const health: Record<string, { ok: boolean; count: number; error?: string }> = {};
   ['SSE', 'SZSE', 'CNINFO'].forEach((source, index) => {
     const result = results[index];
     if (result.status === 'fulfilled') {
-      announcements.push(...result.value);
-      health[source] = { ok: true, count: result.value.length };
+      announcements.push(...result.value.items);
+      health[source] = { ok: result.value.complete, count: result.value.items.length, ...(result.value.complete ? {} : { error: result.value.error ?? 'Pagination incomplete; retry required' }) };
     } else {
       health[source] = { ok: false, count: 0, error: String(result.reason) };
     }
   });
   return { announcements, health };
+}
+
+// Do not infer completion from the filtered report count: an entire page can
+// contain unrelated announcements. A page cap is reported as incomplete.
+export async function collectPages(fetchPage: (page: number) => Promise<SourcePage>, maxPages = 20, pauseMs = 250) {
+  const unique = new Map<string, Announcement>();
+  for (let page = 1; page <= maxPages; page++) {
+    let result: SourcePage;
+    try { result = await fetchPage(page); }
+    catch { return { items: [...unique.values()], complete: false, error: `Page ${page} failed` }; }
+    if (!result.rawCount) return { items: [...unique.values()], complete: true };
+    const before = unique.size;
+    for (const item of result.items) unique.set(`${item.source}:${item.sourceId}`, item);
+    if (result.items.length && unique.size === before) return { items: [...unique.values()], complete: false, error: 'Source returned a repeated page' };
+    if (page < maxPages && pauseMs) await new Promise(resolve => setTimeout(resolve, pauseMs));
+  }
+  return { items: [...unique.values()], complete: false, error: 'Pagination budget reached' };
 }

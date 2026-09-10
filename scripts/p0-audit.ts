@@ -13,7 +13,8 @@ async function main() {
       COUNT(DISTINCT CASE WHEN x.metric_count=4 THEN x.code END)::int AS complete,
       COUNT(DISTINCT CASE WHEN x.metric_count=4 AND x.verified_count=4 THEN x.code END)::int AS verified
     FROM (
-      SELECT a.code, a.id, COUNT(m.metric)::int AS metric_count, COUNT(*) FILTER (WHERE m.verified)::int AS verified_count
+      SELECT a.code, a.id, COUNT(m.metric) FILTER (WHERE m.metric IN ('revenue','net_profit','eps','roe'))::int AS metric_count,
+        COUNT(*) FILTER (WHERE m.verified AND m.metric IN ('revenue','net_profit','eps','roe'))::int AS verified_count
       FROM announcements a LEFT JOIN financial_metrics m ON m.announcement_id=a.id
       GROUP BY a.code, a.id
     ) x

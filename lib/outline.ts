@@ -29,10 +29,29 @@ function cleanExcerpt(content: string, term: string) {
   return content.slice(start, start + 170).replace(/\s+/g, ' ').trim();
 }
 
+function isContents(content: string) {
+  return /目\s*录/.test(content.slice(0, 180)) || /[.．…·]{5,}/.test(content) || (content.match(/第[一二三四五六七八九十百\d]+[章节]/g)?.length ?? 0) >= 3;
+}
+
+function sectionScore(content: string, terms: string[]) {
+  if (isContents(content)) return -1;
+  let best = -1;
+  for (const term of terms) {
+    const at = content.indexOf(term);
+    if (at < 0) continue;
+    const before = content.slice(Math.max(0, at - 60), at);
+    if (/本报告|详见|参见|请参阅|已在|见本/.test(before)) continue;
+    const heading = new RegExp(`第[一二三四五六七八九十百\\d]+[章节]\\s*${term}`).test(content);
+    best = Math.max(best, (heading ? 100 : 0) + (at < 220 ? 30 : 0) + (content.length > 600 ? 5 : 0));
+  }
+  return best;
+}
+
 export function buildOutline(chunks: ReportChunk[]): OutlineSection[] {
   const output: OutlineSection[] = [];
   for (const rule of standardRules) {
-    const hit = chunks.find((chunk) => rule.terms.some((term) => chunk.content.includes(term)));
+    const hit = chunks.map(chunk => ({ ...chunk, score: sectionScore(chunk.content, rule.terms) }))
+      .filter(chunk => chunk.score > 0).sort((a, b) => b.score - a.score || a.page - b.page)[0];
     if (!hit) continue;
     const term = rule.terms.find((item) => hit.content.includes(item)) ?? rule.title;
     output.push({ id: rule.id, title: rule.title, level: 1, page: hit.page, endPage: hit.page, excerpt: cleanExcerpt(hit.content, term), highlight: term, source: 'standard' });
@@ -40,7 +59,8 @@ export function buildOutline(chunks: ReportChunk[]): OutlineSection[] {
   // Annual reports commonly contain numbered "第X节" headings. Preserve a
   // limited number as a second-level navigation aid, without inventing names.
   for (const chunk of chunks) {
-    const match = chunk.content.match(/第[一二三四五六七八九十百]+节\s*([^。；;]{2,42})/);
+    if (isContents(chunk.content)) continue;
+    const match = chunk.content.match(/第[一二三四五六七八九十百]+[章节]\s*([^。；;]{2,42})/);
     if (!match) continue;
     const title = `第${match[0].split('第')[1]}`.replace(/\s+/g, ' ').trim();
     if (output.some((item) => item.page === chunk.page || item.title.includes(title))) continue;
