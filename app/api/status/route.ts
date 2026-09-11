@@ -1,11 +1,9 @@
 import { getDb } from '@/lib/db';
-import { requireAppUser } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const denied = requireAppUser(request); if (denied) return denied;
   try {
     const db = getDb();
     const [counts] = await db`WITH reports AS (

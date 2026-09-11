@@ -11,10 +11,15 @@ function owner(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const denied = requireAppUser(request); if (denied) return denied;
   try {
+    // Anonymous / demo visitors get an empty list (200) so the Network panel is clean;
+    // chat still works without conversationId. Logged-in memory stays behind a session owner.
+    const key = appSessionOwner(request);
+    if (!key) {
+      return Response.json({ conversations: [] }, { headers: { 'cache-control': 'no-store' } });
+    }
     const reportId = new URL(request.url).searchParams.get('reportId');
-    return Response.json({ conversations: await listConversations(owner(request), reportId) }, { headers: { 'cache-control': 'no-store' } });
+    return Response.json({ conversations: await listConversations(key, reportId) }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) { return apiError(error); }
 }
 

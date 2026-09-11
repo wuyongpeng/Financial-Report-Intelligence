@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { appUserRole, createDemoCookie, demoAccessEnabled } from '../lib/auth';
 
-test('demo session is accepted only while evaluator access is enabled', () => {
+test('legacy demo cookie only validates while APP_DEMO_ACCESS is true', () => {
   const previousAccess = process.env.APP_DEMO_ACCESS;
   const previousSecret = process.env.APP_SESSION_SECRET;
   process.env.APP_DEMO_ACCESS = 'true';

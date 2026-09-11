@@ -1,4 +1,4 @@
-import { appUserRole, requireAppUser } from '@/lib/auth';
+import { appUserRole } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 import { allMetricNames } from '@/lib/detail-model';
 
@@ -10,8 +10,6 @@ const verdicts = ['correct', 'wrong'] as const;
 // deliberately advisory: it records evidence for review, and never publishes a
 // metric as verified on its own.
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const denied = requireAppUser(request);
-  if (denied) return denied;
   const { id } = await context.params;
   const body = await request.json().catch(() => ({})) as { metric?: string; verdict?: string; note?: string };
   if (!allMetricNames.includes(body.metric as never)) return Response.json({ error: 'metric 不在可核验范围内' }, { status: 400 });
@@ -35,8 +33,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
-  const denied = requireAppUser(request);
-  if (denied) return denied;
   const { id } = await context.params;
   const db = getDb();
   const rows = await db<Array<{ metric: string; verdict: string; reporter: string }>>`

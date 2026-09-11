@@ -1,12 +1,6 @@
-import { appCookieHeader, createDemoCookie, demoAccessEnabled } from '@/lib/auth';
+import { NextResponse } from 'next/server';
 
+/** Legacy evaluator shortcut — disabled. Product is open for ordinary users. */
 export async function POST() {
-  if (!demoAccessEnabled()) return Response.json({ error: '评委体验入口未开启' }, { status: 404 });
-  try {
-    return Response.json({ ok: true, role: 'guest' }, {
-      headers: { 'set-cookie': appCookieHeader(createDemoCookie()), 'cache-control': 'no-store' },
-    });
-  } catch {
-    return Response.json({ error: '体验会话尚未配置，请检查 APP_SESSION_SECRET。' }, { status: 503 });
-  }
+  return NextResponse.json({ error: '该入口已停用，请直接打开应用使用。' }, { status: 410 });
 }

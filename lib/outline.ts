@@ -7,10 +7,11 @@ export type OutlineSection = {
   endPage: number;
   excerpt: string;
   highlight: string;
-  source: 'detected' | 'standard';
+  source: 'detected' | 'standard' | 'toc';
 };
 
 type Rule = { id: string; title: string; terms: string[] };
+type PageLabelLike = { page: number; printed: number | null };
 
 // The rules are deliberately deterministic. They create a useful reading map
 // even when a PDF has no machine-readable table of contents.
@@ -47,7 +48,67 @@ function sectionScore(content: string, terms: string[]) {
   return best;
 }
 
-export function buildOutline(chunks: ReportChunk[]): OutlineSection[] {
+function parseTocEntries(content: string) {
+  const entries: { title: string; printed: number; highlight: string }[] = [];
+  // A-share 目录 lines: "第一节 释义 …… 4" / "第二节 … P4" / dotted leaders.
+  const re = /(第[一二三四五六七八九十百零〇两\d]+[章节]\s*[^\n\d.…·．.]{1,42}?)\s*(?:[.．…·]{2,}|…+)\s*(?:[Pp]\s*)?(\d{1,3})\b/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(content)) !== null) {
+    const highlight = match[1].replace(/\s+/g, ' ').trim();
+    const title = highlight.replace(/[.．…·\s]+$/g, '').trim();
+    const printed = Number(match[2]);
+    if (!title || printed < 1 || printed > 500) continue;
+    if (entries.some((item) => item.title === title)) continue;
+    entries.push({ title, printed, highlight });
+  }
+  return entries;
+}
+
+function resolveTocPage(title: string, printed: number, chunks: ReportChunk[], labels?: PageLabelLike[]) {
+  const mapped = labels?.find((item) => item.printed === printed)?.page;
+  if (mapped) return mapped;
+  const key = title.replace(/^第[一二三四五六七八九十百零〇两\d]+[章节]\s*/, '').slice(0, 18);
+  for (const chunk of chunks) {
+    if (isContents(chunk.content)) continue;
+    if (chunk.content.includes(title) || (key.length >= 2 && chunk.content.includes(key))) return chunk.page;
+  }
+  // Last resort: treat printed as physical only when it lands inside indexed pages.
+  if (chunks.some((chunk) => chunk.page === printed)) return printed;
+  return null;
+}
+
+function fromToc(chunks: ReportChunk[], labels?: PageLabelLike[]): OutlineSection[] {
+  const raw: { title: string; printed: number; highlight: string }[] = [];
+  for (const chunk of chunks) {
+    if (!isContents(chunk.content) && !/目\s*录/.test(chunk.content.slice(0, 180))) continue;
+    for (const entry of parseTocEntries(chunk.content)) {
+      if (raw.some((item) => item.title === entry.title)) continue;
+      raw.push(entry);
+    }
+  }
+  if (raw.length < 3) return [];
+  const output: OutlineSection[] = [];
+  for (const [index, entry] of raw.entries()) {
+    const page = resolveTocPage(entry.title, entry.printed, chunks, labels);
+    if (page === null) continue;
+    // Same printed/PDF page can host multiple sections (e.g. 第七节+第八节); keep both.
+    if (output.some((item) => item.title === entry.title)) continue;
+    const body = chunks.find((chunk) => chunk.page === page && !isContents(chunk.content)) ?? chunks.find((chunk) => chunk.page === page);
+    output.push({
+      id: `toc-${index + 1}`,
+      title: entry.title,
+      level: 1,
+      page,
+      endPage: page,
+      excerpt: body ? cleanExcerpt(body.content, entry.highlight) : entry.title,
+      highlight: entry.highlight,
+      source: 'toc',
+    });
+  }
+  return output.length >= 3 ? output : [];
+}
+
+function fromHeuristic(chunks: ReportChunk[]): OutlineSection[] {
   const output: OutlineSection[] = [];
   for (const rule of standardRules) {
     const hit = chunks.map(chunk => ({ ...chunk, score: sectionScore(chunk.content, rule.terms) }))
@@ -67,6 +128,12 @@ export function buildOutline(chunks: ReportChunk[]): OutlineSection[] {
     output.push({ id: `detected-${chunk.page}`, title, level: 2, page: chunk.page, endPage: chunk.page, excerpt: cleanExcerpt(chunk.content, match[0]), highlight: match[0], source: 'detected' });
     if (output.filter((item) => item.source === 'detected').length >= 12) break;
   }
+  return output;
+}
+
+export function buildOutline(chunks: ReportChunk[], labels?: PageLabelLike[]): OutlineSection[] {
+  const toc = fromToc(chunks, labels);
+  const output = toc.length ? toc : fromHeuristic(chunks);
   return output.sort((a, b) => a.page - b.page || a.level - b.level).map((item, index, all) => ({
     ...item,
     endPage: Math.max(item.page, (all[index + 1]?.page ?? item.page) - 1),

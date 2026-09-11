@@ -1,5 +1,4 @@
 import { getDb } from '@/lib/db';
-import { requireAppUser } from '@/lib/auth';
 import { ApiError, apiError } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
@@ -8,8 +7,6 @@ type ReportRow = Record<string, unknown> & { id: string };
 type MetricRow = Record<string, unknown> & { announcement_id: string };
 
 export async function GET(request: Request) {
-  const denied = requireAppUser(request);
-  if (denied) return denied;
   const url = new URL(request.url);
   const requestedLimit = Number(url.searchParams.get('limit') ?? 50);
   if (!Number.isInteger(requestedLimit) || requestedLimit < 1) return apiError(new ApiError(400, 'limit 必须为正整数'));

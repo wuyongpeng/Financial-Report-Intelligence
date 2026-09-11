@@ -56,3 +56,20 @@ test('key findings rank flagged moves first and never invent a comparison', () =
   // Without a prior period there is nothing comparable to report.
   assert.deepEqual(keyFindings([current], current).filter((f) => f.headline.includes('同比')), []);
 });
+
+test('YoY headline uses two decimal places (Maotai-like revenue)', () => {
+  const metric = (name: string, value: number) => ({ metric: name as never, value, unit: '元', source_page: 6, source_label: name, confidence: 0.9, verified: 0, period: '' });
+  const build = (id: string, period: string, revenue: number) => ({
+    id, code: '600519', company_name: '贵州茅台', title: period, report_type: 'annual', published_at: `${period.slice(0, 4)}-04-01`,
+    parsed_at: '2026-01-01', industry: '白酒', status: 'online',
+    metrics: [{ ...metric('revenue', revenue), period }],
+  });
+  const previous = build('prev', '2024FY', 89389354416.84);
+  const current = build('curr', '2025FY', 90703260964.48);
+  assert.ok(Math.abs(change(90703260964.48, 89389354416.84)! - 1.469) < 0.01);
+  const findings = keyFindings([previous, current], current);
+  const rev = findings.find((f) => f.metric === 'revenue');
+  assert.ok(rev);
+  assert.ok(rev!.headline.includes('1.47'), `expected 1.47 in ${rev!.headline}`);
+  assert.ok(!rev!.headline.includes('+1.5%'));
+});

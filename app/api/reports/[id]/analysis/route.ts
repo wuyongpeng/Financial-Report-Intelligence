@@ -1,5 +1,4 @@
 import { getDb } from '@/lib/db';
-import { requireAppUser } from '@/lib/auth';
 
 type Metric = { metric: string; value: number; unit: string; period: string };
 
@@ -9,8 +8,6 @@ function change(current?: number, previous?: number) {
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
-  const denied = requireAppUser(request);
-  if (denied) return denied;
   const { id } = await context.params;
   const db = getDb();
   const [target] = await db<Array<{ code: string; industry: string; report_type: string }>>`

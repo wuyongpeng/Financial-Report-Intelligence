@@ -1,20 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import { appSessionOwner, requireAppUser } from '@/lib/auth';
+import { appSessionOwner } from '@/lib/auth';
 import { apiError, ApiError, readObject, requiredText, uuid } from '@/lib/api';
 import { beginTurn, finishTurn, type AnswerResult, type MemoryMessage } from '@/lib/conversations';
 import { loadRagContext } from '@/lib/rag';
 import { generateAnswer } from '@/lib/answer';
+import { assembleFocusPrompt, focusContextBlock, parseFocus, QUESTION_MAX } from '@/lib/focus-prompt';
 
 export const dynamic = 'force-dynamic';
 const encoder = new TextEncoder();
 
 export async function POST(request: Request) {
-  const denied = requireAppUser(request); if (denied) return denied;
   let lease: { owner: string; conversationId: string; requestId: string } | undefined;
   try {
     const body = await readObject(request);
     const reportId = requiredText(body.reportId, 'reportId');
-    const question = requiredText(body.question, 'question', 2000);
+    const typed = requiredText(body.question, 'question', QUESTION_MAX);
+    const focus = parseFocus(body.focus ?? body.pendingItems);
+    const question = assembleFocusPrompt(typed, focus);
+    if (question.length > 12_000) throw new ApiError(413, '关注内容过长，请减少摘录后再试');
     if (body.stream !== undefined && typeof body.stream !== 'boolean') throw new ApiError(400, 'stream 必须为布尔值');
     if (body.summary !== undefined && typeof body.summary !== 'boolean') throw new ApiError(400, 'summary 必须为布尔值');
     const requestId = body.requestId === undefined ? randomUUID() : uuid(body.requestId, 'requestId');
@@ -28,6 +31,10 @@ export async function POST(request: Request) {
       if (!replay) lease = { owner, conversationId, requestId };
     }
     const context = replay ? null : await loadRagContext(reportId, question, history, body.summary === true);
+    if (context && focus.length) {
+      const block = focusContextBlock(focus);
+      if (block) context.structuredContext = `${block}\n\n${context.structuredContext}`;
+    }
     const persist = async (result: AnswerResult) => {
       if (lease) await finishTurn(lease.owner, lease.conversationId, lease.requestId, result);
     };

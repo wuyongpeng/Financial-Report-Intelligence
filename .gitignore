@@ -42,3 +42,9 @@ next-env.d.ts
 !/data/golden-samples.json
 !/data/golden-questions.json
 !/data/metric-ground-truth.json
+
+# Contest submission materials (PII) — keep outside the repo
+*.docx
+docs/*初审*
+docs/*项目书*
+docs/*大赛*

@@ -102,7 +102,7 @@ export function keyFindings(reports: Report[], selected: Report): Finding[] {
     out.push({
       id: `finding-${metric}`,
       metric,
-      headline: `${labels[metric]}同比 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`,
+      headline: `${labels[metric]}同比 ${delta >= 0 ? '+' : ''}${delta.toFixed(2)}%`,
       detail: `本期 ${format(current, metric)}，上年同期 ${format(value(prior, metric), metric)}${extreme}`,
       module: 'anomalies',
       severity: Math.abs(delta) >= 30 ? 'watch' : 'info',

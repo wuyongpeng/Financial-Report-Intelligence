@@ -1,5 +1,4 @@
 import { getDb } from '@/lib/db';
-import { requireAppUser } from '@/lib/auth';
 
 // Follow-up questions are a navigation aid, never an answer: they must stay short,
 // answerable from this single report, and must degrade to a static list when the
@@ -60,8 +59,6 @@ async function generate(prompt: string) {
 }
 
 export async function POST(request: Request) {
-  const denied = requireAppUser(request);
-  if (denied) return denied;
   const body = await request.json().catch(() => ({})) as { reportId?: string; question?: string; answer?: string; asked?: string[] };
   if (!body.reportId || !body.question?.trim()) return Response.json({ error: '缺少 reportId 或 question' }, { status: 400 });
   const asked = [body.question, ...(body.asked ?? [])].filter((q): q is string => Boolean(q));

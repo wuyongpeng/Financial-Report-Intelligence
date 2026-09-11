@@ -1,11 +1,9 @@
-import { requireAppUser } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 import { apiError, ApiError } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
-  const denied = requireAppUser(request); if (denied) return denied;
   try {
     const { id } = await context.params;
     const [row] = await getDb()`SELECT a.id, a.company_name, a.source, a.pdf_url, a.status,
