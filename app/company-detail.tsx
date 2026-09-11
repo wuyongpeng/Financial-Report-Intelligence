@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { amount, cashConversion, change, comparableHistory, debtRatio, format, grossMargin, keyFindings, labels, metricNames, moduleForQuestion, period, periodKey, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
 import PdfEvidence from './pdf-evidence';
@@ -76,7 +77,7 @@ function Radar({ peers, code }: { peers: Peer[]; code: string }) {
   </svg><p className="cd-note"><i className="cd-dot" />同报告期 · 覆盖 {codes.length} 家 · 0–100 百分位</p><p className="cd-note">固定六轴；缺项不补零、不连线。每轴下方标注该轴实际样本量——不同轴的样本可能不同，跨轴比较需谨慎，且不代表完整行业排名。</p></>;
 }
 
-export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void }) {
+export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null }) {
   const [reports, setReports] = useState<Report[]>([initialReport]);
   const [selected, setSelected] = useState(initialReport);
   const [outline, setOutline] = useState<Outline>(emptyOutline);
@@ -134,6 +135,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const chatEnd = useRef<HTMLDivElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const overviewRef = useRef<HTMLDivElement>(null);
+  const autoAskedRef = useRef(false);
+  const askRef = useRef<(text: string) => Promise<void>>(async () => undefined);
+  const [periodBootstrapDone, setPeriodBootstrapDone] = useState(!preferredPeriod);
   const [overviewPick, setOverviewPick] = useState<null | { quote: string; x: number; y: number; kind: FocusKind; page?: number; title?: string }>(null);
 
   function selectReport(report: Report) {
@@ -154,9 +158,23 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (abort.signal.aborted) return;
       const parsed = data.reports.filter(r => r.parsed_at || r.metrics.length).sort((a,b) => periodKey(b)-periodKey(a) || b.published_at.localeCompare(a.published_at));
       const all = parsed.length ? parsed : data.reports;
-      setReports(all); const latest = all[0];
+      setReports(all);
+      const hint = preferredPeriod ? parsePeriodHints(preferredPeriod) : parsePeriodHints('');
+      if (preferredPeriod && !hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(preferredPeriod)) {
+        hint.token = preferredPeriod.toUpperCase();
+      }
+      const matched = preferredPeriod
+        ? all.find(r => reportMatchesPeriod(r, hint) || r.metrics.some(m => m.period === preferredPeriod) || r.title.includes(preferredPeriod))
+        : null;
+      const latest = matched ?? all[0];
       if (latest) selectReport(latest);
-    }).catch(() => { if (!abort.signal.aborted) setError('多期财报暂时无法加载，当前仍可阅读已选报告。'); });
+      if (!abort.signal.aborted) setPeriodBootstrapDone(true);
+    }).catch(() => {
+      if (!abort.signal.aborted) {
+        setError('多期财报暂时无法加载，当前仍可阅读已选报告。');
+        setPeriodBootstrapDone(true);
+      }
+    });
     return () => { abort.abort(); requestRef.current?.abort(); };
     // One company owns this workspace; changing a period must not reload or reset the list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -686,6 +704,29 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     finally { if (activeId.current === id && !controller.signal.aborted) { busyRef.current = false; setAsking(false); setThinking(false); } }
     if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
   }
+  askRef.current = ask;
+
+  // Home deep-link: fill + send once preferred period is resolved and chat memory is ready.
+  useEffect(() => {
+    if (!autoAskQuestion || autoAskedRef.current) return;
+    if (!periodBootstrapDone || memoryLoading || loading || asking) return;
+    if (!memoryReady.current || busyRef.current) return;
+    if (preferredPeriod) {
+      const hint = parsePeriodHints(preferredPeriod);
+      if (!hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(preferredPeriod)) hint.token = preferredPeriod.toUpperCase();
+      const ok = reportMatchesPeriod(selected, hint)
+        || selected.metrics.some(m => m.period === preferredPeriod)
+        || selected.title.includes(preferredPeriod);
+      // If no report matched the hint, still ask against the best available period.
+      if (!ok && selected.metrics.length === 0 && !selected.parsed_at) return;
+    }
+    autoAskedRef.current = true;
+    setChatCollapsed(false);
+    setMobilePane('chat');
+    setQuestion(autoAskQuestion);
+    void askRef.current(autoAskQuestion);
+  }, [autoAskQuestion, preferredPeriod, periodBootstrapDone, memoryLoading, loading, asking, selected]);
+
   async function newConversation() {
     if (busyRef.current || !memoryReady.current) return;
     const id = selected.id;
@@ -844,14 +885,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           <p className="cd-chat-lead">中间栏已经给出结论与发现。这里继续追问原因、对比或原文依据；没有证据时会明确说明。</p>
           <div className="cd-suggest-label">推荐追问</div><div className="cd-suggestions">{suggestions.map(q=><button key={q} disabled={asking} onClick={()=>draftAsk(q)}>{q}<span>↗</span></button>)}</div>
           {messages.length>0&&<div className="cd-conversation-label">围绕 {period(selected)} 的对话</div>}
-          {messages.map((m,i)=><div key={i} className={`cd-message cd-message-${m.role}`}>{m.role==='assistant'&&<b className="cd-answer-label">✧ 财报助手</b>}<p>{m.role==='assistant'?renderAnswer(m):m.text}{!m.text&&asking?(thinking?'模型正在推理，请稍候…':'正在检索财报证据…'):''}</p>
+          {messages.map((m,i)=><div key={i} className={`cd-message cd-message-${m.role}`}>{m.role==='assistant'&&<b className="cd-answer-label">✧ Eva</b>}<p>{m.role==='assistant'?renderAnswer(m):m.text}{!m.text&&asking?(thinking?'模型正在推理，请稍候…':'正在检索财报证据…'):''}</p>
             {m.role==='assistant'&&(m.followupBusy||m.followups?.length)?<div className="cd-followups"><small>{m.followupBusy?'正在生成相关追问…':'继续追问'}</small>{m.followups?.length?<div className="cd-followup-list">{m.followups.map(q=><button key={q} disabled={asking} onClick={()=>draftAsk(q)}>{q}<span>↗</span></button>)}</div>:null}</div>:null}</div>)}<div ref={chatEnd}/>
         </div><form className="cd-chat-input" onSubmit={e=>{e.preventDefault();void ask(question);}}>
           {clipToast && <div className="cd-clip-toast" role="status">{clipToast}</div>}
           {clips.length>0 && <div className={`cd-clips ${clipsFlash?'cd-clips-flash':''}`} aria-label="AI分析关注">
             <ul>{clips.map(c => <li key={c.id}><span>{clipChipLabel(c)}</span><button type="button" aria-label="移除" onClick={()=>removeClip(c.id)}>×</button></li>)}</ul>
           </div>}
-          <div className="cd-composer"><textarea ref={questionRef} aria-label="向财报助手提问" placeholder="随意划词，灵活追问" rows={1} value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void ask(question);}}}/><button aria-label="发送问题" disabled={asking||memoryLoading||(!question.trim()&&!clips.length)} type="submit">{asking?'…':<svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z"/></svg>}</button></div>
+          <div className="cd-composer"><textarea ref={questionRef} aria-label="向 Eva 提问" placeholder="随意划词，灵活追问" rows={1} value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void ask(question);}}}/><button aria-label="发送问题" disabled={asking||memoryLoading||(!question.trim()&&!clips.length)} type="submit">{asking?'…':<svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z"/></svg>}</button></div>
           {memoryLoading && <small>正在恢复历史会话…</small>}</form>
       </aside>
       {sourceCollapsed && <div className="cd-rail cd-rail-left"><button aria-label="展开来源栏" title="展开来源栏" aria-expanded={false} aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(false);setMobilePane('sources');}}><DockIcon side="left" /></button><span>来源</span></div>}

@@ -11,7 +11,8 @@
 ```
 
 - 公告发现：上交所、深交所为主源，巨潮为交叉兜底；按公告 ID 与逻辑 ID 去重，已入库公告跳过。
-- 下载策略：低频小批量、明确 `User-Agent` 和来源页 `Referer`，每次最多下载 5 份、解析 3 份；不绕过验证码或访问控制。遇到失败会记录，下一轮再试。
+- 下载策略：低频小批量、明确 `User-Agent` 和来源页 `Referer`；默认每次最多下载 2 份、解析 1 份，源页/PDF 之间有可配置暂停（`PAGE_PAUSE_MS` / `DOWNLOAD_PAUSE_MS`），三源顺序拉取；不绕过验证码或访问控制。遇到失败会记录，下一轮再试。
+- 短链详情：`/[六位代码]`（如 `/300750`），仍兼容 `/?code=`。
 - 解析：PDF 文本/表格解析后以规则提取营收、归母净利润、EPS、ROE，数值、字段名和页码存库。
 - 存储：`db` 服务的数据在 `data/postgres`，PDF 在 `data/reports`。后续把这两个适配层换为公司 PostgreSQL/S3 即可，不影响页面和采集流程。
 
@@ -72,6 +73,22 @@ docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select sta
 ## 后续平移边界
 
 应用只有两处基础设施适配：`lib/db.ts`（PostgreSQL 连接）和 `lib/storage.ts`（本地文件系统）。迁移到公司 PostgreSQL 与 S3 时替换这些适配层、迁移数据目录即可；采集、解析、API 和页面不需要重写。
+
+## 温和抓取 Worker（演示推荐）
+
+不要一次拉满 60 家 PDF。默认限流：
+
+```bash
+INGEST_INTERVAL_MS=600000 \
+INGEST_DOWNLOAD_LIMIT=2 \
+INGEST_PARSE_LIMIT=1 \
+INGEST_MAX_PAGES=8 \
+PAGE_PAUSE_MS=1000 \
+DOWNLOAD_PAUSE_MS=1200 \
+npm run worker
+```
+
+也可在首页 / `/crawl` 点「触发温和抓取」（`POST /api/crawl/trigger`，每次 backlog 仅下载 1 + 解析 1；`APP_DEMO_ACCESS=true` 或登录会话或 `INTERNAL_INGEST_TOKEN` 可授权）。
 
 ## 本机开发与真实数据验收
 

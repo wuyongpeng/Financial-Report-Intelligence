@@ -103,31 +103,53 @@ export async function fetchSzse(days = 2, page = 1, pageSize = 200): Promise<Sou
   return { items, rawCount: raw.length };
 }
 
+function pagePauseMs() {
+  const base = Number(process.env.PAGE_PAUSE_MS ?? 1000);
+  return Number.isFinite(base) ? Math.max(250, base) : 1000;
+}
+
+function withJitter(ms: number) {
+  const jitter = Math.floor(Math.random() * Math.min(500, Math.max(100, ms * 0.4)));
+  return ms + jitter;
+}
+
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Sequential source polling — never fan out all exchanges at once (anti-ban). */
 export async function fetchAllSources(days = 2) {
-  const budget = Number(process.env.INGEST_MAX_PAGES ?? 20);
-  const maxPages = Number.isInteger(budget) ? Math.min(Math.max(budget, 1), 100) : 20;
-  const results = await Promise.allSettled([
-    collectPages(page => fetchSse(days, page), maxPages),
-    collectPages(page => fetchSzse(days, page), maxPages),
-    collectPages(page => fetchCninfo(days, page), maxPages),
-  ]);
+  const budget = Number(process.env.INGEST_MAX_PAGES ?? 8);
+  const maxPages = Number.isInteger(budget) ? Math.min(Math.max(budget, 1), 40) : 8;
+  const pause = pagePauseMs();
   const announcements: Announcement[] = [];
   const health: Record<string, { ok: boolean; count: number; error?: string }> = {};
-  ['SSE', 'SZSE', 'CNINFO'].forEach((source, index) => {
-    const result = results[index];
-    if (result.status === 'fulfilled') {
-      announcements.push(...result.value.items);
-      health[source] = { ok: result.value.complete, count: result.value.items.length, ...(result.value.complete ? {} : { error: result.value.error ?? 'Pagination incomplete; retry required' }) };
-    } else {
-      health[source] = { ok: false, count: 0, error: String(result.reason) };
+  const jobs: Array<[string, (page: number) => Promise<SourcePage>]> = [
+    ['SSE', (page) => fetchSse(days, page)],
+    ['SZSE', (page) => fetchSzse(days, page)],
+    ['CNINFO', (page) => fetchCninfo(days, page)],
+  ];
+  for (let i = 0; i < jobs.length; i++) {
+    const [source, fetchPage] = jobs[i];
+    try {
+      const result = await collectPages(fetchPage, maxPages, pause);
+      announcements.push(...result.items);
+      health[source] = {
+        ok: result.complete,
+        count: result.items.length,
+        ...(result.complete ? {} : { error: result.error ?? 'Pagination incomplete; retry required' }),
+      };
+    } catch (error) {
+      health[source] = { ok: false, count: 0, error: String(error) };
     }
-  });
+    if (i < jobs.length - 1) await sleep(withJitter(pause));
+  }
   return { announcements, health };
 }
 
 // Do not infer completion from the filtered report count: an entire page can
 // contain unrelated announcements. A page cap is reported as incomplete.
-export async function collectPages(fetchPage: (page: number) => Promise<SourcePage>, maxPages = 20, pauseMs = 250) {
+export async function collectPages(fetchPage: (page: number) => Promise<SourcePage>, maxPages = 8, pauseMs = pagePauseMs()) {
   const unique = new Map<string, Announcement>();
   for (let page = 1; page <= maxPages; page++) {
     let result: SourcePage;
@@ -137,7 +159,7 @@ export async function collectPages(fetchPage: (page: number) => Promise<SourcePa
     const before = unique.size;
     for (const item of result.items) unique.set(`${item.source}:${item.sourceId}`, item);
     if (result.items.length && unique.size === before) return { items: [...unique.values()], complete: false, error: 'Source returned a repeated page' };
-    if (page < maxPages && pauseMs) await new Promise(resolve => setTimeout(resolve, pauseMs));
+    if (page < maxPages && pauseMs) await sleep(withJitter(pauseMs));
   }
   return { items: [...unique.values()], complete: false, error: 'Pagination budget reached' };
 }

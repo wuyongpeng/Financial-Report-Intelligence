@@ -44,6 +44,7 @@ function periodFromTitle(title: string, publishedAt: string) {
 
 async function seedCompanies(now: string) {
   const db = getDb();
+  const codes = companies.map((company) => company.code);
   await db.begin(async (tx) => {
     for (const company of companies) {
       await tx`
@@ -52,6 +53,10 @@ async function seedCompanies(now: string) {
         ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, exchange=EXCLUDED.exchange,
           industry=EXCLUDED.industry, rank=EXCLUDED.rank, weight=EXCLUDED.weight, enabled=true, updated_at=EXCLUDED.updated_at
       `;
+    }
+    // Keep historical rows for FK, but stop monitoring anything not in the coverage list.
+    if (codes.length) {
+      await tx`UPDATE companies SET enabled=false, updated_at=${now} WHERE code NOT IN ${tx(codes)}`;
     }
   });
 }
@@ -106,11 +111,21 @@ export async function recoverStaleRuns() {
   `;
 }
 
+function downloadPauseMs() {
+  const base = Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
+  return Number.isFinite(base) ? Math.max(400, base) : 1200;
+}
+
+function withDownloadJitter(ms: number) {
+  return ms + Math.floor(Math.random() * Math.min(600, Math.max(150, ms * 0.35)));
+}
+
 export async function processBacklog(options: { downloadLimit?: number; parseLimit?: number; codes?: string[] } = {}) {
   const db = getDb();
   const downloadLimit = options.downloadLimit ?? 1;
   const parseLimit = options.parseLimit ?? 1;
   const codes = options.codes ?? [];
+  const pauseBetweenDownloads = downloadPauseMs();
   const backlog = await db<StoredAnnouncement[]>`
     SELECT id, source, source_id, code, company_name, title, report_type, published_at, pdf_url, pdf_key, status
     FROM announcements
@@ -160,6 +175,9 @@ export async function processBacklog(options: { downloadLimit?: number; parseLim
           WHERE id=${record.id}
         `;
         downloaded += 1;
+        if (downloaded < downloadLimit) {
+          await new Promise((resolve) => setTimeout(resolve, withDownloadJitter(pauseBetweenDownloads)));
+        }
       } else if (pdfKey && parsed < parseLimit) {
         const object = await readReport(pdfKey);
         if (object) bytes = object.buffer.slice(object.byteOffset, object.byteOffset + object.byteLength);
@@ -216,8 +234,9 @@ export async function runIngestion(options: { days?: number; downloadLimit?: num
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const days = options.days ?? 2;
-  const downloadLimit = options.downloadLimit ?? 5;
-  const parseLimit = options.parseLimit ?? 3;
+  // Gentle defaults: never blast the monitored pool in one tick.
+  const downloadLimit = options.downloadLimit ?? Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2);
+  const parseLimit = options.parseLimit ?? Number(process.env.INGEST_PARSE_LIMIT ?? 1);
   await db`INSERT INTO ingest_runs (id, started_at, status) VALUES (${runId}, ${startedAt}, 'running')`;
 
   try {
