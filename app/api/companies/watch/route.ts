@@ -32,56 +32,134 @@ function companiesJsonPath() {
   return path.join(process.cwd(), 'data', 'companies.json');
 }
 
+function exchangeOf(code: string): 'SSE' | 'SZSE' {
+  return code.startsWith('6') || code.startsWith('9') ? 'SSE' : 'SZSE';
+}
+
+function normalizeName(name: string) {
+  return name.replace(/\s+/g, '').replace(/　/g, '').trim();
+}
+
+/** Best-effort public name lookup when user only supplies a 6-digit code. */
+async function lookupName(code: string, exchange: 'SSE' | 'SZSE'): Promise<string | null> {
+  try {
+    if (exchange === 'SSE') {
+      const url =
+        'https://query.sse.com.cn/commonQuery.do'
+        + `?jsonCallBack=jsonp&isPagination=false&sqlId=COMMON_SSE_ZQPZ_GP_GPLB_AG_L`
+        + `&securityCodeA=${code}`;
+      const res = await fetch(url, {
+        headers: { 'user-agent': 'FinanceReportIntelligence/1.0', referer: 'https://www.sse.com.cn/' },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!res.ok) return null;
+      const text = await res.text();
+      const m = text.match(/"SECURITY_ABBR_A"\s*:\s*"([^"]+)"/)
+        ?? text.match(/"COMPANY_ABBR"\s*:\s*"([^"]+)"/);
+      return m ? normalizeName(m[1]) : null;
+    }
+    const url =
+      `https://www.szse.cn/api/report/ShowReport/data`
+      + `?SHOWTYPE=JSON&CATALOGID=1110&TABKEY=tab1&txtZqdm=${code}`;
+    const res = await fetch(url, {
+      headers: { 'user-agent': 'FinanceReportIntelligence/1.0', referer: 'https://www.szse.cn/' },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    const json = await res.json() as Array<{ data?: Array<Record<string, string>> }>;
+    const rows = Array.isArray(json) ? (json[0]?.data ?? []) : [];
+    const hit = rows.find((row) => String(row.agdm || row.zqdm || '').padStart(6, '0') === code);
+    const name = hit?.agjc || hit?.zqjc || '';
+    return name ? normalizeName(String(name)) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   if (!authorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: { code?: string } = {};
+  let body: { code?: string; name?: string } = {};
   try { body = await request.json(); } catch { /* empty */ }
   const code = String(body.code ?? '').trim();
+  const providedName = normalizeName(String(body.name ?? ''));
   if (!/^\d{6}$/.test(code)) {
     return Response.json({ error: '请提供六位股票代码' }, { status: 400 });
   }
 
   const listed = (ashareUniverse as Listed[]).find((item) => item.code === code);
-  if (!listed) {
-    return Response.json({ error: '未在 A 股识别名录中找到该代码，拒绝加入' }, { status: 404 });
+  const exchange = listed?.exchange ?? exchangeOf(code);
+
+  let name = providedName || listed?.name || '';
+  if (!name) {
+    name = (await lookupName(code, exchange)) ?? '';
+  }
+  if (!name) {
+    return Response.json({
+      error: '该代码不在识别名录中，请同时提供公司简称（name）后再加入',
+      needName: true,
+      code,
+    }, { status: 400 });
   }
 
-  const exchange = listed.exchange ?? (code.startsWith('6') || code.startsWith('9') ? 'SSE' : 'SZSE');
   const now = new Date().toISOString();
 
-  // Persist into companies.json so later seed/bootstrap does not disable it.
-  const filePath = companiesJsonPath();
-  const raw = await readFile(filePath, 'utf8');
-  const rows = JSON.parse(raw) as CompanyFileRow[];
-  const existing = rows.find((row) => row.code === code);
-  if (!existing) {
-    const nextRank = rows.reduce((max, row) => Math.max(max, row.rank || 0), 0) + 1;
-    rows.push({
-      rank: nextRank,
-      code,
-      name: listed.name,
-      exchange,
-      industry: '待分类',
-      sector: '其他',
-      theme: '待分类',
-      heat: 'B',
-      weight: 60,
-    });
-    rows.sort((a, b) => a.rank - b.rank || a.code.localeCompare(b.code));
-    await writeFile(filePath, `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
+  // Optional seed sync only. Runtime watchlist is the companies table.
+  let existing: CompanyFileRow | undefined;
+  let rows: CompanyFileRow[] = [];
+  try {
+    const filePath = companiesJsonPath();
+    const raw = await readFile(filePath, 'utf8');
+    rows = JSON.parse(raw) as CompanyFileRow[];
+    existing = rows.find((row) => row.code === code);
+    if (!existing) {
+      const nextRank = rows.reduce((max, row) => Math.max(max, row.rank || 0), 0) + 1;
+      rows.push({
+        rank: nextRank,
+        code,
+        name,
+        exchange,
+        industry: '待分类',
+        sector: '其他',
+        theme: '待分类',
+        heat: 'B',
+        weight: 60,
+      });
+      rows.sort((a, b) => a.rank - b.rank || a.code.localeCompare(b.code));
+      await writeFile(filePath, `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
+      existing = rows.find((row) => row.code === code);
+    } else if (providedName && existing.name !== providedName) {
+      existing.name = providedName;
+      await writeFile(filePath, `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
+    }
+  } catch {
+    /* non-fatal — Docker worker may not share this file */
+  }
+
+  // Best-effort: enrich local recognition universe for next search.
+  try {
+    const universePath = path.join(process.cwd(), 'data', 'ashare-universe.json');
+    const universe = JSON.parse(await readFile(universePath, 'utf8')) as Listed[];
+    if (!universe.some((row) => row.code === code)) {
+      universe.push({ code, name, exchange });
+      universe.sort((a, b) => a.code.localeCompare(b.code));
+      await writeFile(universePath, `${JSON.stringify(universe, null, 2)}\n`, 'utf8');
+    }
+  } catch {
+    /* non-fatal */
   }
 
   const db = getDb();
   const rank = existing?.rank ?? rows.find((row) => row.code === code)?.rank ?? 999;
   const weight = existing?.weight ?? 60;
   const industry = existing?.industry ?? '待分类';
+  const finalName = existing && !providedName ? existing.name : name;
 
   await db`
     INSERT INTO companies (code, name, exchange, industry, rank, weight, enabled, created_at, updated_at)
-    VALUES (${code}, ${listed.name}, ${exchange}, ${industry}, ${rank}, ${weight}, true, ${now}, ${now})
+    VALUES (${code}, ${finalName}, ${exchange}, ${industry}, ${rank}, ${weight}, true, ${now}, ${now})
     ON CONFLICT (code) DO UPDATE SET
       name=EXCLUDED.name,
       exchange=EXCLUDED.exchange,
@@ -96,8 +174,9 @@ export async function POST(request: Request) {
 
   return Response.json({
     ok: true,
-    company: { code, name: listed.name, exchange, industry, rank, weight },
+    company: { code, name: finalName, exchange, industry, rank, weight },
     enabledCount: enabled[0]?.n ?? null,
-    note: `已将「${listed.name}」加入监控池`,
+    fromUniverse: Boolean(listed),
+    note: `已将「${finalName}」加入监控池`,
   }, { headers: { 'cache-control': 'no-store' } });
 }

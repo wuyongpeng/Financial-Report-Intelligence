@@ -3,7 +3,23 @@
  * Real data comes from /api/crawl; mock remains a last-resort fallback only.
  */
 export type CrawlSourceKind = 'exchange' | 'cninfo';
-export type ParseStatus = 'completed' | 'parsing' | 'failed' | 'pending';
+export type ParseStatus = 'completed' | 'parsing' | 'queued' | 'failed' | 'pending';
+export type PeriodCollectState = 'parsed' | 'parsed_partial' | 'downloaded' | 'discovered' | 'expected' | 'failed';
+export type CrawlPeriodStatus = {
+  period: string;
+  state: PeriodCollectState;
+  title?: string | null;
+  /** announcements.id when this period is already discovered/downloaded */
+  announcementId?: string | null;
+  /** 该期次实际抓取源：SSE / SZSE / BSE / CNINFO */
+  sourceApi?: string | null;
+  /** announcements.status 原始管道态 */
+  rawStatus?: string | null;
+  /** 指标不完整时列出缺项（橙「已解析」悬停用） */
+  missingMetrics?: Array<'revenue' | 'net_profit' | 'eps' | 'roe'>;
+  /** 硬失败时的错误摘要（红「解析失败」悬停用） */
+  parseError?: string | null;
+};
 export type CrawlReportType = 'annual' | 'semiannual' | 'quarterly' | 'other';
 export type IndustryGroup = '科技' | '消费' | '新能源' | '医药' | '金融' | '周期' | '制造军工' | '其他';
 export type HeadlineMetricName = 'revenue' | 'net_profit' | 'eps' | 'roe';
@@ -42,6 +58,12 @@ export type CrawlCompanyCoverage = {
   metricsComplete: boolean;
   missingMetrics: HeadlineMetricName[];
   metrics: CrawlMetricPreview[];
+  /** Up to a few latest report-period tokens, e.g. 2026Q1 / 2026H1 / 2025FY */
+  recentPeriods: string[];
+  /** Collected + expected periods so UI does not imply “fully done” from an old H1. */
+  periodStatuses?: CrawlPeriodStatus[];
+  latestExpectedPeriod?: string;
+  latestExpectedMissing?: boolean;
   popularity: number;
   rank: number;
 };
@@ -91,10 +113,12 @@ export function sourceKindFromAnnouncement(source: string | null | undefined): C
 export function parseStatusFromAnnouncement(status: string | null | undefined, metricCount: number): ParseStatus {
   if (!status) return 'pending';
   if (status === 'online' || status === 'review') return metricCount > 0 ? 'completed' : 'parsing';
-  if (status === 'parse_partial') return metricCount > 0 ? 'completed' : 'parsing';
-  if (status === 'downloaded') return 'parsing';
-  if (status === 'discovered') return 'pending';
-  if (status === 'download_failed' || status === 'parse_failed') return 'failed';
+  if (status === 'parsing') return 'parsing';
+  // 指标不完整只标注，视为已解析完成（不自动重试）
+  if (status === 'parse_partial') return 'completed';
+  if (status === 'downloaded') return 'queued'; // 排队解析：已下载，尚未进入解析槽
+  if (status === 'discovered' || status === 'downloading') return 'pending';
+  if (status === 'download_failed' || status === 'parse_failed' || status === 'parse_parked') return 'failed';
   return 'pending';
 }
 
@@ -106,21 +130,47 @@ export function reportTypeFromValue(value: string | null | undefined): CrawlRepo
 
 export function sourceBadgeLabel(source: CrawlSourceKind | null) {
   if (source === 'exchange') return '交易所直连';
-  if (source === 'cninfo') return '巨潮资讯兜底';
+  if (source === 'cninfo') return '巨潮资讯';
   return '尚未抓取';
 }
 
 export function sourceBadgeDetail(source: CrawlSourceKind | null) {
   if (source === 'exchange') return '交易所直连 ✓';
-  if (source === 'cninfo') return '巨潮资讯兜底命中 ✓';
+  if (source === 'cninfo') return '巨潮资讯命中 ✓';
   return '监控池内，等待温和抓取';
+}
+
+/** PDF 已落到本地（用户口中的「已接入」） */
+export function hasDownloadedPdf(item: {
+  downloadedAt?: string | null;
+  rawStatus?: string | null;
+  pdfKey?: string | null;
+}) {
+  if (item.downloadedAt) return true;
+  if (item.pdfKey) return true;
+  const s = item.rawStatus ?? '';
+  return s === 'downloaded' || s === 'parsing' || s === 'review' || s === 'online' || s === 'parse_partial' || s === 'parse_parked';
+}
+
+/** 首页卡片是否展示指标区：已下载且至少有一项核心指标 */
+export function hasReadableMetrics(item: { metrics?: unknown[]; downloadedAt?: string | null; rawStatus?: string | null }) {
+  return hasDownloadedPdf(item) && Array.isArray(item.metrics) && item.metrics.length > 0;
 }
 
 export function parseStatusLabel(status: ParseStatus) {
   if (status === 'completed') return '已解析';
   if (status === 'parsing') return '解析中';
+  if (status === 'queued') return '排队解析';
   if (status === 'pending') return '待抓取';
   return '失败';
+}
+
+export function periodStateLabel(state: PeriodCollectState) {
+  if (state === 'parsed' || state === 'parsed_partial') return '已解析';
+  if (state === 'failed') return '解析失败';
+  if (state === 'downloaded') return '已下载';
+  if (state === 'discovered') return '已发现';
+  return '待抓取';
 }
 
 export function reportTypeLabel(type: CrawlReportType | null) {
@@ -163,6 +213,28 @@ export function freshnessLabel(iso: string | null | undefined, now = Date.now())
   return `${Math.floor(mins / (60 * 24))} 天前`;
 }
 
+/** Prefer download time, then discovery, then lastCrawl for card freshness. */
+export function freshnessAt(item: {
+  downloadedAt?: string | null;
+  discoveredAt?: string | null;
+  lastCrawlAt?: string | null;
+}) {
+  return item.downloadedAt || item.discoveredAt || item.lastCrawlAt || null;
+}
+
+/** Explain what the relative time on a home card means. */
+export function freshnessTooltip(item: {
+  downloadedAt?: string | null;
+  discoveredAt?: string | null;
+  lastCrawlAt?: string | null;
+}) {
+  if (item.downloadedAt) return '相对时间按 PDF 下载完成时刻计算';
+  if (item.discoveredAt) return '相对时间按公告发现时刻计算（尚未下载 PDF）';
+  if (item.lastCrawlAt) return '相对时间按最近一次公告时间计算';
+  return '尚无抓取记录';
+}
+
+
 export function isUpdatedToday(iso: string | null | undefined, now = Date.now()) {
   if (!iso) return false;
   const d = new Date(iso);
@@ -174,6 +246,28 @@ export function isUpdatedThisWeek(iso: string | null | undefined, now = Date.now
   if (!iso) return false;
   const mins = (now - new Date(iso).getTime()) / 60000;
   return mins <= 60 * 24 * 7;
+}
+
+
+/** Sort key for compact period tokens like 2026Q1 / 2026H1 / 2025FY (newer = larger). */
+export function periodTokenKey(token: string) {
+  const year = Number(token.match(/20\d{2}/)?.[0] ?? 0);
+  const quarter = /FY/.test(token) ? 4 : /H1|Q2/.test(token) ? 2 : /Q3/.test(token) ? 3 : /Q1/.test(token) ? 1 : 0;
+  return year * 10 + quarter;
+}
+
+/** Keep unique period tokens, newest first, capped. */
+export function pickRecentPeriods(tokens: string[], limit = 3) {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const raw of tokens) {
+    const t = String(raw ?? '').trim();
+    if (!/^20\d{2}(FY|H1|Q[1-3])$/.test(t) || seen.has(t)) continue;
+    seen.add(t);
+    unique.push(t);
+  }
+  unique.sort((a, b) => periodTokenKey(b) - periodTokenKey(a));
+  return unique.slice(0, limit);
 }
 
 export function computeStats(companies: CrawlCompanyCoverage[], lastPollAt: string | null): CrawlStats {

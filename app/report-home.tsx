@@ -1,9 +1,13 @@
 'use client';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import {
+  freshnessAt,
   freshnessLabel,
+  freshnessTooltip,
   formatMetricValue,
+  hasDownloadedPdf,
+  hasReadableMetrics,
   INDUSTRY_CHIPS,
   yoyChange,
   type CrawlCompanyCoverage,
@@ -21,6 +25,7 @@ import {
   pickBestReport,
   type ParsedPeriod,
 } from '@/lib/home-search';
+import { matchesCompanyQuery } from '@/lib/company-query';
 import type { Report } from '@/lib/detail-model';
 import './report-home.css';
 
@@ -30,10 +35,18 @@ type ListSortKey = 'name' | 'code' | 'industry' | 'revenue' | 'net_profit' | 'ep
 type ListSortDir = 'asc' | 'desc';
 
 type DialogState =
-  | { kind: 'unrecognized'; query: string }
+  | { kind: 'unrecognized'; query: string; suggestedCode?: string }
   | { kind: 'missing-company'; listed: { code: string; name: string }; query?: string }
   | { kind: 'missing-report'; company: CrawlCompanyCoverage; period: ParsedPeriod }
 ;
+
+const SEARCH_PLACEHOLDERS = [
+  '贵州茅台2026半年报增长是否缓慢？',
+  '招商银行净利润同比怎么样？',
+  '宁德时代毛利率最近怎么变？',
+  '工业富联营收和净利谁更快？',
+  '对比茅台和五粮液的ROE',
+] as const;
 
 const VIEW_STORAGE_KEY = 'home_view_mode';
 const STAR_STORAGE_KEY = 'home_starred_codes';
@@ -43,20 +56,39 @@ function deltaLabel(n: number | undefined) {
 }
 
 function matchKeyword(item: CrawlCompanyCoverage, keyword: string) {
-  if (!keyword) return true;
-  const hay = `${item.name} ${item.code} ${item.industry} ${item.industryGroup} ${item.theme ?? ''}`.toLowerCase();
-  return keyword.split(/\s+/).filter(Boolean).every((part) => hay.includes(part));
+  return matchesCompanyQuery(keyword, item);
 }
 
 function isConnected(item: CrawlCompanyCoverage) {
-  return item.metrics.length > 0;
+  return hasDownloadedPdf(item);
 }
 
 function statusMeta(item: CrawlCompanyCoverage) {
-  if (item.metrics.length) return '已接入可读财报';
-  if (item.covered || item.parseStatus === 'parsing') return '等待解析';
-  if (item.parseStatus === 'failed') return '解析失败';
+  if (hasReadableMetrics(item)) return '已接入';
+  if (hasDownloadedPdf(item) && (item.parseStatus === 'failed' || item.parseError)) return '解析失败';
+  if (hasDownloadedPdf(item) && item.parseStatus === 'parsing') return '已下载·解析中';
+  if (hasDownloadedPdf(item) && item.parseStatus === 'queued') return '已下载·排队解析';
+  if (hasDownloadedPdf(item)) return '已接入·待解析';
+  if (item.parseStatus === 'failed') return '抓取失败';
+  if (item.covered) return '已发现·待下载';
   return '等待抓取';
+}
+
+function recentPeriodTokens(item: CrawlCompanyCoverage) {
+  const periods = item.recentPeriods?.filter(Boolean).slice(0, 3) ?? [];
+  if (periods.length) return periods;
+  if (item.reportPeriod) return [item.reportPeriod];
+  return [] as string[];
+}
+
+function recentPeriodsLabel(item: CrawlCompanyCoverage) {
+  return recentPeriodTokens(item).join(' | ');
+}
+
+function shortParseError(err: string | null | undefined) {
+  if (!err) return '解析未完成，可在数据采集页重试';
+  const one = err.replace(/\s+/g, ' ').trim();
+  return one.length > 72 ? `${one.slice(0, 72)}…` : one;
 }
 
 function metricByName(item: CrawlCompanyCoverage, name: string) {
@@ -151,10 +183,26 @@ export default function ReportHome() {
   const [submitting, setSubmitting] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
+  const [crawlingCodes, setCrawlingCodes] = useState<string[]>([]);
+  const [joinCode, setJoinCode] = useState('');
+  const [joinName, setJoinName] = useState('');
+  /** Card grid: show 3 rows first, then reveal one-by-one as user scrolls. */
+  const [visibleCardCount, setVisibleCardCount] = useState(9);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
+
 
   useEffect(() => {
     setStarred(readStarredCodes());
   }, []);
+
+  useEffect(() => {
+    if (search.trim()) return;
+    const timer = window.setInterval(() => {
+      setPlaceholderIndex((i) => (i + 1) % SEARCH_PLACEHOLDERS.length);
+    }, 4800);
+    return () => window.clearInterval(timer);
+  }, [search]);
 
   const refreshCoverage = useCallback(async () => {
     try {
@@ -188,6 +236,15 @@ export default function ReportHome() {
     const timer = window.setTimeout(() => setWaitToast(null), 3200);
     return () => window.clearTimeout(timer);
   }, [waitToast]);
+
+  useEffect(() => {
+    if (!dialog || dialog.kind !== 'unrecognized') return;
+    const fromQuery = dialog.suggestedCode
+      ?? dialog.query.match(/(?<!\d)(\d{6})(?!\d)/)?.[1]
+      ?? '';
+    setJoinCode(fromQuery);
+    setJoinName('');
+  }, [dialog]);
 
   const setView = useCallback((mode: ViewMode) => {
     setViewMode(mode);
@@ -249,15 +306,45 @@ export default function ReportHome() {
         return String(av).localeCompare(String(bv), 'zh-CN') * mul;
       });
     } else if (sortMode === 'popular') {
-      rows.sort((a, b) => b.popularity - a.popularity || a.rank - b.rank);
+      rows.sort((a, b) => Number(hasReadableMetrics(b)) - Number(hasReadableMetrics(a)) || Number(isConnected(b)) - Number(isConnected(a)) || b.popularity - a.popularity || a.rank - b.rank);
     } else {
-      rows.sort((a, b) => a.rank - b.rank || a.code.localeCompare(b.code));
+      rows.sort((a, b) => Number(hasReadableMetrics(b)) - Number(hasReadableMetrics(a)) || Number(isConnected(b)) - Number(isConnected(a)) || a.rank - b.rank || a.code.localeCompare(b.code));
     }
 
     // Starred companies first; keep relative order within each group.
     rows.sort((a, b) => Number(starredSet.has(b.code)) - Number(starredSet.has(a.code)));
     return rows;
   }, [coverage, keyword, industry, sortMode, listSort, viewMode, starredSet]);
+
+  const gridCols = viewMode === 'list' ? 1 : 3;
+  const initialRows = 3;
+  const initialCards = gridCols * initialRows;
+
+  useEffect(() => {
+    setVisibleCardCount(initialCards);
+  }, [initialCards, keyword, industry, sortMode, viewMode, listSort]);
+
+  const visibleCards = useMemo(
+    () => (viewMode === 'list' ? filtered : filtered.slice(0, visibleCardCount)),
+    [filtered, viewMode, visibleCardCount],
+  );
+  const hasMoreCards = viewMode !== 'list' && visibleCardCount < filtered.length;
+
+  useEffect(() => {
+    if (!hasMoreCards) return;
+    const node = loadMoreRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        setVisibleCardCount((n) => Math.min(filtered.length, n + 1));
+      },
+      { root: null, rootMargin: '200px 0px', threshold: 0 },
+    );
+    io.observe(node);
+    return () => io.disconnect();
+  }, [hasMoreCards, filtered.length, visibleCardCount]);
+
 
   function cycleListSort(key: ListSortKey) {
     setListSort((prev) => {
@@ -303,27 +390,38 @@ export default function ReportHome() {
     window.location.href = url;
   }
 
-  async function onSearchSubmit() {
-    const raw = search.trim();
+  async function onSearchSubmit(override?: string) {
+    const raw = (override ?? search).trim();
     if (!raw || submitting) return;
     const parsed = parseHomeQuery(raw);
 
-    // Pure 6-digit code without question → open company
+    // Pure 6-digit code without question → open, join if listed, or offer code-join dialog
     if (/^\d{6}$/.test(raw) && !parsed.hasQuestionIntent) {
       const hit = matchCompany(raw, coverage);
-      if (!hit) {
-        setDialog({ kind: 'unrecognized', query: raw });
+      if (hit) {
+        window.location.href = `/${hit.code}`;
         return;
       }
-      window.location.href = `/${hit.code}`;
+      const listed = resolveListedCompany(raw);
+      if (listed) {
+        setDialog({ kind: 'missing-company', listed, query: raw });
+        return;
+      }
+      setDialog({ kind: 'unrecognized', query: raw, suggestedCode: raw });
       return;
     }
 
-    // Short name/code filter-only: keep filtering & scroll
+    // Short name/code filter-only: open company, or offer to join monitor pool if only in 全量识别名录.
     if (!parsed.hasQuestionIntent) {
-      const hit = matchCompany(parsed.companyQuery || raw, coverage);
-      if (hit && (parsed.companyQuery === hit.name || parsed.companyQuery === hit.code || /^\d{6}$/.test(raw))) {
+      const hit = matchCompany(parsed.companyQuery || raw, coverage)
+        ?? matchCompany(raw, coverage);
+      if (hit) {
         window.location.href = `/${hit.code}`;
+        return;
+      }
+      const listed = resolveListedCompany(raw) ?? resolveListedCompany(parsed.companyQuery || raw);
+      if (listed) {
+        setDialog({ kind: 'missing-company', listed, query: raw });
         return;
       }
       document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -360,7 +458,7 @@ export default function ReportHome() {
       const response = await fetch('/api/companies/watch', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code: listed.code }),
+        body: JSON.stringify({ code: listed.code, name: listed.name }),
       });
       const payload = await response.json() as {
         ok?: boolean;
@@ -399,7 +497,7 @@ export default function ReportHome() {
         paused?: boolean;
       };
       if (!response.ok) {
-        setWaitToast(payload.error ?? '采集触发失败，请稍后在「数据源采集」重试');
+        setWaitToast(payload.error ?? '采集触发失败，请稍后在「数据采集」重试');
         setDialog(null);
         return;
       }
@@ -416,7 +514,103 @@ export default function ReportHome() {
     }
   }
 
+  async function triggerHomeCrawl(item: CrawlCompanyCoverage, e?: MouseEvent) {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (crawlingCodes.includes(item.code)) {
+      window.location.href = `/sources?focus=${encodeURIComponent(item.code)}`;
+      return;
+    }
+    setCrawlingCodes((prev) => (prev.includes(item.code) ? prev : [...prev, item.code]));
+    setWaitToast(`${item.name}（${item.code}）：正在发现并下载财报…`);
+    try {
+      const response = await fetch('/api/crawl/trigger', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'backlog', codes: [item.code] }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; note?: string; paused?: boolean };
+      if (!response.ok) {
+        setCrawlingCodes((prev) => prev.filter((c) => c !== item.code));
+        setWaitToast(payload.error ?? '立即抓取失败，请在数据源页确认自动抓取已开启');
+        return;
+      }
+      setWaitToast(payload.note ?? `${item.name}：已进入抓取队列`);
+    } catch (err) {
+      setCrawlingCodes((prev) => prev.filter((c) => c !== item.code));
+      setWaitToast(`网络异常：${String(err)}`);
+      return;
+    }
+    window.location.href = `/sources?focus=${encodeURIComponent(item.code)}`;
+  }
+
+  async function joinByCodeFromDialog() {
+    if (!dialog || dialog.kind !== 'unrecognized') return;
+    const code = joinCode.trim();
+    const name = joinName.trim();
+    if (!/^\d{6}$/.test(code)) {
+      setWaitToast('请填写有效的六位股票代码');
+      return;
+    }
+    setDialogBusy(true);
+    try {
+      const response = await fetch('/api/companies/watch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code, ...(name ? { name } : {}) }),
+      });
+      const payload = await response.json() as {
+        ok?: boolean;
+        error?: string;
+        note?: string;
+        needName?: boolean;
+      };
+      if (!response.ok) {
+        setWaitToast(payload.error ?? '加入监控池失败');
+        if (payload.needName) {
+          /* keep dialog open for name */
+        }
+        return;
+      }
+      setWaitToast(payload.note ?? `已将 ${code} 加入监控池`);
+      setDialog(null);
+      setSearch('');
+      await refreshCoverage();
+    } finally {
+      setDialogBusy(false);
+    }
+  }
+
+  async function reportMissingToAdmin() {
+    if (!dialog || dialog.kind !== 'unrecognized') return;
+    setDialogBusy(true);
+    try {
+      const response = await fetch('/api/companies/report-missing', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          query: dialog.query,
+          ...(joinCode.trim() ? { code: joinCode.trim() } : {}),
+          ...(joinName.trim() ? { name: joinName.trim() } : {}),
+        }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; note?: string };
+      if (!response.ok) {
+        setWaitToast(payload.error ?? '上报失败，请稍后重试');
+        return;
+      }
+      setWaitToast(payload.note ?? '已上报给管理员');
+      setDialog(null);
+    } finally {
+      setDialogBusy(false);
+    }
+  }
+
   const filtering = Boolean(keyword || industry !== '全部');
+  const listedOutsidePool = (() => {
+    if (!search.trim() || filtered.length) return null;
+    return resolveListedCompany(search.trim()) ?? resolveListedCompany(parseHomeQuery(search.trim()).companyQuery || search.trim());
+  })();
 
   return (
     <section className="rh-home">
@@ -439,7 +633,7 @@ export default function ReportHome() {
         </svg>
         <input
           aria-label="搜索或提问：公司名称、股票代码，或自然语言问题"
-          placeholder="问财报，例如：贵州茅台26年Q2半年报增长是否缓慢"
+          placeholder={SEARCH_PLACEHOLDERS[placeholderIndex]}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           disabled={submitting}
@@ -449,8 +643,25 @@ export default function ReportHome() {
             ×
           </button>
         )}
-        <button className="rh-search-submit" type="submit" disabled={submitting || !search.trim()} aria-label="搜索">
-          {submitting ? '…' : <span aria-hidden="true">→</span>}
+        <button
+          className="rh-search-submit"
+          type="button"
+          disabled={submitting}
+          aria-label={search.trim() ? '搜索' : '用当前示例提问'}
+          title={search.trim() ? '搜索' : '发送示例问题'}
+          onClick={() => {
+            const q = search.trim() || SEARCH_PLACEHOLDERS[placeholderIndex];
+            if (!search.trim()) setSearch(q);
+            void onSearchSubmit(q);
+          }}
+        >
+          {submitting ? (
+            <span className="rh-search-spinner" aria-hidden="true" />
+          ) : (
+            <svg className="rh-search-arrow" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M12.75 5.25a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1 0 1.06l-4.5 4.5a.75.75 0 1 1-1.06-1.06L15.94 12H5.25a.75.75 0 0 1 0-1.5h10.69l-3.22-3.22a.75.75 0 0 1 0-1.06Z" />
+            </svg>
+          )}
         </button>
       </form>
 
@@ -629,101 +840,190 @@ export default function ReportHome() {
           </div>
         ) : (
           <div className="rh-card-grid rh-card-grid-all">
-            {filtered.map((item) => {
-              const connected = isConnected(item);
+            {visibleCards.map((item) => {
+              const downloaded = isConnected(item);
+              const readable = hasReadableMetrics(item);
               const isStarred = starredSet.has(item.code);
-              if (!connected) {
+              const isCrawling = crawlingCodes.includes(item.code);
+              if (!downloaded) {
                 return (
-                  <Link
+                  <div
                     key={item.code}
-                    href={`/${item.code}`}
-                    className="rh-company-card rh-company-card-empty"
-                    aria-label={`${item.name} ${item.code}，等待抓取`}
-                    title="等待抓取"
-                    onClick={(e) => onEmptyCardActivate(e, item)}
+                    className={`rh-company-card rh-company-card-empty ${isCrawling ? 'rh-crawling' : ''}`}
                   >
-                    <div className="rh-empty-card-body">
-                      <h3>
-                        {item.name}
-                        <small className="rh-code-with-star">
-                          {item.code}
-                          <StarButton code={item.code} starred={isStarred} onToggle={toggleStar} />
-                        </small>
-                      </h3>
-                    </div>
-                    <span className="rh-empty-hover-tip" aria-hidden="true">等待抓取</span>
-                    <div className="rh-card-meta">等待抓取</div>
-                  </Link>
+                    {isCrawling ? (
+                      <span className="rh-crawling-badge" title="抓取中">抓取中</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="rh-crawl-now-btn"
+                        aria-label={`立即抓取 ${item.name}`}
+                        title="立即抓取"
+                        onClick={(e) => void triggerHomeCrawl(item, e)}
+                      >
+                        立即抓取
+                      </button>
+                    )}
+                    <Link
+                      href={`/${item.code}`}
+                      className="rh-empty-card-link"
+                      aria-label={`${item.name} ${item.code}，等待抓取`}
+                      title="等待抓取"
+                      onClick={(e) => onEmptyCardActivate(e, item)}
+                    >
+                      <div className="rh-empty-card-body">
+                        <h3>
+                          {item.name}
+                          <small className="rh-code-with-star">
+                            {item.code}
+                            <StarButton code={item.code} starred={isStarred} onToggle={toggleStar} />
+                          </small>
+                        </h3>
+                      </div>
+                      <div className="rh-card-meta">{isCrawling ? '抓取中' : '等待抓取'}</div>
+                    </Link>
+                  </div>
                 );
               }
 
               const previewMetrics = item.metrics.slice(0, 3);
+              const periodTokens = recentPeriodTokens(item);
+              const freshIso = freshnessAt(item);
+              const parseFailed = !readable && (item.parseStatus === 'failed' || Boolean(item.parseError));
+              const cardState = readable ? '' : parseFailed ? ' rh-company-card-failed' : ' rh-company-card-parsing';
               return (
-                <Link
+                <div
                   key={item.code}
-                  href={`/${item.code}`}
-                  className="rh-company-card rh-company-card-connected"
-                  aria-label={`查看${item.name}财报`}
+                  className={`rh-company-card rh-company-card-connected${cardState}`}
                 >
-                  <span className="rh-connected-badge" title="已接入可读">
-                    已接入可读
-                  </span>
-                  <div className="rh-card-top">
-                    <div>
-                      <h3>
-                        {item.name}
-                        <small className="rh-code-with-star">
-                          {item.code}
-                          <StarButton code={item.code} starred={isStarred} onToggle={toggleStar} />
-                        </small>
-                      </h3>
-                      <p>
-                        <span className="rh-industry-badge">{item.industryGroup}</span>
-                        {item.theme ? <span>{item.theme}</span> : null}
-                      </p>
+                  {parseFailed ? (
+                    <Link
+                      href={`/sources?focus=${item.code}`}
+                      className="rh-connected-badge rh-connected-badge-failed"
+                      title="打开数据采集页处理解析失败"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      解析失败
+                    </Link>
+                  ) : (
+                    <span className="rh-connected-badge" title="财报 PDF 已下载">
+                      已接入
+                    </span>
+                  )}
+                  <Link
+                    href={`/${item.code}`}
+                    className="rh-card-main"
+                    aria-label={
+                      readable
+                        ? `查看${item.name}财报`
+                        : parseFailed
+                          ? `${item.name}财报解析失败`
+                          : `${item.name}财报已下载，指标解析中`
+                    }
+                  >
+                    <div className="rh-card-top">
+                      <div>
+                        <h3>
+                          {item.name}
+                          <small className="rh-code-with-star">
+                            {item.code}
+                            <StarButton code={item.code} starred={isStarred} onToggle={toggleStar} />
+                          </small>
+                        </h3>
+                        <p>
+                          <span className="rh-industry-badge">{item.industryGroup}</span>
+                          {item.theme ? <span>{item.theme}</span> : null}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="rh-card-metrics rh-card-metrics-3">
-                    {previewMetrics.map((metric) => {
-                      const delta = yoyChange(metric.value, metric.prior);
-                      return (
-                        <div key={metric.metric}>
-                          <span>{metric.label}</span>
-                          <strong>{formatMetricValue(metric.metric, metric.value)}</strong>
-                          {delta === undefined ? (
-                            <small>暂无同比</small>
-                          ) : (
-                            <small className={delta >= 0 ? 'rh-ashare-up' : 'rh-ashare-down'}>
-                              <span aria-hidden="true">{delta >= 0 ? '↑' : '↓'}</span> {deltaLabel(delta)}
-                            </small>
-                          )}
+                    <div className="rh-card-metrics rh-card-metrics-3">
+                      {!readable ? (
+                        <div className="rh-metric-empty">
+                          <span>指标</span>
+                          <strong>{parseFailed ? '解析失败' : '解析中'}</strong>
+                          <small>{parseFailed ? shortParseError(item.parseError) : 'PDF 已下载，核心指标尚未就绪'}</small>
                         </div>
-                      );
-                    })}
-                  </div>
+                      ) : null}
+                      {previewMetrics.map((metric) => {
+                        const delta = yoyChange(metric.value, metric.prior);
+                        return (
+                          <div key={metric.metric}>
+                            <span>{metric.label}</span>
+                            <strong>{formatMetricValue(metric.metric, metric.value)}</strong>
+                            {delta === undefined ? (
+                              <small>暂无同比</small>
+                            ) : (
+                              <small className={delta >= 0 ? 'rh-ashare-up' : 'rh-ashare-down'}>
+                                <span aria-hidden="true">{delta >= 0 ? '↑' : '↓'}</span> {deltaLabel(delta)}
+                              </small>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Link>
                   <div className="rh-card-meta">
-                    <span>{freshnessLabel(item.lastCrawlAt)}</span>
-                    <span>{statusMeta(item)}</span>
+                    <div className="rh-periods">
+                      {periodTokens.length ? (
+                        periodTokens.map((token) => (
+                          <Link
+                            key={token}
+                            href={`/${item.code}?period=${encodeURIComponent(token)}`}
+                            className="rh-period-btn"
+                            title={`打开 ${token} 报告`}
+                          >
+                            {token}
+                          </Link>
+                        ))
+                      ) : (
+                        <span className="rh-periods-empty">暂无期次</span>
+                      )}
+                    </div>
+                    <span className="rh-freshness" title={freshnessTooltip(item)}>
+                      {freshnessLabel(freshIso)}
+                    </span>
                   </div>
-                </Link>
+                </div>
               );
             })}
           </div>
         )}
 
+        {hasMoreCards ? (
+          <div ref={loadMoreRef} className="rh-load-more" aria-hidden="true">
+            <span>加载更多…</span>
+          </div>
+        ) : null}
+
         {!filtered.length && !loading && (
           <div className="rh-empty">
             <b>没有符合条件的公司</b>
-            <p>试试调整行业，或换一个公司简称 / 六位代码；完整问题请点发送走追问路径。</p>
-            <button
-              type="button"
-              onClick={() => {
-                setSearch('');
-                setIndustry('全部');
-              }}
-            >
-              清除筛选
-            </button>
+            {listedOutsidePool ? (
+              <>
+                <p>
+                  已识别到「{listedOutsidePool.name}」（{listedOutsidePool.code}），但不在当前监控池。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setDialog({ kind: 'missing-company', listed: listedOutsidePool, query: search.trim() })}
+                >
+                  加入监控池
+                </button>
+              </>
+            ) : (
+              <>
+                <p>试试调整行业，或换一个公司简称 / 六位代码；完整问题请点发送走追问路径。</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('');
+                    setIndustry('全部');
+                  }}
+                >
+                  清除筛选
+                </button>
+              </>
+            )}
           </div>
         )}
       </section>
@@ -753,26 +1053,60 @@ export default function ReportHome() {
               <>
                 <h2 id="rh-dialog-title">没有识别到上市公司</h2>
                 <p>
-                  未能从「{dialog.query}」中匹配到 A 股公司全称或六位代码。请换用官方简称（如「牧原股份」）或代码后再试；不会把整句问题当成公司名入库。
+                  未能从「{dialog.query}」匹配到 A 股公司。不会把自由文本当成公司名交给 AI。
+                  若已知六位代码，可填写后加入监控池；也可上报管理员补全识别名录。
                 </p>
-                <div className="rh-dialog-actions">
-                  <button type="button" className="rh-dialog-confirm" disabled={dialogBusy} onClick={() => setDialog(null)}>
-                    知道了
+                <div className="rh-dialog-fields">
+                  <label>
+                    <span>六位代码</span>
+                    <input
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder="例如 688802"
+                      value={joinCode}
+                      disabled={dialogBusy}
+                      onChange={(e) => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    />
+                  </label>
+                  <label>
+                    <span>公司简称（可选）</span>
+                    <input
+                      placeholder="例如 沐曦股份"
+                      value={joinName}
+                      disabled={dialogBusy}
+                      onChange={(e) => setJoinName(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="rh-dialog-actions rh-dialog-actions-wrap">
+                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => setDialog(null)}>
+                    取消
+                  </button>
+                  <button type="button" className="rh-dialog-secondary" disabled={dialogBusy} onClick={() => void reportMissingToAdmin()}>
+                    {dialogBusy ? '上报中…' : '上报管理员'}
+                  </button>
+                  <button
+                    type="button"
+                    className="rh-dialog-confirm"
+                    disabled={dialogBusy || !/^\d{6}$/.test(joinCode.trim())}
+                    onClick={() => void joinByCodeFromDialog()}
+                  >
+                    {dialogBusy ? '加入中…' : '填写代码加入'}
                   </button>
                 </div>
               </>
             ) : dialog.kind === 'missing-company' ? (
               <>
-                <h2 id="rh-dialog-title">不在当前监控池，是否立即加入？</h2>
+                <h2 id="rh-dialog-title">加入监控池</h2>
                 <p>
-                  已识别到上市公司「{dialog.listed.name}」（{dialog.listed.code}），但还不在当前 {stats?.universe ?? coverage.length} 家监控池。是否立即加入？
+                  已识别到「{dialog.listed.name}」（{dialog.listed.code}），但不在当前监控池。
                 </p>
                 <div className="rh-dialog-actions">
                   <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => setDialog(null)}>
                     取消
                   </button>
                   <button type="button" className="rh-dialog-confirm" disabled={dialogBusy} onClick={() => void confirmMissingCompany()}>
-                    {dialogBusy ? '加入中…' : '确认加入'}
+                    {dialogBusy ? '加入中…' : '加入监控池'}
                   </button>
                 </div>
               </>

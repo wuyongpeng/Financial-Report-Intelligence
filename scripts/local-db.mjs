@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from '
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
+process.env.LC_ALL = process.env.LC_ALL || 'C';
+process.env.LANG = process.env.LANG || 'C';
 const root = resolve(import.meta.dirname, '..');
 const bin = process.env.PG_BIN ?? '/opt/homebrew/opt/postgresql@16/bin';
 const data = resolve(root, 'data/postgres-local');

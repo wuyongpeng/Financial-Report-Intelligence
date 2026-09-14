@@ -43,6 +43,7 @@ import {
   type CrawlStats,
   METRIC_LABELS,
   computeStats,
+  pickRecentPeriods,
 } from "./crawl-display";
 
 const EXTRA_COMPANIES: Array<{ code: string; name: string; exchange: "SSE" | "SZSE"; industry: string }> = [
@@ -144,6 +145,7 @@ function buildCoverage(): CrawlCompanyCoverage[] {
       announcementTitle: title,
       discoveredAt: lastCrawlAt,
       downloadedAt: covered && parseStatus !== "pending" ? minutesAgoIso(Math.max(1, lastMinutes - 2)) : null,
+      pdfKey: covered && parseStatus !== "pending" ? `mock/${company.code}.pdf` : null,
       parsedAt: parseStatus === "completed" ? minutesAgoIso(Math.max(1, lastMinutes - 4)) : null,
       rawStatus: parseStatus === "completed" ? "online"
         : parseStatus === "parsing" ? "downloaded"
@@ -152,6 +154,7 @@ function buildCoverage(): CrawlCompanyCoverage[] {
       metricsComplete,
       missingMetrics,
       metrics,
+      recentPeriods: covered ? pickRecentPeriods([reportPeriod, '2025FY', '2025H1'].filter(Boolean)) : [],
       popularity: company.weight,
       rank: company.rank,
     };

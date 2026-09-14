@@ -134,6 +134,68 @@ export function appCookieHeader(value: string, expires?: Date) {
   return `${appCookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${expires ? 0 : maxAgeSeconds}${secure}`;
 }
 
+
+const guestCookieName = 'fri_guest_session';
+const guestMaxAgeSeconds = 30 * 24 * 60 * 60;
+
+function guestSecret() {
+  return appSecret();
+}
+
+function signGuest(payload: string) {
+  return createHmac('sha256', guestSecret()).update(payload).digest('base64url');
+}
+
+/** Mint or read an anonymous guest cookie for conversation isolation (no login). */
+export function ensureGuestSession(request: Request): { owner: string; setCookie?: string } {
+  const existing = namedCookieValue(request, guestCookieName);
+  if (existing) {
+    const parts = existing.split('.');
+    if (parts.length === 3) {
+      const [id, expiresAt, signature] = parts;
+      const payload = `${id}.${expiresAt}`;
+      try {
+        if (id && /^\d+$/.test(expiresAt) && Number(expiresAt) > Math.floor(Date.now() / 1000)
+          && safeEqual(signature, signGuest(payload))) {
+          return { owner: createHmac('sha256', guestSecret()).update(`conversation:guest:${id}`).digest('hex') };
+        }
+      } catch { /* mint new */ }
+    }
+  }
+  const id = randomUUID();
+  const expiresAt = Math.floor(Date.now() / 1000) + guestMaxAgeSeconds;
+  const payload = `${id}.${expiresAt}`;
+  const value = `${payload}.${signGuest(payload)}`;
+  const secureCookie = process.env.COOKIE_SECURE
+    ? process.env.COOKIE_SECURE === 'true'
+    : process.env.NODE_ENV === 'production';
+  const secure = secureCookie ? '; Secure' : '';
+  return {
+    owner: createHmac('sha256', guestSecret()).update(`conversation:guest:${id}`).digest('hex'),
+    setCookie: `${guestCookieName}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${guestMaxAgeSeconds}${secure}`,
+  };
+}
+
+/** Logged-in / demo app session first; otherwise anonymous guest owner. */
+export function hasGuestSession(request: Request) {
+  const existing = namedCookieValue(request, guestCookieName);
+  if (!existing) return false;
+  const parts = existing.split('.');
+  if (parts.length !== 3) return false;
+  const [id, expiresAt, signature] = parts;
+  const payload = `${id}.${expiresAt}`;
+  try {
+    return Boolean(id && /^\d+$/.test(expiresAt) && Number(expiresAt) > Math.floor(Date.now() / 1000)
+      && safeEqual(signature, signGuest(payload)));
+  } catch { return false; }
+}
+
+export function ensureConversationOwner(request: Request): { owner: string; setCookie?: string } {
+  const session = appSessionOwner(request);
+  if (session) return { owner: session };
+  return ensureGuestSession(request);
+}
+
 export function requireAppUser(request: Request) {
   if (!isAppUser(request)) return Response.json({ error: '请先登录' }, { status: 401 });
   return null;

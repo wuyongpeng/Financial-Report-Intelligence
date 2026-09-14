@@ -1,4 +1,4 @@
-import { processBacklog, runIngestion } from '@/lib/ingest';
+import { fillCoverageGaps, processBacklog, prioritizeCompanyCrawl, runIngestion } from '@/lib/ingest';
 import { demoAccessEnabled, isAppUser } from '@/lib/auth';
 import { isAutoCrawlEnabled } from '@/lib/ingest-control';
 
@@ -10,7 +10,8 @@ function authorized(request: Request) {
   if (token && bearer === `Bearer ${token}`) return 'token';
   if (isAppUser(request)) return 'session';
   if (demoAccessEnabled()) return 'demo';
-  return null;
+  // Product is open for evaluators / guests — allow soft crawl without login.
+  return 'guest';
 }
 
 function sanitizeCodes(raw: unknown): string[] {
@@ -24,21 +25,36 @@ export async function POST(request: Request) {
   const auth = authorized(request);
   if (!auth) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  if (!(await isAutoCrawlEnabled())) {
+  let body: {
+    mode?: string; codes?: string[]; fullHistory?: boolean; lookback?: string; parseOnly?: boolean;
+    periods?: string[]; announcementIds?: string[];
+  } = {};
+  try { body = await request.json(); } catch { /* empty body ok */ }
+  const discover = body.mode === 'discover' && auth === 'token';
+  const codes = sanitizeCodes(body.codes);
+  const fullHistory = body.fullHistory === true || body.lookback === 'full' || body.mode === 'manual';
+  const parseOnly = body.parseOnly === true || body.mode === 'parse';
+  const periods = Array.isArray(body.periods)
+    ? body.periods.filter((p): p is string => typeof p === 'string' && /^20\d{2}(FY|H1|Q[1-3])$/i.test(p)).map((p) => p.toUpperCase()).slice(0, 8)
+    : [];
+  const announcementIds = Array.isArray(body.announcementIds)
+    ? body.announcementIds.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(0, 10)
+    : [];
+  const paused = !(await isAutoCrawlEnabled());
+
+  // Paused blocks auto discover/download (anti 封控). Still allow:
+  // - parse-only of already-downloaded PDFs
+  // - explicit fullHistory / 数据采集 manual crawl
+  if (paused && !fullHistory && !parseOnly && (discover || codes.length)) {
     return Response.json(
       {
         ok: false,
-        error: '自动抓取已暂停，手动触发亦已拦截，避免交易所封控。请先在「数据源采集」开启自动抓取。',
+        error: '自动抓取已暂停，请先在「数据源采集」开启自动抓取；解析已下载 PDF 不受影响。',
         paused: true,
       },
       { status: 409, headers: { 'cache-control': 'no-store' } },
     );
   }
-
-  let body: { mode?: string; codes?: string[] } = {};
-  try { body = await request.json(); } catch { /* empty body ok */ }
-  const discover = body.mode === 'discover' && auth === 'token';
-  const codes = sanitizeCodes(body.codes);
 
   try {
     if (discover) {
@@ -46,23 +62,54 @@ export async function POST(request: Request) {
         days: Number(process.env.INGEST_DAYS ?? 2),
         downloadLimit: Math.min(Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2), 2),
         parseLimit: Math.min(Number(process.env.INGEST_PARSE_LIMIT ?? 1), 1),
+        fullHistory,
       });
-      return Response.json({ ok: true, mode: 'discover', auth, ...result }, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ mode: 'discover', auth, fullHistory, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
     }
+
+
+    // Per-company parse only (local PDFs) — used by 数据采集「解析」.
+    if (parseOnly && (codes.length || announcementIds.length)) {
+      const result = await processBacklog({
+        downloadLimit: 0,
+        parseLimit: 1,
+        codes,
+        fullHistory: true,
+        announcementIds,
+        periods,
+      });
+      return Response.json({ mode: 'parse', auth, codes, periods, announcementIds, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
+    }
+    // Per-company crawl. Sources page passes fullHistory to reach older than last-year H1.
+    if (codes.length) {
+      const result = await prioritizeCompanyCrawl(codes, {
+        downloadLimit: 1,
+        parseLimit: 1,
+        fullHistory,
+        periods,
+        announcementIds,
+      });
+      return Response.json({ mode: 'priority', auth, fullHistory, periods, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
+    }
+
     const result = await processBacklog({
-      downloadLimit: 1,
+      downloadLimit: paused ? 0 : 1,
       parseLimit: 1,
-      ...(codes.length ? { codes } : {}),
+      fullHistory,
     });
+    const gaps = paused
+      ? { filled: 0, codes: [] as string[] }
+      : await fillCoverageGaps({ companyLimit: 2, downloadLimit: 1 });
     return Response.json({
-      ok: true,
-      mode: 'backlog',
+      mode: paused ? 'parse-only' : 'backlog',
       auth,
-      codes: codes.length ? codes : undefined,
-      note: codes.length
-        ? `温和模式：仅处理 ${codes.join('、')} 的积压（每次下载 1 份、解析 1 份）。`
-        : '温和模式：每次仅下载 1 份 PDF、解析 1 份；不会一次冲掉监控池。',
+      paused,
+      note: paused
+        ? '自动抓取已暂停：仅解析已下载 PDF，未向交易所发起新下载。'
+        : `温和模式：下载/解析各限流；本轮补发现 ${gaps.filled} 家缺口公司。`,
       ...result,
+      gaps,
+      ok: true,
     }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     return Response.json({ ok: false, error: String(error) }, { status: 500, headers: { 'cache-control': 'no-store' } });

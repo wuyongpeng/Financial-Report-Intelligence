@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { appSessionOwner } from '@/lib/auth';
+import { ensureConversationOwner } from '@/lib/auth';
 import { apiError, ApiError, readObject, requiredText, uuid } from '@/lib/api';
 import { beginTurn, finishTurn, type AnswerResult, type MemoryMessage } from '@/lib/conversations';
 import { loadRagContext } from '@/lib/rag';
@@ -23,12 +23,13 @@ export async function POST(request: Request) {
     const requestId = body.requestId === undefined ? randomUUID() : uuid(body.requestId, 'requestId');
     const conversationId = body.conversationId === undefined ? undefined : uuid(body.conversationId, 'conversationId');
     let history: MemoryMessage[] = [], replay: AnswerResult | null = null;
+    let setCookie: string | undefined;
     if (conversationId) {
-      const owner = appSessionOwner(request);
-      if (!owner) throw new ApiError(401, '请重新登录以启用独立会话记忆');
-      const turn = await beginTurn(owner, conversationId, reportId, requestId, question);
+      const guest = ensureConversationOwner(request);
+      setCookie = guest.setCookie;
+      const turn = await beginTurn(guest.owner, conversationId, reportId, requestId, question);
       history = turn.history; replay = turn.replay;
-      if (!replay) lease = { owner, conversationId, requestId };
+      if (!replay) lease = { owner: guest.owner, conversationId, requestId };
     }
     const context = replay ? null : await loadRagContext(reportId, question, history, body.summary === true);
     if (context && focus.length) {
@@ -41,7 +42,9 @@ export async function POST(request: Request) {
     if (!body.stream) {
       const result = replay ?? await generateAnswer(context!, history, request.signal);
       await persist(result);
-      return Response.json({ ...result, requestId, conversationId, metrics: context?.metrics, peers: context?.peers }, { headers: { 'cache-control': 'no-store' } });
+      const headers = new Headers({ 'cache-control': 'no-store' });
+      if (setCookie) headers.append('set-cookie', setCookie);
+      return Response.json({ ...result, requestId, conversationId, metrics: context?.metrics, peers: context?.peers }, { headers });
     }
     const abort = new AbortController();
     const onAbort = () => abort.abort();
@@ -71,7 +74,9 @@ export async function POST(request: Request) {
       },
       cancel() { cancelled = true; abort.abort(); },
     });
-    return new Response(stream, { headers: { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' } });
+    const streamHeaders = new Headers({ 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' });
+    if (setCookie) streamHeaders.append('set-cookie', setCookie);
+    return new Response(stream, { headers: streamHeaders });
   } catch (error) {
     if (lease) await finishTurn(lease.owner, lease.conversationId, lease.requestId, { answer: '', evidence: [], status: 'failed', mode: 'error', durationMs: 0 }).catch(() => undefined);
     return apiError(error);

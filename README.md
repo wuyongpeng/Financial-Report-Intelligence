@@ -100,3 +100,19 @@ npm run worker
 - 对运行中的服务验收：`npm run test:integration`
 
 样本包含茅台、招商银行及同行的历年中报，用于真实趋势、同比和原文溯源。每项指标均由 PDF 解析，导入不会标记为人工复核。未配置模型接口时，问答以结构化指标和原文检索模式运行，不能视为已完成模型问答准确率验收。
+
+## A 股识别名录（全量）维护
+
+首页搜索认领使用 `data/ashare-universe.json`（识别名录），与监控池 `data/companies.json` 分离：
+
+- **识别名录**：用于把「三一重工」「三一重工(600031)」等解析成代码；不代表已在抓取。
+- **监控池**：真正启用采集与首页卡片列表；未在池内时会提示「已识别…加入监控池」，确认后 `POST /api/companies/watch`。
+- **新上市 / 名录外**：`POST /api/companies/watch` 接受 `{ code, name? }`；六位代码合法且提供简称（或交易所 best-effort 查名）时可 upsert 入库，即使不在 `ashare-universe.json`。未识别搜索可「填写六位代码加入」或「上报管理员」（写入 `data/missing-company-reports.json`）。
+
+刷新识别名录（优先拉取上交所公开列表，深交所可达时合并；失败则保留本地种子并确保 essentials）：
+
+```bash
+npm run refresh:ashare
+# 或
+npx tsx scripts/refresh-ashare-universe.ts
+```

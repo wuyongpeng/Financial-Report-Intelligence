@@ -103,7 +103,7 @@ export async function loadRagContext(reportId: string, question: string, history
   for (const row of factLines.filter(f => f.metric.announcement_id === reportId)) {
     const prior = factLines.find(f => f.metric.period === priorPeriod && f.metric.metric === row.metric.metric && reports.find(r => r.id === f.metric.announcement_id)?.code === target.code);
     const delta = change(row.metric.value, prior?.metric.value);
-    if (prior && delta !== undefined) calculations.push(`${metricLabel(row.metric.metric)}同比：${delta >= 0 ? '+' : ''}${delta.toFixed(2)}%（基期 ${priorPeriod}，公式：(本期-上期)/|上期|）${row.citation ? `【${row.citation.id}】` : ''}${prior.citation ? `【${prior.citation.id}】` : ''}`);
+    if (prior && delta !== undefined) calculations.push(`${metricLabel(row.metric.metric)}同比：${delta >= 0 ? '+' : ''}${delta.toFixed(2)}%${row.citation ? `【${row.citation.id}】` : ''}（基期 ${priorPeriod}${prior.citation ? `【${prior.citation.id}】` : ''}，公式：(本期-上期)/|上期|）`);
   }
   const chunks = await db<Chunk[]>`SELECT announcement_id, page, content FROM report_chunks
     WHERE announcement_id=${reportId} ORDER BY page LIMIT 400`;

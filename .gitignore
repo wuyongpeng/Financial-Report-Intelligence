@@ -49,3 +49,4 @@ next-env.d.ts
 docs/*初审*
 docs/*项目书*
 docs/*大赛*
+.data/

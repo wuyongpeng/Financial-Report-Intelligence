@@ -1,15 +1,23 @@
 import { getDb } from '@/lib/db';
 import { apiError } from '@/lib/api';
 import { getIngestControl } from '@/lib/ingest-control';
+import { periodFromTitle } from '@/lib/ingest-period';
+import { listIngestProgress } from '@/lib/ingest-progress';
 
 export const dynamic = 'force-dynamic';
+
+function queueLabel(name: string, title: string, publishedAt: string) {
+  const period = periodFromTitle(title, publishedAt);
+  return { period, label: `${name} ${period}` };
+}
 
 export async function GET() {
   try {
     const db = getDb();
     const [counts] = await db<Array<{
-      discovered: number; downloaded: number; download_failed: number; parse_partial: number;
-      review: number; online: number; pending_download: number; pending_parse: number; target_companies: number;
+      discovered: number; downloaded: number; download_failed: number; parse_partial: number; downloading: number;
+      parsing: number; parse_parked: number;
+      review: number; online: number; pending_download: number; pending_parse: number; ingested: number; target_companies: number;
     }>>`
       WITH a AS (
         SELECT status FROM announcements ann
@@ -20,10 +28,16 @@ export async function GET() {
         COUNT(*) FILTER (WHERE status='downloaded')::int AS downloaded,
         COUNT(*) FILTER (WHERE status='download_failed')::int AS download_failed,
         COUNT(*) FILTER (WHERE status='parse_partial')::int AS parse_partial,
+        COUNT(*) FILTER (WHERE status='downloading')::int AS downloading,
+        COUNT(*) FILTER (WHERE status='parsing')::int AS parsing,
+        COUNT(*) FILTER (WHERE status='parse_parked')::int AS parse_parked,
         COUNT(*) FILTER (WHERE status='review')::int AS review,
         COUNT(*) FILTER (WHERE status='online')::int AS online,
-        COUNT(*) FILTER (WHERE status IN ('discovered','download_failed'))::int AS pending_download,
-        COUNT(*) FILTER (WHERE status IN ('downloaded','parse_partial'))::int AS pending_parse,
+        COUNT(*) FILTER (WHERE status IN ('discovered','download_failed','downloading'))::int AS pending_download,
+        -- 排队解析：已下载待排 + 可重试 partial；不含正在解析、不含搁置
+        COUNT(*) FILTER (WHERE status='downloaded')::int AS pending_parse,
+        -- 已入库：解析成功（review 待审 / online 已上线）
+        COUNT(*) FILTER (WHERE status IN ('review','online'))::int AS ingested,
         (SELECT COUNT(*)::int FROM companies WHERE enabled=true) AS target_companies
       FROM a
     `;
@@ -46,19 +60,21 @@ export async function GET() {
 
     const latestRun = recentRuns[0] ?? null;
     const running = latestRun?.status === 'running';
+    const control = await getIngestControl();
+    const progress = listIngestProgress();
     const downloadSlots = {
-      used: running ? 1 : 0,
+      used: Math.max(counts.downloading, progress.filter((p) => p.phase === 'download').length),
       max: Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2),
     };
     const parseSlots = {
-      used: running ? Math.min(1, Number(process.env.INGEST_PARSE_LIMIT ?? 1)) : 0,
+      used: Math.max(counts.parsing, progress.filter((p) => p.phase === 'parse').length),
       max: Number(process.env.INGEST_PARSE_LIMIT ?? 1),
     };
 
     const stages = [
-      { id: 'discover', label: '发现公告', count: counts.discovered + counts.review + counts.online + counts.downloaded + counts.download_failed + counts.parse_partial, active: running },
+      { id: 'discover', label: '发现公告', count: counts.discovered + counts.review + counts.online + counts.downloaded + counts.download_failed + counts.parse_partial + counts.downloading, active: running },
       { id: 'queue', label: '排队', count: counts.pending_download, active: running && counts.pending_download > 0 },
-      { id: 'download', label: '下载 PDF', count: downloadSlots.used, capacity: downloadSlots.max, active: running && downloadSlots.used > 0 },
+      { id: 'download', label: '下载 PDF', count: downloadSlots.used, capacity: downloadSlots.max, active: downloadSlots.used > 0 },
       { id: 'parse', label: '解析入库', count: counts.pending_parse + counts.review + counts.online, active: running && counts.pending_parse > 0 },
     ];
 
@@ -73,7 +89,193 @@ export async function GET() {
           : run.error ?? run.status,
     }));
 
-    const control = await getIngestControl();
+    const downloadQueue = await db<Array<{
+      code: string; company_name: string; status: string; title: string; published_at: string; source: string; updated_at: string;
+    }>>`
+      SELECT code, company_name, status, title, published_at, source, updated_at
+      FROM announcements ann
+      WHERE status IN ('discovered', 'download_failed')
+        AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
+      ORDER BY CASE WHEN status='discovered' THEN 0 ELSE 1 END, published_at DESC
+      LIMIT 80
+    `;
+    const parseQueue = await db<Array<{
+      code: string; company_name: string; status: string; title: string; published_at: string;
+      parse_error: string | null; pdf_key: string | null; parsed_at: string | null; source: string; updated_at: string;
+    }>>`
+      SELECT code, company_name, status, title, published_at, parse_error, pdf_key, parsed_at, source, updated_at
+      FROM announcements ann
+      WHERE status='downloaded'
+        AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
+      ORDER BY published_at DESC
+      LIMIT 40
+    `;
+    const parseParked = await db<Array<{
+      code: string; company_name: string; status: string; title: string; published_at: string;
+      parse_error: string | null; pdf_key: string | null; source: string;
+    }>>`
+      SELECT code, company_name, status, title, published_at, parse_error, pdf_key, source
+      FROM announcements ann
+      WHERE status = 'parse_parked'
+        AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
+      ORDER BY updated_at DESC
+      LIMIT 20
+    `;
+    const parsingRows = await db<Array<{
+      id: string; code: string; company_name: string; status: string; title: string; published_at: string;
+      source: string; updated_at: string; parse_error: string | null;
+    }>>`
+      SELECT id, code, company_name, status, title, published_at, source, updated_at, parse_error
+      FROM announcements ann
+      WHERE status='parsing'
+        AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
+      ORDER BY updated_at ASC
+      LIMIT 12
+    `;
+
+    const downloadingRows = await db<Array<{
+      id: string; code: string; company_name: string; status: string; title: string; published_at: string;
+      source: string; updated_at: string; parse_error: string | null;
+    }>>`
+      SELECT id, code, company_name, status, title, published_at, source, updated_at, parse_error
+      FROM announcements ann
+      WHERE status='downloading'
+        AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
+      ORDER BY updated_at ASC
+      LIMIT 12
+    `;
+
+    const recentDownloads = await db<Array<{
+      code: string; company_name: string; title: string; published_at: string; source: string; downloaded_at: string;
+    }>>`
+      SELECT code, company_name, title, published_at, source, downloaded_at
+      FROM announcements ann
+      WHERE downloaded_at IS NOT NULL
+        AND downloaded_at > NOW() - INTERVAL '3 minutes'
+        AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
+      ORDER BY downloaded_at DESC
+      LIMIT 8
+    `;
+
+    const queueItems = [
+      ...downloadQueue.map((row, i) => {
+        const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
+        return {
+          code: row.code,
+          name: row.company_name,
+          label,
+          period,
+          status: row.status === 'download_failed' ? 'retry' : 'queued',
+          stage: 'download' as const,
+          position: i + 1,
+          title: row.title,
+          source: row.source,
+        };
+      }),
+      ...parseQueue.map((row, i) => {
+        const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
+        let reason = '';
+        if (!row.pdf_key) reason = '缺少 PDF';
+        else if (row.parse_error) reason = row.parse_error;
+        else if (row.status === 'parse_partial') reason = '解析不完整，等待重试';
+        else if (!control.autoCrawlEnabled) reason = '自动抓取已关闭：仅消化已下载 PDF';
+        else if (i === 0) reason = '即将解析';
+        else reason = `排队第 ${i + 1} 位`;
+        return {
+          code: row.code,
+          name: row.company_name,
+          label,
+          period,
+          status: row.parse_error ? 'retry' : 'queued',
+          stage: 'parse' as const,
+          position: i + 1,
+          title: row.title,
+          parseError: row.parse_error,
+          pdfKey: row.pdf_key,
+          reason,
+          rawStatus: row.status,
+          source: row.source,
+        };
+      }),
+      ...parseParked.map((row, i) => {
+        const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
+        return {
+          code: row.code,
+          name: row.company_name,
+          label,
+          period,
+          status: 'parked',
+          stage: 'parse' as const,
+          position: parseQueue.length + i + 1,
+          title: row.title,
+          parseError: row.parse_error,
+          pdfKey: row.pdf_key,
+          reason: row.parse_error ?? '已搁置，不占用待解析',
+          rawStatus: row.status,
+          source: row.source,
+        };
+      }),
+    ];
+
+    const progressById = new Map(progress.map((p) => [p.id, p]));
+    const activeDownload = downloadingRows.map((row, i) => {
+      const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
+      const mem = progressById.get(row.id);
+      const ageMs = Math.max(0, Date.now() - new Date(row.updated_at).getTime());
+      return {
+        code: row.code,
+        name: row.company_name,
+        label,
+        period,
+        status: 'downloading',
+        stage: 'download' as const,
+        position: i + 1,
+        title: row.title,
+        source: row.source,
+        progress: mem?.detail ?? `下载中 · ${row.source} · 已 ${Math.round(ageMs / 1000)}s / 限 5min`,
+        startedAt: mem?.startedAt ?? row.updated_at,
+        ageMs,
+      };
+    });
+    const activeParseFromDb = parsingRows.map((row, i) => {
+      const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
+      const mem = progressById.get(row.id);
+      const ageMs = Math.max(0, Date.now() - new Date(row.updated_at).getTime());
+      return {
+        code: row.code,
+        name: row.company_name,
+        label,
+        period,
+        status: 'parsing',
+        stage: 'parse' as const,
+        position: i + 1,
+        title: row.title,
+        source: row.source,
+        progress: mem?.detail ?? `解析中 · 已 ${Math.round(ageMs / 1000)}s / 限 5min`,
+        startedAt: mem?.startedAt ?? row.updated_at,
+        ageMs,
+      };
+    });
+    const activeParseIds = new Set(parsingRows.map((r) => r.id));
+    const activeParseFromMem = progress
+      .filter((p) => p.phase === 'parse' && !activeParseIds.has(p.id))
+      .map((p, i) => ({
+        code: p.code,
+        name: p.name,
+        label: `${p.name} ${p.period}`,
+        period: p.period,
+        status: 'parsing',
+        stage: 'parse' as const,
+        position: activeParseFromDb.length + i + 1,
+        title: p.title,
+        source: p.source,
+        progress: p.detail,
+        startedAt: p.startedAt,
+        ageMs: Math.max(0, Date.now() - new Date(p.startedAt).getTime()),
+      }));
+    const activeItems = [...activeDownload, ...activeParseFromDb, ...activeParseFromMem];
+    const pendingParseItems = queueItems.filter((q) => q.stage === 'parse');
+    const activeParseItems = [...activeParseFromDb, ...activeParseFromMem];
 
     return Response.json({
       mode: 'live',
@@ -84,8 +286,30 @@ export async function GET() {
       counts,
       downloadSlots,
       parseSlots,
+      queueItems,
+      activeItems,
+      recentDownloads: recentDownloads.map((row, i) => {
+        const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
+        return {
+          code: row.code,
+          name: row.company_name,
+          label,
+          period,
+          status: 'done',
+          stage: 'download' as const,
+          position: i + 1,
+          title: row.title,
+          source: row.source,
+          progress: `刚下完 · ${row.downloaded_at}`,
+          startedAt: row.downloaded_at,
+        };
+      }),
+      queueTotal: counts.pending_download,
+      queueShown: downloadQueue.length,
+      pendingParseItems,
+      activeParseItems,
       stages,
-      health: ['SSE', 'SZSE', 'CNINFO'].map((source) => {
+      health: ['SSE', 'SZSE', 'BSE', 'CNINFO'].map((source) => {
         const row = health.find((h) => h.source === source);
         return {
           source,
@@ -105,6 +329,9 @@ export async function GET() {
         pagePauseMs: Number(process.env.PAGE_PAUSE_MS ?? 1000),
         downloadPauseMs: Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200),
         maxPages: Number(process.env.INGEST_MAX_PAGES ?? 8),
+        downloadTimeoutMs: 5 * 60 * 1000,
+        parseTimeoutMs: 5 * 60 * 1000,
+        queueMax: null,
       },
       generatedAt: new Date().toISOString(),
     }, { headers: { 'cache-control': 'no-store' } });

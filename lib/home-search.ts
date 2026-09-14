@@ -5,6 +5,7 @@
 import type { CrawlCompanyCoverage, CrawlReportType } from '@/lib/crawl-display';
 import ashareUniverseJson from '@/data/ashare-universe.json';
 import type { Report } from '@/lib/detail-model';
+import { pinyinKeys } from '@/lib/company-query';
 import { period as reportPeriodLabel, periodKey } from '@/lib/detail-model';
 
 export type PeriodKind = 'annual' | 'semiannual' | 'quarterly';
@@ -109,6 +110,8 @@ export function stripQueryNoise(raw: string): string {
     .replace(/(20\d{2}|\d{2})\s*年/g, ' ')
     .replace(/半年度报告|半年度|半年报|中报|年度报告|年报|一季报|二季报|三季报|季报|第一季度|第二季度|第三季度/g, ' ')
     .replace(/\b(?:FY|H1|Q[1-3])\b/gi, ' ')
+    // Keep embedded 6-digit codes; drop surrounding parentheses for name matching.
+    .replace(/[（(]\s*(\d{6})\s*[）)]/g, ' $1 ')
     .replace(questionNoise, ' ')
     .replace(/[？?，,。.!！、\s]+/g, ' ')
     .trim();
@@ -142,9 +145,10 @@ export function matchByNameOrCode(
   if (/^\d{6}$/.test(q)) {
     return list.find((c) => c.code === q) ?? null;
   }
-  const embeddedCode = q.match(/(?<!\d)(\d{6})(?!\d)/)?.[1];
-  if (embeddedCode) {
-    const byCode = list.find((c) => c.code === embeddedCode);
+  // Forms like 三一重工(600031) / 三一重工（600031）
+  const parenCode = q.match(/[（(]\s*(\d{6})\s*[）)]/)?.[1] ?? q.match(/(?<!\d)(\d{6})(?!\d)/)?.[1];
+  if (parenCode) {
+    const byCode = list.find((c) => c.code === parenCode);
     if (byCode) return byCode;
   }
 
@@ -170,6 +174,26 @@ export function matchByNameOrCode(
       (c) => c.name.includes(cleaned) || c.name.toLowerCase().includes(lower),
     );
     if (contains.length === 1) return contains[0];
+
+    // Pinyin: hanwu / hwj → 寒武纪（多命中时取名称更短的更精确者）
+    if (/^[a-z]+$/i.test(lower)) {
+      const pyHits = list.filter((c) => {
+        const py = pinyinKeys(c.name);
+        return (
+          py.full === lower
+          || py.initials === lower
+          || py.full.startsWith(lower)
+          || py.initials.startsWith(lower)
+          || py.full.includes(lower)
+        );
+      });
+      if (pyHits.length === 1) return pyHits[0];
+      if (pyHits.length > 1) {
+        const exactFull = pyHits.find((c) => pinyinKeys(c.name).full === lower);
+        if (exactFull) return exactFull;
+        return [...pyHits].sort((a, b) => a.name.length - b.name.length || a.code.localeCompare(b.code))[0] ?? null;
+      }
+    }
   }
 
   return null;

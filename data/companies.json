@@ -680,5 +680,16 @@
     "theme": "待分类",
     "heat": "B",
     "weight": 60
+  },
+  {
+    "rank": 63,
+    "code": "600018",
+    "name": "上港集团",
+    "exchange": "SSE",
+    "industry": "待分类",
+    "sector": "其他",
+    "theme": "待分类",
+    "heat": "B",
+    "weight": 60
   }
 ]

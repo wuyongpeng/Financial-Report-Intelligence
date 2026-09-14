@@ -2,7 +2,7 @@ export type Company = {
   rank: number;
   code: string;
   name: string;
-  exchange: 'SSE' | 'SZSE';
+  exchange: 'SSE' | 'SZSE' | 'BSE';
   /** 主题（白酒/半导体…），用于同业对比 */
   industry: string;
   weight: number;
@@ -14,7 +14,7 @@ export type Company = {
 
 
 export type Announcement = {
-  source: 'CNINFO' | 'SSE' | 'SZSE';
+  source: 'CNINFO' | 'SSE' | 'SZSE' | 'BSE';
   sourceId: string;
   code: string;
   name: string;

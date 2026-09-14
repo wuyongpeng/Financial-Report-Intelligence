@@ -85,6 +85,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [sourcePage, setSourcePage] = useState(1);
+  const [pdfJumpNonce, setPdfJumpNonce] = useState(0);
   const [highlight, setHighlight] = useState('');
   const [reportListOpen, setReportListOpen] = useState(false);
   const [sourceDrawerOpen, setSourceDrawerOpen] = useState(false);
@@ -97,7 +98,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [feedbackError, setFeedbackError] = useState('');
   const [chatCollapsed, setChatCollapsed] = useState(false);
   // Session column ratios (~25 / 48 / 25); gutters are fixed px outside the %.
-  const [colRatios, setColRatios] = useState({ source: 25, middle: 48, chat: 25 });
+  const SOURCE_DEFAULT = 25;
+  const SOURCE_WIDE = 40;
+  const [colRatios, setColRatios] = useState({ source: SOURCE_DEFAULT, middle: 48, chat: 25 });
+  const scrollPageSync = useRef(false);
   const columnsRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ side: 'source' | 'chat'; startX: number; source: number; middle: number; chat: number } | null>(null);
   const sourcePaneRef = useRef<HTMLElement>(null);
@@ -119,8 +123,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [asking, setAsking] = useState(false);
   // A reasoning model thinks before it speaks; say so instead of showing dead air.
   const [thinking, setThinking] = useState(false);
-  const [summary, setSummary] = useState<Message | null>(null);
-  const [summaryBusy, setSummaryBusy] = useState(false);
   const [mobilePane, setMobilePane] = useState('dashboard');
   // Comparing two periods is the core job, so a period switch must not discard
   // the conversation the reader already built up.
@@ -147,8 +149,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // Same-company period switch keeps the QA thread; only `newConversation` / `+` clears it.
     memoryReady.current = false; setMemoryLoading(true);
     activeId.current = report.id;
-    setSelected(report); onSelect(report.id); setPick(null); setOverviewPick(null); setAsking(false); setSummary(null); setBaselineId(null);
-    setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setHighlight(''); setCitedMetric(null); setExpanded([]); setFocused(null);
+    setSelected(report); onSelect(report.id); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
+    setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setFocused(null);
   }
   useEffect(() => {
     const abort = new AbortController();
@@ -182,7 +184,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   useEffect(() => {
     // Reset the view when the external report resource changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    const abort = new AbortController(); setLoading(true); setOutline(emptyOutline); setAnalysis({}); setSummary(null);
+    const abort = new AbortController(); setLoading(true); setOutline(emptyOutline); setAnalysis({});
     void Promise.all([
       fetch(`/api/reports/${encodeURIComponent(selected.id)}/outline`, { signal: abort.signal }).then(async r => { if (!r.ok) throw new Error(); return r.json() as Promise<Outline>; }),
       fetch(`/api/reports/${encodeURIComponent(selected.id)}/analysis`, { signal: abort.signal }).then(async r => { if (!r.ok) throw new Error(); return r.json() as Promise<Analysis>; }),
@@ -212,15 +214,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     return () => abort.abort();
   }, [selected.id]);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    const abort = new AbortController(); setSummaryBusy(true);
-    void fetch('/api/chat', { method: 'POST', signal: abort.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: selected.id, question: '请用3句话概览本期财报，指出最值得关注的1至2个变化。每个关键数据标注原文页码；缺少同期依据不要计算变化。', summary: true }) }).then(async r => {
-      if (!r.ok) return; const p = await r.json() as { answer?: string; mode?: string; evidence?: Citation[] };
-      if (!abort.signal.aborted && p.mode === 'llm-rag' && p.answer) setSummary({ role: 'assistant', text: p.answer, citations: p.evidence });
-    }).catch(() => undefined).finally(() => { if (!abort.signal.aborted) setSummaryBusy(false); });
-    return () => abort.abort();
-  }, [selected.id]);
-  useEffect(() => {
     const abort = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFeedback({});
@@ -241,7 +234,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const timer = window.setTimeout(() => {
       const hit = sourceRef.current?.querySelector('mark');
       if (sourceMode === 'text' && hit) hit.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      else if (sourceMode === 'pdf' && highlight) return; // PdfEvidence scrolls to the yellow highlight line.
+      else if (sourceMode === 'pdf') return; // Continuous PdfEvidence scrolls the cite page into view.
       else sourceRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     }, 80);
     return () => window.clearTimeout(timer);
@@ -250,7 +243,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   useEffect(() => {
     const root = sourceRef.current;
     if (!root) return;
-    function onUp() {
+    function onUp(ev: MouseEvent) {
+      const t = ev.target;
+      // Never clear / reposition the pick bar when clicking its own buttons.
+      if (t instanceof Element && t.closest('.cd-pick-bar')) return;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.rangeCount) { setPick(null); return; }
       const anchor = sel.anchorNode;
@@ -262,13 +258,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const raw = sel.toString().replace(/\s+/g, ' ').trim();
       if (raw.length < 4) { setPick(null); return; }
       const range = sel.getRangeAt(0).getBoundingClientRect();
-      const box = root!.getBoundingClientRect();
       setOverviewPick(null);
       setPick({
         quote: raw,
         page: resolvedPage ?? sourcePage,
-        x: range.left - box.left + root!.scrollLeft + range.width / 2,
-        y: Math.max(root!.scrollTop + 8, range.top - box.top + root!.scrollTop - 36),
+        x: range.left + range.width / 2,
+        y: Math.max(8, range.top - 40),
       });
     }
     root.addEventListener('mouseup', onUp);
@@ -277,49 +272,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
 
   useEffect(() => {
     const root = sourceRef.current;
-    if (!root || sourceMode !== 'pdf') return;
-    let locked = false;
-    const maxPage = Math.max(outline.indexedPages || 0, outline.pages.length || 0, sourcePage);
-    function onWheel(event: WheelEvent) {
-      if (locked || event.ctrlKey || event.metaKey) return;
-      const el = root!;
-      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 3;
-      const atTop = el.scrollTop <= 2;
-      if (event.deltaY > 8 && atBottom && sourcePage < maxPage) {
-        event.preventDefault();
-        locked = true;
-        pageEnter.current = 'next';
-        setHighlight('');
-        setResolvedPage(null);
-        setSourcePage(sourcePage + 1);
-        window.setTimeout(() => { locked = false; }, 420);
-      } else if (event.deltaY < -8 && atTop && sourcePage > 1) {
-        event.preventDefault();
-        locked = true;
-        pageEnter.current = 'prev';
-        setHighlight('');
-        setResolvedPage(null);
-        setSourcePage(sourcePage - 1);
-        window.setTimeout(() => { locked = false; }, 420);
-      }
-    }
-    root.addEventListener('wheel', onWheel, { passive: false });
-    return () => root.removeEventListener('wheel', onWheel);
-  }, [sourceMode, sourcePage, outline.indexedPages, outline.pages.length]);
-
-  useEffect(() => {
-    if (sourceMode !== 'pdf') return;
-    const root = sourceRef.current;
     if (!root) return;
-    const enter = pageEnter.current;
-    pageEnter.current = 'start';
-    const timer = window.setTimeout(() => {
-      if (enter === 'next') root.scrollTop = 0;
-      else if (enter === 'prev') root.scrollTop = root.scrollHeight;
-    }, 60);
-    return () => window.clearTimeout(timer);
-  }, [sourcePage, sourceMode, selected.id]);
+    function onScroll() { setPick(null); }
+    root.addEventListener('scroll', onScroll, { passive: true });
+    return () => root.removeEventListener('scroll', onScroll);
+  }, [selected.id, sourceMode]);
 
+  // Continuous PDF scroll: wheel page-flip removed — .cd-source-scroll owns vertical scrolling.
 
 
   const readingKey = `${selected.id}|${sourcePage}|${sourceMode}|${highlight}`;
@@ -417,7 +376,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const profitStanding = standing(profitRanks, roe);
   const growthStanding = standing(growthRanks, selfGrowth);
   const findings = keyFindings(reports, selected);
-  const shaky = deltas.filter(d => d.amount !== undefined && d.confidence !== undefined && d.confidence < 0.8).map(d => d.metric);
   const mdaSection = outline.outline.find(o => o.id === 'mda') ?? outline.outline.find(o => /管理层讨论与分析|经营情况讨论与分析/.test(o.title));
   const mdaExcerpt = mdaSection ? (outline.pages.find(p => p.page === mdaSection.page)?.content ?? '').slice(0, 420) : '';
   const topFinding = findings[0];
@@ -455,13 +413,51 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     { label: '成长性（营收同比）', standing: growthStanding, detail: growthStanding ? '同报告期可比公司内排序' : '待上年同期与可比同业数据' },
   ];
   // A single click only jumps inside the left column; enlarging stays explicit.
+  /** Widen source pane for PDF reading (~40%). Gutters already allow manual tweak. */
+  function widenSourceForPdf(targetPct = SOURCE_WIDE) {
+    setSourceCollapsed(false);
+    setMobilePane('sources');
+    // Exit legacy drawer mode if somehow open — width resize replaces 展开/收起.
+    if (sourceDrawerOpen) setSourceDrawerOpen(false);
+    setColRatios((prev) => {
+      const source = Math.min(52, Math.max(targetPct, prev.source));
+      if (chatCollapsed) {
+        return { source, middle: Math.max(28, 100 - source), chat: prev.chat };
+      }
+      const chat = Math.min(prev.chat, Math.max(18, 100 - source - 32));
+      const middle = Math.max(28, 100 - source - chat);
+      return { source, middle, chat: 100 - source - middle };
+    });
+  }
+
+  function restoreSourceDefault() {
+    setSourceCollapsed(false);
+    if (sourceDrawerOpen) setSourceDrawerOpen(false);
+    setColRatios((prev) => {
+      const source = SOURCE_DEFAULT;
+      if (chatCollapsed) {
+        return { source, middle: Math.max(28, 100 - source), chat: prev.chat };
+      }
+      const chat = Math.min(Math.max(prev.chat, 18), Math.max(18, 100 - source - 32));
+      const middle = Math.max(28, 100 - source - chat);
+      return { source, middle, chat: 100 - source - middle };
+    });
+  }
+  function toggleSourceWidth() {
+    if (colRatios.source > SOURCE_DEFAULT + 2) restoreSourceDefault();
+    else widenSourceForPdf(SOURCE_WIDE);
+  }
+
   function cite(c: Citation, expand = false, metric: MetricName | null = null) {
-    readingPosition.current = null; setSourcePage(c.page); setHighlight(c.quote); setResolvedPage(null); setCitedMetric(metric);
-    setSourceCollapsed(false); setMobilePane('sources');
-    if (expand || sourceDrawerOpen) { openSource(); if (sourceMode === 'text' || !c.quote) sourceRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); }
+    readingPosition.current = null; scrollPageSync.current = false;
+    setSourcePage(c.page); setPdfJumpNonce((n) => n + 1); setHighlight(c.quote); setResolvedPage(null); setCitedMetric(metric);
+    widenSourceForPdf(SOURCE_WIDE);
+    if (sourceMode === 'text' || !c.quote) {
+      window.setTimeout(() => sourceRef.current?.scrollTo({ top: 0, behavior: 'smooth' }), 40);
+    }
   }
   function metricCitation(m: MetricName, report = selected) { const item = report.metrics.find(x => x.metric === m); return item?.source_page ? { page: item.source_page, quote: item.source_label ?? labels[m] } : null; }
-  function footnote(m: MetricName) { const c = metricCitation(m); return c && <button className="cd-cite" onClick={(e) => { e.stopPropagation(); cite(c, false, m); }} onDoubleClick={(e) => { e.stopPropagation(); cite(c, true, m); }} title={`单击预览${labels[m]}原文，双击展开原文，${pageDescription(c.page)}`}>[{pageLabel(c.page)}]</button>; }
+  function footnote(m: MetricName) { const c = metricCitation(m); return c && <button className="cd-cite" onClick={(e) => { e.stopPropagation(); cite(c, false, m); }} onDoubleClick={(e) => { e.stopPropagation(); cite(c, true, m); }} title={`单击定位原文（来源栏加宽至约40%），${pageDescription(c.page)}`}>[{pageLabel(c.page)}]</button>; }
   const citedItem = citedMetric ? selected.metrics.find(m => m.metric === citedMetric) : undefined;
   // Low confidence or an unverified value must be visible before the reader trusts it.
   const citedCaveat = citedItem && (citedItem.confidence < 0.8 || !citedItem.verified)
@@ -502,21 +498,29 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     return <button type="button" className="cd-cite cd-answer-ref" key={key} title={title} onClick={() => jumpCitation(c)} onDoubleClick={() => jumpCitation(c, true)}>{label}</button>;
   }
   function renderAnswer(message: Message) {
-    let prevCiteLabel: string | null = null;
-    return message.text.split(/(【(?:E\d+|第\s*\d+\s*页)】|\[P\d+\])/g).map((part,i) => {
+    let prevCiteId: string | null = null;
+    // Normalize glued markers so +54.63%【E1】【E2】 doesn't collapse visually into P6P6.
+    const text = message.text.replace(/(】)(?=【)/g, '$1 ').replace(/(\])(?=\[P)/g, '$1 ');
+    return text.split(/(【(?:E\d+|第\s*\d+\s*页)】|\[P\d+\])/g).map((part,i) => {
       const marked = part.match(/^【(?:E(\d+)|第\s*(\d+)\s*页)】$/);
       const bare = part.match(/^\[P(\d+)\]$/);
-      if (!marked && !bare) { prevCiteLabel = null; return <Fragment key={i}>{part}</Fragment>; }
+      if (!marked && !bare) {
+        // Whitespace-only between markers: keep as thin gap, do not reset cite id.
+        if (!part.trim()) return part ? <Fragment key={i}>{part}</Fragment> : null;
+        prevCiteId = null;
+        return <Fragment key={i}>{part}</Fragment>;
+      }
       const printed = bare?.[1];
       const c = marked
         ? message.citations?.find(c => marked[1] ? c.id === `E${marked[1]}` : c.page === Number(marked[2]))
         : printed
           ? message.citations?.find(c => pageLabel(c.page) === `P${printed}` || c.page === Number(printed))
           : undefined;
-      if (!c) { prevCiteLabel = null; return <span className="cd-note" key={i}>{part}（待核验）</span>; }
-      const label = citeRefLabel(c);
-      if (label === prevCiteLabel) return <Fragment key={i} />;
-      prevCiteLabel = label;
+      if (!c) { prevCiteId = null; return <span className="cd-note" key={i}>{part}（待核验）</span>; }
+      const citeKey = c.id ?? `${c.reportId ?? ''}:${c.page}:${c.quote}`;
+      // Same evidence twice in a row → hide duplicate. Different evidence (even same page) stays clickable with its own quote.
+      if (citeKey === prevCiteId) return null;
+      prevCiteId = citeKey;
       return citationLink(c, i);
     });
   }
@@ -558,15 +562,33 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
   // Suggest the next question instead of making the reader compose one; the list is
   // advisory, so any failure simply leaves the answer without buttons.
-  async function loadFollowups(reportId: string, slot: number, question: string, answer: string, asked: string[]) {
+  function defaultFollowups(answer: string, asked: string[]) {
+    const pool = [
+      '本期营业收入同比怎么变化？',
+      '归母净利润变化的主要原因是什么？',
+      '和上年同期比，哪些指标最值得关注？',
+      '同行公司在同一报告期表现如何？',
+      '请给出支持上述结论的原文页码。',
+    ];
+    const lowerAsked = asked.map(q => q.replace(/\s+/g, ''));
+    const picked = pool.filter(q => !lowerAsked.some(a => a.includes(q.replace(/\s+/g, '')) || q.replace(/\s+/g, '').includes(a))).slice(0, 3);
+    if (picked.length) return picked;
+    return pool.slice(0, 3);
+  }
+  async function loadFollowups(reportId: string, slot: number, question: string, answer: string, asked: string[], mode?: string) {
     const patch = (value: Partial<Message>) => setMessages(m => activeId.current === reportId && m[slot]?.role === 'assistant' ? m.map((item,i) => i === slot ? { ...item, ...value } : item) : m);
+    // Structured / metric answers: template only — no model call.
+    if (!mode || mode === 'structured' || mode === 'metrics' || mode === 'template' || mode.startsWith('struct')) {
+      patch({ followups: defaultFollowups(answer, asked), followupBusy: false });
+      return;
+    }
     patch({ followupBusy: true });
     try {
       const response = await fetch('/api/chat/followups', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ reportId, question, answer, asked }) });
       if (!response.ok) throw new Error();
       const payload = await response.json() as { questions?: string[] };
-      patch({ followups: payload.questions?.slice(0,3) ?? [], followupBusy: false });
-    } catch { patch({ followupBusy: false }); }
+      patch({ followups: payload.questions?.slice(0,3) ?? defaultFollowups(answer, asked), followupBusy: false });
+    } catch { patch({ followups: defaultFollowups(answer, asked), followupBusy: false }); }
   }
 
   useEffect(() => {
@@ -586,20 +608,25 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const finding = metricName ? findings.find(f => f.metric === metricName) : undefined;
       const cite = metricName ? metricCitation(metricName) : null;
       const range = sel.getRangeAt(0).getBoundingClientRect();
-      const box = root!.getBoundingClientRect();
       setPick(null);
       setOverviewPick({
         quote: raw,
         kind: finding ? 'finding' : 'metric',
         page: cite?.page,
         title: finding?.headline ?? (metricName ? labels[metricName] : undefined),
-        x: range.left - box.left + root!.scrollLeft + Math.min(range.width, 240) / 2,
-        y: Math.max(root!.scrollTop + 8, range.top - box.top + root!.scrollTop - 40),
+        x: range.left + Math.min(range.width, 240) / 2,
+        y: Math.max(8, range.top - 44),
       });
     }
     root.addEventListener('mouseup', onUp);
     return () => root.removeEventListener('mouseup', onUp);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mouseup reads latest findings/citations
+  }, [selected.id]);
+
+  useEffect(() => {
+    function onScroll() { setOverviewPick(null); }
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+    return () => window.removeEventListener('scroll', onScroll, true);
   }, [selected.id]);
 
   function flashClips(message: string) {
@@ -608,22 +635,35 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     window.setTimeout(() => setClipsFlash(false), 900);
     window.setTimeout(() => setClipToast(current => current === message ? null : current), 2200);
   }
+  function makeClipId() {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    } catch { /* insecure context */ }
+    return `clip-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
   function addFocus(item: { kind: FocusKind; quote: string; page?: number; title?: string }) {
     const clean = item.quote.replace(/\s+/g, ' ').trim();
     if (clean.length < 4) return;
     const quote = clean.slice(0, FOCUS_QUOTE_MAX);
     let added = true;
     let capped = false;
-    setClips(prev => {
-      const dup = prev.some(c => c.kind === item.kind && c.quote === quote && c.page === item.page && c.title === item.title);
-      if (dup) { added = false; return prev; }
-      if (prev.length >= FOCUS_MAX_ITEMS) capped = true;
-      return [...prev, { id: crypto.randomUUID(), kind: item.kind, quote, page: item.page, title: item.title }].slice(-FOCUS_MAX_ITEMS);
-    });
+    try {
+      setClips(prev => {
+        const dup = prev.some(c => c.kind === item.kind && c.quote === quote && c.page === item.page && c.title === item.title);
+        if (dup) { added = false; return prev; }
+        if (prev.length >= FOCUS_MAX_ITEMS) capped = true;
+        return [...prev, { id: makeClipId(), kind: item.kind, quote, page: item.page, title: item.title }].slice(-FOCUS_MAX_ITEMS);
+      });
+    } catch (err) {
+      console.error('addFocus failed', err);
+      flashClips('加入AI分析失败，请重试');
+      return;
+    }
     setPick(null);
     setOverviewPick(null);
     setChatCollapsed(false);
-    setMobilePane('chat');
+    // Do not force-switch mobilePane here: unmounting the PDF pane mid-interaction
+    // (display:none) has crashed the tab when pdf.js still held the canvas.
     window.getSelection()?.removeAllRanges();
     if (!added) flashClips('这项已在AI分析列表里');
     else if (capped) flashClips(`已加入AI分析；最多 ${FOCUS_MAX_ITEMS} 项，已去掉最早的一项`);
@@ -644,17 +684,17 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     return q.startsWith('概览 ') ? q : `概览 ${q}`;
   }
   function placePick(quote: string, page: number) {
+    // .cd-pick-bar is position:fixed — use viewport coords, not scroll-container offsets.
     const sel = window.getSelection();
-    const root = sourceRef.current;
-    if (!sel || !sel.rangeCount || !root) { addClip(quote, page); return; }
+    if (!sel || !sel.rangeCount) { addClip(quote, page); return; }
     const range = sel.getRangeAt(0).getBoundingClientRect();
-    const box = root.getBoundingClientRect();
+    if (range.width === 0 && range.height === 0) { addClip(quote, page); return; }
     setOverviewPick(null);
     setPick({
       quote,
       page,
-      x: range.left - box.left + root.scrollLeft + Math.min(range.width, 240) / 2,
-      y: Math.max(root.scrollTop + 8, range.top - box.top + root.scrollTop - 40),
+      x: range.left + range.width / 2,
+      y: Math.max(8, range.top - 8),
     });
   }
   function onSourceTextPick(text: string, page: number) { placePick(text, page); }
@@ -678,6 +718,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setAsking(true); setThinking(false); setQuestion(''); setClips([]); setPick(null); setMessages(m => [...m,{ role:'user',text:display },{ role:'assistant',text:'' }]);
     const targetModule = moduleForQuestion(assembled); if (targetModule) focusModule(targetModule);
     let answer = '';
+    let answerMode = '';
     function update(citations?: Citation[]) { if (activeId.current !== id || controller.signal.aborted) return; setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:answer, ...(citations ? { citations } : {}) } : item)); }
     try {
       let conversationId = conversationIds.current.get(id);
@@ -696,13 +737,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       while (true) {
         const {done,value:chunk} = await reader.read(); buffer += decoder.decode(chunk ?? new Uint8Array(), {stream:!done});
         const events = buffer.split('\n\n'); buffer = events.pop() ?? '';
-        for (const event of events) { const raw = event.split('\n').find(l=>l.startsWith('data: '))?.slice(6); if (!raw || raw==='[DONE]') continue; const p = JSON.parse(raw) as {content?:string;evidence?:Citation[];status?:string;error?:string;result?:{answer:string;evidence:Citation[]}}; if(p.status==='reasoning') setThinking(true); if(p.content||p.result) setThinking(false); answer = p.result ? p.result.answer : answer + (p.content ?? ''); if(p.error) answer=p.error; update(p.result?.evidence ?? p.evidence); }
+        for (const event of events) { const raw = event.split('\n').find(l=>l.startsWith('data: '))?.slice(6); if (!raw || raw==='[DONE]') continue; const p = JSON.parse(raw) as {content?:string;evidence?:Citation[];status?:string;error?:string;mode?:string;result?:{answer:string;evidence:Citation[];mode?:string}}; if(p.status==='reasoning') setThinking(true); if(p.content||p.result) setThinking(false); answer = p.result ? p.result.answer : answer + (p.content ?? ''); if(p.result?.mode) answerMode=p.result.mode; else if(p.mode) answerMode=p.mode; if(p.error) answer=p.error; update(p.result?.evidence ?? p.evidence); }
         if(done) break;
       }
       if (!answer) { answer='暂无法回答：未返回足够证据。可尝试询问本期营业收入或净利润。'; update(); }
     } catch (error) { if (!controller.signal.aborted) { answer = error instanceof Error ? error.message : '问答服务暂时不可用，请稍后重试。'; update(); } }
     finally { if (activeId.current === id && !controller.signal.aborted) { busyRef.current = false; setAsking(false); setThinking(false); } }
-    if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
+    if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked, answerMode);
   }
   askRef.current = ask;
 
@@ -783,17 +824,17 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const sourceText = outline.pages.find(p => p.page === sourcePage)?.content;
   const highlightRange = sourceText ? sourceRange(sourceText, highlight) : null;
   return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''}`} >
-    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表">←</button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry} <span>／</span> {selected.report_type === 'annual' ? '年度报告' : selected.report_type === 'semiannual' ? '半年度报告' : '季度报告'}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true">{reportListOpen?'⌃':'⌄'}</span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions"><span className="cd-status"><i />{selected.metrics.length} 项指标已解析</span>{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}</div></header>
+    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表">←</button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true">{reportListOpen?'⌃':'⌄'}</span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions"><span className="cd-status"><i />{selected.metrics.length} 项指标已解析</span>{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}</div></header>
     {error && <div role="alert" className="cd-error">{error}</div>}
     <nav className="cd-mobile-tabs" aria-label="详情页分栏">{[['sources','来源'],['dashboard','数据概览'],['chat','对话']].map(([id,label]) => <button key={id} className={mobilePane===id?'active':''} onClick={()=>{setMobilePane(id);if(id==='chat')setChatCollapsed(false);if(id==='sources')setSourceCollapsed(false);}}>{label}</button>)}</nav>
     <div className="cd-columns" ref={columnsRef}>
       <div id="cd-source-panel" className={`cd-source-slot ${mobilePane==='sources'?'mobile-active':''}`} style={!sourceCollapsed ? { flex: `${colRatios.source} 1 0%`, minWidth: 200 } : undefined}>
       <aside className={`cd-sources cd-pane ${sourceDrawerOpen?'cd-source-drawer':''}`} role={sourceDrawerOpen?'dialog':undefined} aria-modal={sourceDrawerOpen?false:undefined} aria-label={sourceDrawerOpen?'财报原文阅读抽屉':'财报来源'} ref={sourcePaneRef}>
-        <div className="cd-pane-head cd-source-head"><h2><span>◇</span> {sourceDrawerOpen?'财报原文':'来源'}</h2><div className="cd-pane-tools">{sourceDrawerOpen ? <button className="cd-source-expand" ref={drawerCloseRef} onClick={()=>closeSource()} aria-label="收起来源阅读区">收起</button> : <><button className="cd-source-expand" onClick={openSource} aria-haspopup="dialog" aria-label="展开来源阅读区">展开</button><button className="cd-dock" aria-label="收起来源栏" title="收起来源栏" aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="left" /></button></>}</div></div>
+        <div className="cd-pane-head cd-source-head"><h2><span>◇</span> 来源</h2><div className="cd-pane-tools"><button type="button" className="cd-dock cd-source-width" aria-label={colRatios.source > SOURCE_DEFAULT + 2 ? '恢复默认宽度' : '加宽来源栏'} title={colRatios.source > SOURCE_DEFAULT + 2 ? '快速回到默认宽度（约25%）' : '加宽到来源阅读宽度（约40%）'} onClick={toggleSourceWidth}>{colRatios.source > SOURCE_DEFAULT + 2 ? '«' : '»'}</button><button className="cd-dock" aria-label="收起来源栏" title="收起来源栏（可用中间分隔条再调宽）" aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="left" /></button></div></div>
         <details className="cd-outline"><summary><svg className="cd-outline-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg><b>提纲导航</b><span>{outline.outline.length} 个章节</span></summary><nav>{outline.outline.map(o=><button key={o.id} onClick={()=>cite({page:o.page,quote:o.highlight})}><b>{o.title}</b><span className="cd-outline-page">{pageLabel(o.page)}</span></button>)}</nav></details>
         <div className="cd-source-toolbar">
           <label><select aria-label="原文模式" value={sourceMode} onChange={e=>{const m=e.target.value as 'pdf'|'text';setSourceMode(m);if(m==='pdf')pageEnter.current='start';}}><option value="pdf">原始PDF</option><option value="text">原文文本</option></select></label>
-          <label><select aria-label="跳转原文页码" value={sourcePage} onChange={e=>{readingPosition.current=null;pageEnter.current='start';setSourcePage(Number(e.target.value));setHighlight('');}}>{[...new Set([1,sourcePage,...(pageLabels.length?pageLabels:outline.pages).map(p=>p.page)])].sort((a,b)=>a-b).map(p=><option key={p} value={p}>{pageLabel(p)}</option>)}</select></label>
+          <label><select aria-label="跳转原文页码" value={sourcePage} onChange={e=>{readingPosition.current=null;pageEnter.current='start';scrollPageSync.current=false;setSourcePage(Number(e.target.value));setPdfJumpNonce((n)=>n+1);setHighlight('');}}>{[...new Set([1,sourcePage,...(pageLabels.length?pageLabels:outline.pages).map(p=>p.page)])].sort((a,b)=>a-b).map(p=><option key={p} value={p}>{pageLabel(p)}</option>)}</select></label>
           <span className="cd-pdf-pick-hint">划词智析</span>
         </div>
         {!printedKnown && pageLabels.length>0 && <p className="cd-page-notice">这份 PDF 没能识别出正文页码，下面统一按 PDF 实际页数显示。</p>}
@@ -812,8 +853,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {feedbackError && <small className="cd-verify-hint cd-verify-error">{feedbackError}</small>}
             {feedback[citedMetric] && <small className="cd-verify-hint">{feedback[citedMetric]==='correct'?'已记录你的确认，累计确认会进入复核队列。':'已记录异议，该指标会被优先人工复核。'}</small>}
           </div>}
-          {sourceMode==='pdf' ? <PdfEvidence key={`${selected.id}-${sourcePage}-${highlight}`} reportId={selected.id} page={sourcePage} quote={highlight} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
-        </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF ↗</a><button onClick={()=>{if(sourceDrawerOpen) closeSource();draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
+          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
+        </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF ↗</a><button onClick={()=>{draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
       </aside>
       </div>
       {!sourceCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整来源栏宽度" onPointerDown={e=>onGutterDown('source', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
@@ -846,7 +887,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
               <strong>{amount(value(selected, m), m)}<i>{unitOf(m)}</i></strong>
               <span className={`cd-pill ${pill}`}>{delta}</span>
               {f && <small className="cd-metric-insight">{f.detail}</small>}
-              {shaky.includes(m) && <small className="cd-caveat" title="本期或上年同期的解析置信度偏低，建议点角标核对原文">⚠ 口径待核对</small>}
             </article>;
           })}</div>
           {baselineOptions.length>0 && <div className="cd-baseline-row"><label>对比基准 <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`${period(defaultPrevious)}（上年同期）`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}</select></label>{!baselineIsDefault && previous && <span className="cd-note">当前以 {period(previous)} 为基准，非上年同期。</span>}</div>}

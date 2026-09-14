@@ -10,6 +10,7 @@ import {
   pickBestReport,
   reportMatchesPeriod,
 } from '../lib/home-search';
+import { pickRecentPeriods } from '../lib/crawl-display';
 import type { CrawlCompanyCoverage } from '../lib/crawl-display';
 import type { Report } from '../lib/detail-model';
 
@@ -63,6 +64,7 @@ test('matchCompany by name and code', () => {
       metricsComplete: true,
       missingMetrics: [],
       metrics: [{ metric: 'revenue', label: '营业收入', value: 1, unit: '元' }],
+      recentPeriods: ['2026H1', '2025FY'],
       popularity: 100,
       rank: 16,
     },
@@ -121,4 +123,24 @@ test('resolveListedCompany recognizes 牧原股份 outside monitor phrasing', ()
   assert.equal(hit?.code, '002714');
   assert.equal(hit?.name, '牧原股份');
   assert.equal(resolveListedCompany('完全不存在的公司xyz增长如何'), null);
+});
+
+test('resolveListedCompany handles paren-embedded codes', () => {
+  assert.equal(resolveListedCompany('三一重工(600031)')?.code, '600031');
+  assert.equal(resolveListedCompany('三一重工（600031）')?.code, '600031');
+  assert.equal(resolveListedCompany('600031')?.name, '三一重工');
+});
+
+
+test('resolveListedCompany recognizes 沐曦股份 / 688802', () => {
+  assert.equal(resolveListedCompany('沐曦股份')?.code, '688802');
+  assert.equal(resolveListedCompany('688802')?.code, '688802');
+  assert.equal(resolveListedCompany('沐曦股份(688802)')?.code, '688802');
+});
+
+test('pickRecentPeriods newest first capped at 3', () => {
+  assert.deepEqual(
+    pickRecentPeriods(['2025FY', '2026Q1', '2026H1', '2024FY', '2025FY']),
+    ['2026H1', '2026Q1', '2025FY'],
+  );
 });

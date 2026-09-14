@@ -15,7 +15,9 @@ async function main() {
     FROM (
       SELECT a.code, a.id, COUNT(m.metric) FILTER (WHERE m.metric IN ('revenue','net_profit','eps','roe'))::int AS metric_count,
         COUNT(*) FILTER (WHERE m.verified AND m.metric IN ('revenue','net_profit','eps','roe'))::int AS verified_count
-      FROM announcements a LEFT JOIN financial_metrics m ON m.announcement_id=a.id
+      FROM announcements a
+      JOIN companies c ON c.code=a.code AND c.enabled=true
+      LEFT JOIN financial_metrics m ON m.announcement_id=a.id
       GROUP BY a.code, a.id
     ) x
   `;
@@ -47,7 +49,7 @@ async function main() {
     { name: '人工复核覆盖', passed: coverage.verified >= 50, detail: `${coverage.verified}/50 家至少一份报告完成四项人工复核` },
     { name: '黄金样本多期数据', passed: completeGolden === goldenSamples.length, detail: `${completeGolden}/${goldenSamples.length} 家达到四期` },
     { name: '官方真值回归', passed: truthMatched === truthExpected, detail: `${truthMatched}/${truthExpected} 个已标注指标数值与页码一致` },
-    { name: '标准问题集', passed: goldenQuestions.length >= 20, detail: `${goldenQuestions.length} 个验收问题` },
+    { name: '标准问题集', passed: goldenQuestions.length >= 20 && goldenQuestions.every((q: { kind?: string; expectedMetric?: string; expectedTerms?: string[]; rubric?: string }) => Boolean(q.kind) && Boolean(q.expectedMetric || q.expectedTerms?.length || q.rubric)), detail: `${goldenQuestions.length} 个验收问题（含评分字段）` },
   ];
   for (const check of checks) console.log(`${check.passed ? 'PASS' : 'FAIL'} ${check.name}: ${check.detail}`);
   if (checks.some((check) => !check.passed)) process.exitCode = 1;
