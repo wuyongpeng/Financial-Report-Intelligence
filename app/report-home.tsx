@@ -75,7 +75,7 @@ function statusMeta(item: CrawlCompanyCoverage) {
 }
 
 function recentPeriodTokens(item: CrawlCompanyCoverage) {
-  const periods = item.recentPeriods?.filter(Boolean).slice(0, 3) ?? [];
+  const periods = item.recentPeriods?.filter(Boolean).slice(0, 6) ?? [];
   if (periods.length) return periods;
   if (item.reportPeriod) return [item.reportPeriod];
   return [] as string[];

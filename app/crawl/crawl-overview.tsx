@@ -86,7 +86,7 @@ type LivePayload = {
   };
 };
 
-function formatCrawlTime(iso: string | null) {
+function formatCrawlTime(iso: string | null | undefined) {
   if (!iso) return '—';
   const d = new Date(iso);
   const y = d.getFullYear();
@@ -243,6 +243,9 @@ function periodChipTitle(p: CrawlPeriodStatus) {
     `来源：${sourceApiShort(p.sourceApi)}`,
     periodPipelineLabel(p),
   ];
+  if (p.discoveredAt) lines.push(`发现：${formatCrawlTime(p.discoveredAt ?? null)}`);
+  if (p.downloadedAt) lines.push(`抓取：${formatCrawlTime(p.downloadedAt ?? null)}`);
+  if (p.parsedAt) lines.push(`解析：${formatCrawlTime(p.parsedAt ?? null)}`);
   if (p.title) lines.push(p.title.replace(/\s+/g, ' ').slice(0, 48));
   return lines.join('\n');
 }
@@ -254,16 +257,17 @@ function PeriodChips({ periods }: { periods?: CrawlPeriodStatus[] }) {
   const row1 = list.slice(0, 3);
   const row2 = list.slice(3, 6);
   const chip = (p: CrawlPeriodStatus) => (
-    <span key={p.period} className={`co-period ${p.state}`} title={periodChipTitle(p)}>
+    <span key={p.period} className={`co-period ${p.state}`} data-tip={periodChipTitle(p)}>
       {p.period}
       <i>{periodStateLabel(p.state)}</i>
       {p.sourceApi ? <em className="co-period-src">{sourceApiShort(p.sourceApi)}</em> : null}
     </span>
   );
   return (
-    <div className="co-period-chips">
+    <div className="co-period-chips" aria-label="公告期次，悬停看详情，点行展开完整列表">
       <div className="co-period-row">{row1.map(chip)}</div>
       {row2.length > 0 ? <div className="co-period-row">{row2.map(chip)}</div> : null}
+      <div className="co-period-hint">悬停看详情 · 点行展开公告表</div>
     </div>
   );
 }
@@ -689,10 +693,6 @@ export default function CrawlOverview() {
   async function runCrawlCompany(code: string, name: string, period?: string) {
     if (rowTriggering) return;
     const label = period ? `${name} ${period}` : `${name}（${code}）`;
-    const ok = window.confirm(period
-      ? `确定抓取 ${label}？`
-      : `${name}（${code}）确定立即抓取？`);
-    if (!ok) return;
     setRowTriggering(`crawl:${code}`);
     setPriorityCodes((prev) => (prev.includes(code) ? prev : [code, ...prev].slice(0, 8)));
     setTriggerMsg(`正在抓取 ${label}…`);
@@ -739,8 +739,6 @@ export default function CrawlOverview() {
   ) {
     if (rowTriggering) return;
     const label = chosen?.period ? `${name} ${chosen.period}` : `${name}（${code}）`;
-    const ok = window.confirm(`确定解析 ${label}？`);
-    if (!ok) return;
     setRowTriggering(`parse:${code}`);
     setTriggerMsg(`正在解析 ${label}…`);
     try {
@@ -1096,7 +1094,7 @@ export default function CrawlOverview() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="公司 / 代码 / 拼音（如 hanwu）"
+              placeholder="公司 / 代码"
               aria-label="搜索公司或代码"
             />
           </label>
@@ -1203,61 +1201,63 @@ export default function CrawlOverview() {
                     </tr>
                     {open && (
                       <tr key={`${item.code}-detail`} className="co-detail-row">
-                        <td colSpan={4}>
-                          <div className="co-detail">
-                            <div>
-                              <span>公告标题</span>
-                              <strong>{item.announcementTitle ?? '—'}</strong>
+                        <td colSpan={4} onClick={(e) => e.stopPropagation()}>
+                          <div className="co-ann-panel">
+                            <div className="co-ann-head">
+                              <strong>公告列表</strong>
+                              <Link href={companyHref(item)}>打开公司详情 →</Link>
                             </div>
-                            <div>
-                              <span>最近一期来源</span>
-                              <strong>{sourceApiLabel(item)}（各期次以来源芯片为准）</strong>
-                            </div>
-                            <div>
-                              <span>发现时间</span>
-                              <strong>{formatCrawlTime(item.discoveredAt ?? item.lastCrawlAt)}</strong>
-                            </div>
-                            <div>
-                              <span>下载时间</span>
-                              <strong>{formatCrawlTime(item.downloadedAt)}</strong>
-                            </div>
-                            <div>
-                              <span>解析完成</span>
-                              <strong>{formatCrawlTime(item.parsedAt)}</strong>
-                            </div>
-                            <div>
-                              <span>管道状态</span>
-                              <strong>{item.rawStatus ?? item.parseStatus}</strong>
-                            </div>
-                            {item.parseStatus === 'failed' && (
-                              <div className="co-detail-fail">
-                                <span>失败原因</span>
-                                <strong>{item.parseError ?? '未知错误'}</strong>
-                              </div>
-                            )}
-                            {item.parseStatus === 'parsing' && (
-                              <div>
-                                <span>解析进度</span>
-                                <strong>{rowProgress(item) != null ? `已 ${Math.round(rowProgress(item)!)}s` : '进行中（无假百分比）'}</strong>
-                              </div>
-                            )}
-                            {item.parseStatus === 'queued' && (
-                              <div>
-                                <span>解析进度</span>
-                                <strong>排队等待解析槽（并发上限 1）</strong>
-                              </div>
-                            )}
-                            {!item.metricsComplete && item.missingMetrics.length > 0 && (
-                              <div>
-                                <span>缺少指标</span>
-                                <strong>{item.missingMetrics.map(metricLabel).join(' / ')}</strong>
-                              </div>
-                            )}
-                            <div className="co-detail-link">
-                              <Link href={companyHref(item)} onClick={(e) => e.stopPropagation()}>
-                                打开公司详情 →
-                              </Link>
-                            </div>
+                            <table className="co-ann-table">
+                              <thead>
+                                <tr>
+                                  <th>期次</th>
+                                  <th>状态</th>
+                                  <th>来源</th>
+                                  <th>发现</th>
+                                  <th>抓取</th>
+                                  <th>解析</th>
+                                  <th>操作</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(item.periodStatuses ?? []).filter((p) => p.state !== 'expected' || p.announcementId).map((p) => (
+                                  <tr key={`${item.code}-${p.period}-${p.announcementId ?? 'x'}`}>
+                                    <td>
+                                      <b>{p.period}</b>
+                                      {p.title ? <div className="co-sub" title={p.title}>{p.title.replace(/\s+/g, ' ').slice(0, 36)}</div> : null}
+                                    </td>
+                                    <td><span className={`co-period ${p.state}`}>{periodStateLabel(p.state)}</span></td>
+                                    <td>{sourceApiShort(p.sourceApi)}</td>
+                                    <td>{formatCrawlTime(p.discoveredAt ?? p.publishedAt ?? null)}</td>
+                                    <td>{formatCrawlTime(p.downloadedAt ?? null)}</td>
+                                    <td>{formatCrawlTime(p.parsedAt ?? null)}</td>
+                                    <td className="co-actions">
+                                      <button
+                                        type="button"
+                                        className="co-text-act"
+                                        disabled={Boolean(rowTriggering)}
+                                        onClick={() => void runCrawlCompany(item.code, item.name, p.period === '最新' ? undefined : p.period)}
+                                      >抓取</button>
+                                      <button
+                                        type="button"
+                                        className="co-text-act"
+                                        disabled={Boolean(rowTriggering) || (p.state === 'expected' && !p.announcementId)}
+                                        onClick={() => {
+                                          if (p.state === 'expected' && !p.announcementId) {
+                                            window.alert(`${item.name} ${p.period} 尚未下载，请先抓取`);
+                                            return;
+                                          }
+                                          void runParseCompany(item.code, item.name, p);
+                                        }}
+                                      >解析</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                                {!(item.periodStatuses ?? []).some((p) => p.state !== 'expected' || p.announcementId) && (
+                                  <tr><td colSpan={7} className="co-sub">暂无公告，可点上方「抓取」发现财报</td></tr>
+                                )}
+                              </tbody>
+                            </table>
                           </div>
                         </td>
                       </tr>

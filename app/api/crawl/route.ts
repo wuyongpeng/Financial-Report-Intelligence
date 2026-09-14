@@ -5,6 +5,7 @@ import {
   computeStats,
   mapIndustryGroup,
   parseStatusFromAnnouncement,
+  companyParseStatusFromPeriods,
   reportTypeFromValue,
   sourceKindFromAnnouncement,
   pickRecentPeriods,
@@ -55,6 +56,7 @@ function buildPeriodStatuses(rows: Array<{
   period: string; status: string | null; pdf_key: string | null; title: string | null;
   hasMetrics: boolean; metricsComplete: boolean; missingMetrics?: CrawlPeriodStatus['missingMetrics'];
   parseError?: string | null; id?: string | null; source?: string | null;
+  discoveredAt?: string | null; downloadedAt?: string | null; parsedAt?: string | null; publishedAt?: string | null;
 }>): { periodStatuses: CrawlPeriodStatus[]; latestExpected: string; latestExpectedMissing: boolean } {
   const latestExpected = latestExpectedPeriod();
   const byPeriod = new Map<string, CrawlPeriodStatus>();
@@ -74,6 +76,10 @@ function buildPeriodStatuses(rows: Array<{
         announcementId: row.id ?? null,
         sourceApi: row.source ?? null,
         rawStatus: row.status ?? null,
+        discoveredAt: row.discoveredAt ?? null,
+        downloadedAt: row.downloadedAt ?? null,
+        parsedAt: row.parsedAt ?? null,
+        publishedAt: row.publishedAt ?? null,
         missingMetrics: row.missingMetrics,
         parseError: row.parseError ?? null,
       });
@@ -126,62 +132,21 @@ export async function GET() {
     `;
     const latestByCode = new Map(latest.map((row) => [row.code, row]));
 
-    const announcementIds = latest.map((row) => row.id);
-    type MetricRow = { announcement_id: string; period: string; metric: string; value: number; unit: string };
-    const metrics: MetricRow[] = announcementIds.length
-      ? await db<MetricRow[]>`
-          SELECT announcement_id, period, metric, value, unit
-          FROM financial_metrics
-          WHERE announcement_id IN ${db(announcementIds)}
-            AND metric IN ('revenue','net_profit','eps','roe')
-        `
-      : [];
-    const metricsByAnnouncement = new Map<string, MetricRow[]>();
-    for (const metric of metrics) {
-      const list = metricsByAnnouncement.get(metric.announcement_id) ?? [];
-      list.push(metric);
-      metricsByAnnouncement.set(metric.announcement_id, list);
-    }
-
-    const codeToAnnouncement = new Map(latest.map((row) => [row.id, row.code]));
-    const priorPeriods = [...new Set(metrics.map((m) => priorPeriod(m.period)).filter((p): p is string => Boolean(p)))];
-    const codesForPrior = [...new Set(metrics.map((m) => codeToAnnouncement.get(m.announcement_id)).filter((c): c is string => Boolean(c)))];
-    const priorMetrics = priorPeriods.length && codesForPrior.length
-      ? await db<Array<{ code: string; period: string; metric: string; value: number }>>`
-          SELECT DISTINCT ON (code, period, metric) code, period, metric, value
-          FROM financial_metrics
-          WHERE code = ANY(${codesForPrior}::text[])
-            AND period = ANY(${priorPeriods}::text[])
-            AND metric IN ('revenue','net_profit','eps','roe')
-          ORDER BY code, period, metric, created_at DESC
-        `
-      : [];
-    const priorLookup = new Map(priorMetrics.map((m) => [`${m.code}|${m.period}|${m.metric}`, Number(m.value)]));
-
     const companyCodes = companies.map((c) => c.code);
-    const periodRows = companyCodes.length
-      ? await db<Array<{ code: string; period: string }>>`
-          SELECT DISTINCT fm.code, fm.period
-          FROM financial_metrics fm
-          WHERE fm.code = ANY(${companyCodes}::text[])
-            AND fm.period ~ '^20[0-9]{2}(FY|H1|Q[1-3])$'
-        `
-      : [];
-    const periodsByCode = new Map<string, string[]>();
-    for (const row of periodRows) {
-      const list = periodsByCode.get(row.code) ?? [];
-      list.push(row.period);
-      periodsByCode.set(row.code, list);
-    }
-
+    type MetricRow = { announcement_id: string; period: string; metric: string; value: number; unit: string };
+    // Metrics loaded after we know all announcements (below). Placeholder maps filled later.
+    let metricsByAnnouncement = new Map<string, MetricRow[]>();
+    let priorLookup = new Map<string, number>();
     type AnnPeriodRow = {
       id: string; code: string; title: string; status: string; pdf_key: string | null;
-      published_at: string; parse_error: string | null; source: string; period: string | null; metric_count: number;
+      published_at: string; discovered_at: string; downloaded_at: string | null; parsed_at: string | null;
+      parse_error: string | null; source: string; report_type: string; period: string | null; metric_count: number;
       has_revenue: boolean; has_net_profit: boolean; has_eps: boolean; has_roe: boolean;
     };
     const announcementPeriods: AnnPeriodRow[] = companyCodes.length
       ? await db<AnnPeriodRow[]>`
-          SELECT a.id, a.code, a.title, a.status, a.pdf_key, a.published_at, a.parse_error, a.source,
+          SELECT a.id, a.code, a.title, a.status, a.pdf_key, a.published_at, a.discovered_at, a.downloaded_at, a.parsed_at,
+            a.parse_error, a.source, a.report_type,
             (SELECT fm.period FROM financial_metrics fm WHERE fm.announcement_id=a.id LIMIT 1) AS period,
             (SELECT COUNT(*)::int FROM financial_metrics fm
               WHERE fm.announcement_id=a.id AND fm.metric IN ('revenue','net_profit','eps','roe')) AS metric_count,
@@ -200,36 +165,44 @@ export async function GET() {
       annPeriodsByCode.set(row.code, list);
     }
 
+    const allAnnIds = announcementPeriods.map((r) => r.id);
+    const metrics: MetricRow[] = allAnnIds.length
+      ? await db<MetricRow[]>`
+          SELECT announcement_id, period, metric, value, unit
+          FROM financial_metrics
+          WHERE announcement_id IN ${db(allAnnIds)}
+            AND metric IN ('revenue','net_profit','eps','roe')
+        `
+      : [];
+    metricsByAnnouncement = new Map<string, MetricRow[]>();
+    for (const metric of metrics) {
+      const list = metricsByAnnouncement.get(metric.announcement_id) ?? [];
+      list.push(metric);
+      metricsByAnnouncement.set(metric.announcement_id, list);
+    }
+    const codeToAnnouncement = new Map(announcementPeriods.map((row) => [row.id, row.code]));
+    const priorPeriods = [...new Set(metrics.map((m) => priorPeriod(m.period)).filter((p): p is string => Boolean(p)))];
+    const codesForPrior = [...new Set(metrics.map((m) => codeToAnnouncement.get(m.announcement_id)).filter((c): c is string => Boolean(c)))];
+    const priorMetrics = priorPeriods.length && codesForPrior.length
+      ? await db<Array<{ code: string; period: string; metric: string; value: number }>>`
+          SELECT DISTINCT ON (code, period, metric) code, period, metric, value
+          FROM financial_metrics
+          WHERE code = ANY(${codesForPrior}::text[])
+            AND period = ANY(${priorPeriods}::text[])
+            AND metric IN ('revenue','net_profit','eps','roe')
+          ORDER BY code, period, metric, created_at DESC
+        `
+      : [];
+    priorLookup = new Map(priorMetrics.map((m) => [`${m.code}|${m.period}|${m.metric}`, Number(m.value)]));
+
     const [run] = await db<Array<{ started_at: string; finished_at: string | null }>>`
       SELECT started_at, finished_at FROM ingest_runs ORDER BY started_at DESC LIMIT 1
     `;
 
     const coverage: CrawlCompanyCoverage[] = companies.map((company) => {
       const meta = metaByCode.get(company.code);
-      const ann = latestByCode.get(company.code);
-      const metricRows = ann ? (metricsByAnnouncement.get(ann.id) ?? []) : [];
-      const metricCount = metricRows.filter((m) => CORE.includes(m.metric as HeadlineMetricName)).length;
-      const parseStatus = parseStatusFromAnnouncement(ann?.status, metricCount);
-      const present = new Set(metricRows.map((m) => m.metric));
-      const missingMetrics = CORE.filter((m) => !present.has(m));
-      const resolvedPeriod = metricRows[0]?.period ?? null;
-      const preview: CrawlMetricPreview[] = [];
-      for (const metric of CORE) {
-        const row = metricRows.find((m) => m.metric === metric);
-        if (!row) continue;
-        const priorKey = resolvedPeriod ? priorPeriod(resolvedPeriod) : null;
-        const prior = priorKey ? priorLookup.get(`${company.code}|${priorKey}|${metric}`) : undefined;
-        preview.push({
-          metric,
-          label: METRIC_LABELS[metric],
-          value: Number(row.value),
-          ...(prior !== undefined ? { prior } : {}),
-          unit: row.unit,
-        });
-      }
-
-      const lastCrawlAt = ann?.discovered_at ?? ann?.published_at ?? null;
-      const periodBuilt = buildPeriodStatuses((annPeriodsByCode.get(company.code) ?? []).map((row) => {
+      const rows = annPeriodsByCode.get(company.code) ?? [];
+      const periodBuilt = buildPeriodStatuses(rows.map((row) => {
         const missing = CORE.filter((m) => {
           if (m === 'revenue') return !row.has_revenue;
           if (m === 'net_profit') return !row.has_net_profit;
@@ -247,8 +220,69 @@ export async function GET() {
           parseError: row.parse_error,
           source: row.source,
           id: row.id,
+          discoveredAt: row.discovered_at,
+          downloadedAt: row.downloaded_at,
+          parsedAt: row.parsed_at,
+          publishedAt: row.published_at,
         };
       }));
+
+      // Homepage / company-level fields: newest *parsed* filing, not newest published announcement.
+      const parsedPeriods = periodBuilt.periodStatuses.filter((p) => p.state === 'parsed' || p.state === 'parsed_partial');
+      const displayPeriod = parsedPeriods.length
+        ? [...parsedPeriods].sort((a, b) => periodTokenKey(b.period) - periodTokenKey(a.period))[0]
+        : null;
+      const displayRow = displayPeriod?.announcementId
+        ? rows.find((r) => r.id === displayPeriod.announcementId) ?? null
+        : null;
+      const fallbackLatest = latestByCode.get(company.code) ?? null;
+      const ann = displayRow ?? (fallbackLatest
+        ? {
+            id: fallbackLatest.id,
+            code: fallbackLatest.code,
+            title: fallbackLatest.title,
+            status: fallbackLatest.status,
+            pdf_key: fallbackLatest.pdf_key,
+            published_at: fallbackLatest.published_at,
+            discovered_at: fallbackLatest.discovered_at,
+            downloaded_at: fallbackLatest.downloaded_at,
+            parsed_at: fallbackLatest.parsed_at,
+            parse_error: fallbackLatest.parse_error,
+            source: fallbackLatest.source,
+            report_type: fallbackLatest.report_type,
+            period: null as string | null,
+            metric_count: 0,
+            has_revenue: false, has_net_profit: false, has_eps: false, has_roe: false,
+          }
+        : null);
+
+      const metricRows = ann ? (metricsByAnnouncement.get(ann.id) ?? []) : [];
+      const metricCount = metricRows.filter((m) => CORE.includes(m.metric as HeadlineMetricName)).length;
+      const parseStatus = displayPeriod
+        ? companyParseStatusFromPeriods(periodBuilt.periodStatuses)
+        : parseStatusFromAnnouncement(ann?.status, metricCount);
+      const present = new Set(metricRows.map((m) => m.metric));
+      const missingMetrics = CORE.filter((m) => !present.has(m));
+      const resolvedPeriod = metricRows[0]?.period ?? displayPeriod?.period ?? null;
+      const preview: CrawlMetricPreview[] = [];
+      for (const metric of CORE) {
+        const row = metricRows.find((m) => m.metric === metric);
+        if (!row) continue;
+        const priorKey = resolvedPeriod ? priorPeriod(resolvedPeriod) : null;
+        const prior = priorKey ? priorLookup.get(`${company.code}|${priorKey}|${metric}`) : undefined;
+        preview.push({
+          metric,
+          label: METRIC_LABELS[metric],
+          value: Number(row.value),
+          ...(prior !== undefined ? { prior } : {}),
+          unit: row.unit,
+        });
+      }
+
+      const anyDownloaded = rows.find((r) => r.downloaded_at || r.pdf_key);
+      const anyParsed = rows.find((r) => r.parsed_at);
+      const lastCrawlAt = ann?.discovered_at ?? ann?.published_at ?? fallbackLatest?.discovered_at ?? null;
+
       return {
         code: company.code,
         name: company.name,
@@ -256,27 +290,27 @@ export async function GET() {
         industryGroup: mapIndustryGroup(company.industry, meta?.sector),
         theme: meta?.theme ?? meta?.industry ?? company.industry,
         exchange: company.exchange,
-        covered: Boolean(ann),
+        covered: rows.length > 0 || Boolean(fallbackLatest),
         lastCrawlAt,
-        source: sourceKindFromAnnouncement(ann?.source),
-        sourceApi: ann?.source ?? null,
-        reportType: reportTypeFromValue(ann?.report_type),
+        source: sourceKindFromAnnouncement(ann?.source ?? fallbackLatest?.source),
+        sourceApi: ann?.source ?? fallbackLatest?.source ?? null,
+        reportType: reportTypeFromValue(ann?.report_type ?? fallbackLatest?.report_type),
         reportPeriod: resolvedPeriod,
         parseStatus,
-        parseError: ann?.parse_error ?? (parseStatus === 'pending' ? '监控池内，尚未完成抓取/解析' : null),
+        parseError: displayPeriod
+          ? (displayPeriod.parseError ?? null)
+          : (ann?.parse_error ?? (parseStatus === 'pending' ? '监控池内，尚未完成抓取/解析' : null)),
         announcementTitle: ann?.title ?? null,
         discoveredAt: ann?.discovered_at ?? null,
-        downloadedAt: ann?.downloaded_at ?? null,
-        parsedAt: ann?.parsed_at ?? null,
-        pdfKey: ann?.pdf_key ?? null,
+        downloadedAt: ann?.downloaded_at ?? anyDownloaded?.downloaded_at ?? null,
+        parsedAt: ann?.parsed_at ?? anyParsed?.parsed_at ?? null,
+        pdfKey: ann?.pdf_key ?? anyDownloaded?.pdf_key ?? null,
         rawStatus: ann?.status ?? null,
-        metricsComplete: missingMetrics.length === 0 && parseStatus === 'completed',
+        metricsComplete: missingMetrics.length === 0 && parseStatus === 'completed' && metricCount > 0,
         missingMetrics,
         metrics: preview,
-        recentPeriods: pickRecentPeriods([
-          ...(periodsByCode.get(company.code) ?? []),
-          ...(resolvedPeriod ? [resolvedPeriod] : []),
-        ]),
+        // Home left-bottom period buttons: one per *parsed* report
+        recentPeriods: pickRecentPeriods(parsedPeriods.map((p) => p.period), 6),
         periodStatuses: periodBuilt.periodStatuses,
         latestExpectedPeriod: periodBuilt.latestExpected,
         latestExpectedMissing: periodBuilt.latestExpectedMissing,

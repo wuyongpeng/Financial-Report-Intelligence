@@ -14,8 +14,9 @@ export function yearFromTitleOrDate(title: string, publishedAt: unknown): string
 
 export function periodFromTitle(title: string, publishedAt: unknown): string {
   const year = yearFromTitleOrDate(title, publishedAt);
-  if (/半年度/.test(title)) return `${year}H1`;
-  if (/第一季度/.test(title)) return `${year}Q1`;
-  if (/第三季度/.test(title)) return `${year}Q3`;
+  if (/半年度|中期报告/.test(title)) return `${year}H1`;
+  if (/第一季度|一季度|一季报/.test(title)) return `${year}Q1`;
+  if (/第三季度|三季度|三季报/.test(title)) return `${year}Q3`;
+  if (/第二季度|二季度|二季报/.test(title)) return `${year}H1`; // A-share Q2 full text usually maps to mid-year window
   return `${year}FY`;
 }

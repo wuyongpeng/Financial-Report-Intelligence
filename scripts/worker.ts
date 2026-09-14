@@ -1,4 +1,5 @@
 import { bootstrapLiveData, fillCoverageGaps, processBacklog, runIngestion } from '../lib/ingest';
+import { refreshAshareUniverse } from './refresh-ashare-universe';
 import { closeDb } from '../lib/db';
 import { ensureSchema } from '../lib/migrate';
 import { sendAlert } from '../lib/alerts';
@@ -15,6 +16,8 @@ const maxPages = Number(process.env.INGEST_MAX_PAGES ?? 8);
 let busy = false;
 let discoverTimer: NodeJS.Timeout | undefined;
 let backlogTimer: NodeJS.Timeout | undefined;
+let universeTimer: NodeJS.Timeout | undefined;
+let lastUniverseDay = '';
 
 async function withLock(
   label: string,
@@ -71,10 +74,29 @@ async function backlogTick() {
   });
 }
 
+
+async function ashareUniverseTick() {
+  const now = new Date();
+  // Local calendar day key; fire once after 01:00
+  const day = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+  if (now.getHours() < 1) return;
+  if (lastUniverseDay === day) return;
+  await withLock(
+    'ashare-universe',
+    async () => {
+      const result = await refreshAshareUniverse();
+      lastUniverseDay = day;
+      return result;
+    },
+    { allowWhenPaused: true },
+  );
+}
+
 async function shutdown(signal: string) {
   console.info(`[worker] received ${signal}, shutting down`);
   if (discoverTimer) clearInterval(discoverTimer);
   if (backlogTimer) clearInterval(backlogTimer);
+  if (universeTimer) clearInterval(universeTimer);
   await closeDb();
   process.exit(0);
 }
@@ -85,10 +107,13 @@ async function main() {
   // Drain existing discovered PDFs immediately, then full discover.
   await backlogTick();
   await discoverTick();
+  void ashareUniverseTick();
   backlogTimer = setInterval(() => void backlogTick(), backlogIntervalMs);
   discoverTimer = setInterval(() => void discoverTick(), intervalMs);
+  // 每 30 分钟检查一次：本地日历日 01:00 后跑一轮全 A 名录刷新（一天只跑一次）
+  universeTimer = setInterval(() => { void ashareUniverseTick(); }, 30 * 60 * 1000);
   console.info(
-    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms; days=${days} downloadLimit=${downloadLimit} parseLimit=${parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${downloadPauseMs} maxPages=${maxPages}`,
+    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms; days=${days} downloadLimit=${downloadLimit} parseLimit=${parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${downloadPauseMs} maxPages=${maxPages}; ashare-universe daily after 01:00`,
   );
 }
 

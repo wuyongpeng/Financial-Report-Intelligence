@@ -243,10 +243,12 @@ export async function processBacklog(options: {
   let parsed = 0;
   let failed = 0;
   let skippedCutoff = 0;
+  const idSet = new Set(announcementIds);
   for (const record of backlog) {
     if (downloaded >= downloadLimit && parsed >= parseLimit) break;
     try {
-      if (periodFilter.size) {
+      // announcementIds 精确命中时不再用期次过滤（避免标题期次识别偏差导致排队解析空转）
+      if (periodFilter.size && !idSet.has(record.id)) {
         const token = periodFromTitle(record.title, record.published_at).toUpperCase();
         if (!periodFilter.has(token)) continue;
       }
@@ -315,12 +317,20 @@ export async function processBacklog(options: {
           UPDATE announcements SET status='downloaded', downloaded_at=${downloadedAt}, pdf_key=${pdfKey}, pdf_sha256=${digest}, parse_error=NULL, updated_at=${downloadedAt}
           WHERE id=${record.id}
         `;
-        clearIngestProgress(record.id);
+        // Keep progress visible briefly so live UI can show 「刚下完 → 排队解析」
+        patchIngestProgress(record.id, { detail: '下载完成，准备解析…' });
         downloaded += 1;
         if (downloaded < downloadLimit) {
           await new Promise((resolve) => setTimeout(resolve, withDownloadJitter(pauseBetweenDownloads)));
         }
+        // Fall through: same-tick parse when parseLimit allows (bytes already in memory).
       } else if (pdfKey && parsed < parseLimit) {
+        const object = await readReport(pdfKey);
+        if (object) bytes = object.buffer.slice(object.byteOffset, object.byteOffset + object.byteLength);
+      }
+
+      // Just-downloaded rows must still parse in this pass even if parseCandidates was empty at query time.
+      if (!bytes && pdfKey && parsed < parseLimit) {
         const object = await readReport(pdfKey);
         if (object) bytes = object.buffer.slice(object.byteOffset, object.byteOffset + object.byteLength);
       }
@@ -613,7 +623,7 @@ export async function prioritizeCompanyCrawl(codes: string[], options: {
       }
     }
 
-    const processed = await processBacklog({
+    let processed = await processBacklog({
       downloadLimit,
       parseLimit,
       codes: unique,
@@ -621,6 +631,23 @@ export async function prioritizeCompanyCrawl(codes: string[], options: {
       periods: options.periods,
       announcementIds: options.announcementIds,
     });
+    // 手动抓取：下载完成后若本轮未解析到，再单独消化「排队解析」，保证用户能看到解析过程
+    if (processed.downloaded > 0 && processed.parsed === 0 && parseLimit > 0) {
+      const parsePass = await processBacklog({
+        downloadLimit: 0,
+        parseLimit: Math.max(parseLimit, processed.downloaded),
+        codes: unique,
+        fullHistory: true,
+        periods: options.periods,
+        announcementIds: options.announcementIds,
+      });
+      processed = {
+        ...processed,
+        parsed: processed.parsed + parsePass.parsed,
+        failed: processed.failed + parsePass.failed,
+        parseCandidates: processed.parseCandidates + parsePass.parseCandidates,
+      };
+    }
     const finishedAt = new Date().toISOString();
     await db`
       UPDATE ingest_runs SET finished_at=${finishedAt}, status='success',

@@ -15,6 +15,10 @@ export type CrawlPeriodStatus = {
   sourceApi?: string | null;
   /** announcements.status 原始管道态 */
   rawStatus?: string | null;
+  discoveredAt?: string | null;
+  downloadedAt?: string | null;
+  parsedAt?: string | null;
+  publishedAt?: string | null;
   /** 指标不完整时列出缺项（橙「已解析」悬停用） */
   missingMetrics?: Array<'revenue' | 'net_profit' | 'eps' | 'roe'>;
   /** 硬失败时的错误摘要（红「解析失败」悬停用） */
@@ -108,6 +112,35 @@ export function sourceKindFromAnnouncement(source: string | null | undefined): C
   if (source === 'CNINFO') return 'cninfo';
   if (source === 'SSE' || source === 'SZSE') return 'exchange';
   return null;
+}
+
+
+/** Newest parsed/partial period — homepage cards show this report's metrics. */
+export function pickDisplayPeriod(periods: CrawlPeriodStatus[] | undefined): CrawlPeriodStatus | null {
+  const list = periods ?? [];
+  const parsed = list.filter((p) => p.state === 'parsed' || p.state === 'parsed_partial');
+  if (parsed.length) {
+    return [...parsed].sort((a, b) => periodTokenKey(b.period) - periodTokenKey(a.period))[0] ?? null;
+  }
+  const order: Record<PeriodCollectState, number> = {
+    parsed: 60, parsed_partial: 55, downloaded: 40, discovered: 30, failed: 20, expected: 10,
+  };
+  return [...list]
+    .sort((a, b) => (order[b.state] ?? 0) - (order[a.state] ?? 0) || periodTokenKey(b.period) - periodTokenKey(a.period))[0]
+    ?? null;
+}
+
+/** Company-level status from the period table (single source of truth with采集页). */
+export function companyParseStatusFromPeriods(periods: CrawlPeriodStatus[] | undefined): ParseStatus {
+  const list = periods ?? [];
+  if (list.some((p) => p.state === 'parsed' || p.state === 'parsed_partial')) return 'completed';
+  if (list.some((p) => p.rawStatus === 'parsing')) return 'parsing';
+  if (list.some((p) => p.state === 'downloaded' || p.rawStatus === 'downloaded')) return 'queued';
+  if (list.some((p) => p.state === 'failed' || p.rawStatus === 'parse_failed' || p.rawStatus === 'parse_parked' || p.rawStatus === 'download_failed')) {
+    return 'failed';
+  }
+  if (list.some((p) => p.state === 'discovered' || p.rawStatus === 'discovered' || p.rawStatus === 'downloading')) return 'pending';
+  return 'pending';
 }
 
 export function parseStatusFromAnnouncement(status: string | null | undefined, metricCount: number): ParseStatus {

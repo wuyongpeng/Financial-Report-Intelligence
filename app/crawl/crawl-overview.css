@@ -305,3 +305,27 @@
 .co-queue-scroll{max-height:280px;overflow:auto;scrollbar-gutter:stable}
 .co-q-recent{opacity:.85}
 .co-q-recent em{color:#229482!important}
+
+
+/* Instant period tooltip (native title is ~1s delayed) */
+.co-period{position:relative;cursor:help}
+.co-period[data-tip]:hover::after,.co-period[data-tip]:focus::after{
+  content:attr(data-tip);
+  white-space:pre-line;
+  position:absolute;z-index:40;left:0;bottom:calc(100% + 6px);
+  min-width:200px;max-width:320px;padding:8px 10px;border-radius:8px;
+  background:#1f2a3a;color:#f4f7fb;font-size:11px;line-height:1.45;font-style:normal;
+  box-shadow:0 8px 24px rgba(20,32,54,.22);pointer-events:none;
+}
+.co-period-hint{font-size:10px;color:#91a0b4;margin-top:2px}
+.co-ann-panel{padding:10px 12px 14px;background:#f7f9fc;border-bottom:1px solid #e8edf5}
+.co-ann-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:12px}
+.co-ann-head strong{font-weight:600;color:#31465f}
+.co-ann-table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid #e4eaf3;border-radius:8px;overflow:hidden}
+.co-ann-table th,.co-ann-table td{padding:7px 8px;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:top}
+.co-ann-table th{background:#f3f6fa;color:#6a7a90;font-weight:600;font-size:11px}
+.co-ann-table tr:last-child td{border-bottom:0}
+.co-ann-table .co-period{padding:1px 6px}
+@media (max-width:900px){
+  .co-ann-table{display:block;overflow-x:auto}
+}

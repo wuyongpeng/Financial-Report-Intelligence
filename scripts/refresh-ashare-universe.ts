@@ -32,6 +32,8 @@ const ESSENTIALS: Row[] = [
   { code: '300750', name: '宁德时代', exchange: 'SZSE' },
   { code: '002714', name: '牧原股份', exchange: 'SZSE' },
   { code: '688802', name: '沐曦股份', exchange: 'SSE' }, // STAR / 科创板 newly listed
+  { code: '688801', name: '燧原科技', exchange: 'SSE' }, // 2026-09-11 科创板
+  // 新上市科创板常见漏网：刷新失败时至少保证识别
 ];
 
 function exchangeOf(code: string): 'SSE' | 'SZSE' {
@@ -49,8 +51,15 @@ function upsert(map: Map<string, Row>, row: Row) {
   if (!name) return;
   const exchange = row.exchange || exchangeOf(code);
   const prev = map.get(code);
-  if (!prev || (name.length >= prev.name.length && name !== code)) {
+  if (!prev) {
     map.set(code, { code, name, exchange });
+    return;
+  }
+  const prevUgly = /^C.+-U$/.test(prev.name);
+  const nextUgly = /^C.+-U$/.test(name);
+  // Prefer cleaner / longer Chinese short name over Cxxx-U listing ticker.
+  if ((prevUgly && !nextUgly) || (!nextUgly && name.length >= prev.name.length && name !== code)) {
+    map.set(code, { code, name, exchange: prev.exchange || exchange });
   }
 }
 
@@ -65,26 +74,28 @@ async function loadExisting(): Promise<Row[]> {
 }
 
 async function fetchSse(): Promise<Row[]> {
-  const url =
-    'https://query.sse.com.cn/security/stock/getStockListData2.do'
-    + '?pageHelp.pageSize=5000&pageHelp.pageNo=1&stockType=1';
-  const res = await fetch(url, {
-    headers: { 'user-agent': UA, referer: 'https://www.sse.com.cn/' },
-    signal: AbortSignal.timeout(45_000),
-  });
-  if (!res.ok) throw new Error(`SSE HTTP ${res.status}`);
-  const json = await res.json() as {
-    pageHelp?: { total?: number; data?: Array<Record<string, string>> };
-  };
-  const rows = json.pageHelp?.data ?? [];
+  // stockType=1 沪市主板等；=8 科创板。合并拉取，避免新上市科创板漏网。
   const out: Row[] = [];
   const seen = new Set<string>();
-  for (const row of rows) {
-    const code = (row.SECURITY_CODE_A || row.SECURITY_CODE || '').trim();
-    const name = row.SECURITY_ABBR_A || row.COMPANY_ABBR || row.SECURITY_ABBR || '';
-    if (!code || seen.has(code)) continue;
-    seen.add(code);
-    out.push({ code, name, exchange: 'SSE' });
+  for (const stockType of ['1', '8']) {
+    const url =
+      'https://query.sse.com.cn/security/stock/getStockListData2.do'
+      + `?pageHelp.pageSize=5000&pageHelp.pageNo=1&stockType=${stockType}`;
+    const res = await fetch(url, {
+      headers: { 'user-agent': UA, referer: 'https://www.sse.com.cn/' },
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!res.ok) throw new Error(`SSE HTTP ${res.status} (stockType=${stockType})`);
+    const json = await res.json() as {
+      pageHelp?: { total?: number; data?: Array<Record<string, string>> };
+    };
+    for (const row of json.pageHelp?.data ?? []) {
+      const code = (row.SECURITY_CODE_A || row.SECURITY_CODE || '').trim();
+      const name = row.SECURITY_ABBR_A || row.COMPANY_ABBR || row.SECURITY_ABBR || '';
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      out.push({ code, name, exchange: 'SSE' });
+    }
   }
   return out;
 }
@@ -121,40 +132,73 @@ async function fetchSzse(): Promise<Row[]> {
   return out;
 }
 
-async function main() {
+export async function refreshAshareUniverse() {
   const map = new Map<string, Row>();
   for (const row of await loadExisting()) upsert(map, row);
-  for (const row of ESSENTIALS) upsert(map, row);
 
   const notes: string[] = [];
+  // Prefer Python urllib + 东方财富（本机 Node fetch 常被交易所网关掐断）
   try {
-    const sse = await fetchSse();
-    for (const row of sse) upsert(map, row);
-    notes.push(`SSE fetched ${sse.length}`);
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const { join } = await import('node:path');
+    const execFileAsync = promisify(execFile);
+    const script = join(ROOT, 'scripts/ashare-list.py');
+    const { stdout } = await execFileAsync('python3', [script], {
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 180_000,
+    });
+    const payload = JSON.parse(String(stdout)) as { notes?: string[]; rows?: Row[] };
+    for (const row of payload.rows ?? []) upsert(map, row);
+    notes.push(`python-list: ${(payload.notes ?? []).join('; ')} → ${payload.rows?.length ?? 0}`);
   } catch (err) {
-    notes.push(`SSE skipped: ${String(err)}`);
+    notes.push(`python-list skipped: ${String(err)}`);
   }
 
-  try {
-    const szse = await fetchSzse();
-    for (const row of szse) upsert(map, row);
-    notes.push(`SZSE fetched ${szse.length}`);
-  } catch (err) {
-    notes.push(`SZSE skipped: ${String(err)}`);
+  if ([...map.keys()].length < 1000) {
+    try {
+      const sse = await fetchSse();
+      for (const row of sse) upsert(map, row);
+      notes.push(`SSE fetched ${sse.length}`);
+    } catch (err) {
+      notes.push(`SSE skipped: ${String(err)}`);
+    }
+
+    try {
+      const szse = await fetchSzse();
+      for (const row of szse) upsert(map, row);
+      notes.push(`SZSE fetched ${szse.length}`);
+    } catch (err) {
+      notes.push(`SZSE skipped: ${String(err)}`);
+    }
+  }
+
+  // Essentials last so preferred short names win over exchange "Cxxx-U" tickers.
+  for (const row of ESSENTIALS) upsert(map, row);
+  for (const row of map.values()) {
+    // 科创未盈利等：C燧原-U → 仍保留代码；若 essentials 未覆盖，去掉 C前缀/-U 便于搜索
+    if (/^C.+-U$/.test(row.name) && !ESSENTIALS.some((e) => e.code === row.code)) {
+      row.name = row.name.replace(/^C/, '').replace(/-U$/, '');
+    }
   }
 
   const list = [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
   await writeFile(OUT, `${JSON.stringify(list, null, 2)}\n`, 'utf8');
   const sanyi = list.find((r) => r.code === '600031');
-  console.log(JSON.stringify({
+  const summary = {
     out: OUT,
     count: list.length,
     notes,
     sanyi,
-  }, null, 2));
+  };
+  console.log(JSON.stringify(summary, null, 2));
+  return summary;
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const isDirect = process.argv[1]?.includes('refresh-ashare-universe');
+if (isDirect) {
+  refreshAshareUniverse().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

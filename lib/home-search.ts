@@ -3,7 +3,7 @@
  * filter-as-you-type vs deep ask navigation.
  */
 import type { CrawlCompanyCoverage, CrawlReportType } from '@/lib/crawl-display';
-import ashareUniverseJson from '@/data/ashare-universe.json';
+import { getAshareUniverse } from '@/lib/ashare-universe';
 import type { Report } from '@/lib/detail-model';
 import { pinyinKeys } from '@/lib/company-query';
 import { period as reportPeriodLabel, periodKey } from '@/lib/detail-model';
@@ -129,7 +129,6 @@ export function parseHomeQuery(raw: string): ParsedHomeQuery {
 
 export type ListedNameCode = { code: string; name: string };
 
-const ASHARE_UNIVERSE = ashareUniverseJson as ListedNameCode[];
 
 /**
  * Simple precise match against a name/code list (longest name substring wins).
@@ -202,7 +201,7 @@ export function matchByNameOrCode(
 /** Identify a listed A-share from free text using the recognition universe (not monitor pool). */
 export function resolveListedCompany(
   query: string,
-  universe: ListedNameCode[] = ASHARE_UNIVERSE,
+  universe: ListedNameCode[] = getAshareUniverse(),
 ): ListedNameCode | null {
   return matchByNameOrCode(query, universe);
 }
