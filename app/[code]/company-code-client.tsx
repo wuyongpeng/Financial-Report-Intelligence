@@ -48,7 +48,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
   const [adminError, setAdminError] = useState('');
   const [adminSubmitting, setAdminSubmitting] = useState(false);
   const [reviewReportId, setReviewReportId] = useState<string | null>(null);
-  const adminMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('admin') === '1';
+  const adminMode = searchParams.get('admin') === '1';
 
   useEffect(() => {
     let active = true;
@@ -117,7 +117,11 @@ export default function CompanyCodeClient({ code }: { code: string }) {
     return (
       <main className="app-shell">
         <section className="lane-page">
-          <div className="honest-empty"><b>正在打开 {code}</b><p>读取该公司财报与指标…</p></div>
+          <div className="honest-empty page-opening">
+            <span className="page-opening-spin" aria-hidden="true" />
+            <b>正在打开 {code}</b>
+            <p>读取该公司财报与指标…</p>
+          </div>
         </section>
       </main>
     );

@@ -1,4 +1,5 @@
 import type { Announcement } from './types';
+import { classifyReportTitle } from './ingest-period';
 
 export type SourcePage = { items: Announcement[]; rawCount: number };
 
@@ -63,10 +64,7 @@ function dateOnly(daysAgo = 0) {
 }
 
 function classify(title: string): Announcement['reportType'] {
-  if (/半年度报告(?!摘要)/.test(title)) return 'semiannual';
-  if (/年度报告(?!摘要)/.test(title)) return 'annual';
-  if (/(第一季度|第三季度|季度)报告(?!摘要)/.test(title)) return 'quarterly';
-  return 'other';
+  return classifyReportTitle(title);
 }
 
 function isFullFinancialReport(title: string) {

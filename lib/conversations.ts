@@ -3,7 +3,7 @@ import { getDb } from './db';
 import { ensureBackendSchema } from './backend-schema';
 import { ApiError } from './api';
 
-export type Evidence = { id: string; reportId: string; companyName: string; period: string; page: number; quote: string; metric?: string };
+export type Evidence = { id: string; reportId: string; companyName: string; period: string; page: number; quote: string; metric?: string; code?: string };
 export type StoredMessage = { id: string; request_id: string; role: 'user' | 'assistant'; content: string; status: string; evidence: Evidence[]; mode: string | null };
 export type MemoryMessage = { role: 'user' | 'assistant'; content: string };
 export type AnswerResult = { answer: string; mode: string; evidence: Evidence[]; status: 'complete' | 'interrupted' | 'failed'; durationMs: number; warnings?: string[] };

@@ -10,7 +10,11 @@ export default async function CompanyCodePage({ params }: { params: Promise<{ co
       fallback={
         <main className="app-shell">
           <section className="lane-page">
-            <div className="honest-empty"><b>正在打开 {code}</b><p>读取该公司财报与指标…</p></div>
+          <div className="honest-empty page-opening">
+            <span className="page-opening-spin" aria-hidden="true" />
+            <b>正在打开 {code}</b>
+            <p>读取该公司财报与指标…</p>
+          </div>
           </section>
         </main>
       }

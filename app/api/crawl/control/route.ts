@@ -49,14 +49,10 @@ export async function POST(request: Request) {
   }
 
   let note = '已更新';
-  if (typeof patch.downloadPaused === 'boolean') {
-    note = control.downloadPaused
-      ? '已暂停抓取：停止新下载，排队保持不变；自动抓取已同步关闭'
-      : '已恢复下载';
-  } else if (typeof patch.autoCrawlEnabled === 'boolean') {
+  if (typeof patch.autoCrawlEnabled === 'boolean' || typeof patch.downloadPaused === 'boolean') {
     note = control.autoCrawlEnabled
-      ? '已开启自动抓取（发现新公告/补缺口）'
-      : '已关闭自动抓取：不再发现新公告/补缺口；已有排队仍会下载与解析';
+      ? '已开启自动抓取：识别 PDF 地址并并发下载'
+      : '已关闭自动抓取：下载中的任务会完成，排队任务不再自动开始下载；仍会定时扫描新公告';
   }
 
   return Response.json(

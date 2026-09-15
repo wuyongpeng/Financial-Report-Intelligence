@@ -1,10 +1,13 @@
 'use client';
 
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { amount, cashConversion, change, comparableHistory, debtRatio, format, grossMargin, keyFindings, labels, metricNames, moduleForQuestion, period, periodKey, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { amount, cashConversion, change, comparableHistory, debtRatio, filingType, format, grossMargin, keyFindings, labels, metricNames, moduleForQuestion, period, periodConclusion, periodKey, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
+import { citeHoverText, citeReferenceText, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '@/lib/answer-cite';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
+import AnswerMarkdown from './answer-markdown';
+import { AnswerFeedback } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
 import './company-detail.css';
 
@@ -13,7 +16,16 @@ type Peer = { code: string; company_name: string; metric: string; value: number;
 type Analysis = { peers?: Peer[]; industry?: string };
 // Follow-ups belong to the answer that produced them, so they travel on the message
 // itself and survive a period switch together with the conversation.
-type Message = { role: 'user' | 'assistant'; text: string; citations?: Citation[]; followups?: string[]; followupBusy?: boolean };
+type Message = {
+  role: 'user' | 'assistant';
+  text: string;
+  citations?: Citation[];
+  followups?: string[];
+  followupBusy?: boolean;
+  feedback?: 'up' | 'down';
+  feedbackDone?: boolean;
+  ask?: { question: string; focus?: FocusItem[] };
+};
 type Clip = { id: string; kind: FocusKind; quote: string; page?: number; title?: string };
 const emptyOutline: Outline = { indexedPages: 0, pages: [], outline: [] };
 const moduleLabels = { business: '主营业务构成', attribution: '净利润变动分解', anomalies: '异常指标提示', history: '历史趋势详情', peers: '同业对比表格' };
@@ -26,8 +38,33 @@ const dockPaths = {
 function DockIcon({ side }: { side: 'left' | 'right' }) {
   return <svg className="cd-dock-icon" viewBox="0 -960 960 960" aria-hidden="true" focusable="false"><path d={dockPaths[side]} /></svg>;
 }
+function ActIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg className="cd-act-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      {children}
+    </svg>
+  );
+}
+
+function EvaAnalyzing({ phase }: { phase: 'retrieving' | 'reasoning' }) {
+  const label = phase === 'reasoning' ? 'Eva正在推理' : 'Eva正在分析';
+  return (
+    <div className="cd-analyzing" role="status" aria-live="polite" aria-label={`${label}中`}>
+      <span className="cd-analyzing-spark" aria-hidden="true">✧</span>
+      <span className="cd-analyzing-copy">{label}</span>
+      <span className="cd-analyzing-dots" aria-hidden="true">
+        <span className="cd-analyzing-dot" />
+        <span className="cd-analyzing-dot" />
+        <span className="cd-analyzing-dot" />
+      </span>
+    </div>
+  );
+}
 const pct = (n: number | undefined) => n === undefined ? '暂无同期数据' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
-function reportTypeLabel(r: Report) { return r.report_type === 'annual' ? '年报' : r.report_type === 'semiannual' ? '中报' : '季报'; }
+function reportTypeLabel(r: Report) {
+  const kind = filingType(r);
+  return kind === 'annual' ? '年报' : kind === 'semiannual' ? '中报' : '季报';
+}
 
 function Trend({ reports, metric, compare, onSelect }: { reports: Report[]; metric: HeadlineMetric; compare: HeadlineMetric | null; onSelect: (r: Report) => void }) {
   const rows = reports.slice(-5);
@@ -118,9 +155,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [clips, setClips] = useState<Clip[]>([]);
   const [pick, setPick] = useState<{ quote: string; page: number; x: number; y: number } | null>(null);
   const [clipToast, setClipToast] = useState<string | null>(null);
+  const [copiedSlot, setCopiedSlot] = useState<number | null>(null);
   const [clipsFlash, setClipsFlash] = useState(false);
   const pageEnter = useRef<'start' | 'next' | 'prev'>('start');
   const [asking, setAsking] = useState(false);
+  const [regenMenu, setRegenMenu] = useState<number | null>(null);
+  const [jumpAsk, setJumpAsk] = useState<null | { href: string; title: string; detail: string }>(null);
+  const [jumpBlocked, setJumpBlocked] = useState(false);
   // A reasoning model thinks before it speaks; say so instead of showing dead air.
   const [thinking, setThinking] = useState(false);
   const [mobilePane, setMobilePane] = useState('dashboard');
@@ -224,6 +265,31 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     return () => abort.abort();
   }, [selected.id]);
   useEffect(() => { if (messages.length) chatEnd.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    if (regenMenu == null) return;
+    function onDoc(event: MouseEvent) {
+      const target = event.target;
+      if (target instanceof Element && target.closest('.cd-regen')) return;
+      setRegenMenu(null);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setRegenMenu(null);
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [regenMenu]);
+  useEffect(() => {
+    if (!jumpAsk) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') { setJumpAsk(null); setJumpBlocked(false); }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [jumpAsk]);
   useLayoutEffect(() => {
     const el = questionRef.current;
     if (!el) return;
@@ -348,7 +414,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
 
   const history = comparableHistory(reports, selected);
   const defaultPrevious = priorYear(reports, selected);
-  const baselineOptions = reports.filter(r => r.id !== selected.id && r.report_type === selected.report_type && periodKey(r) < periodKey(selected) && r.metrics.length);
+  const baselineOptions = reports.filter(r => r.id !== selected.id && filingType(r) === filingType(selected) && periodKey(r) < periodKey(selected) && r.metrics.length);
   const previous = (baselineId ? reports.find(r => r.id === baselineId) : undefined) ?? defaultPrevious;
   const baselineIsDefault = !baselineId || previous?.id === defaultPrevious?.id;
   const peers = analysis.peers ?? [];
@@ -378,30 +444,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const findings = keyFindings(reports, selected);
   const mdaSection = outline.outline.find(o => o.id === 'mda') ?? outline.outline.find(o => /管理层讨论与分析|经营情况讨论与分析/.test(o.title));
   const mdaExcerpt = mdaSection ? (outline.pages.find(p => p.page === mdaSection.page)?.content ?? '').slice(0, 420) : '';
-  const topFinding = findings[0];
-  const briefSignal = topFinding
-    ? topFinding.headline
-    : revenue !== undefined
-      ? `${period(selected)} 营收 ${format(revenue, 'revenue')} · 净利 ${format(profit, 'net_profit')}`
-      : `${period(selected)} 核心指标解析中`;
-  function briefInsight() {
-    const chars = (s: string) => [...s].slice(0, 30).join('');
-    if (bridge) {
-      const rev = bridge.revenueEffect, mar = bridge.marginEffect;
-      if (Math.abs(mar) >= Math.abs(rev)) return chars(mar < 0 ? '利润承压，主因净利率走弱' : '利润改善，净利率是主因');
-      return chars(rev < 0 ? '利润承压，主因营收下滑' : '利润改善，营收是主因');
-    }
-    if (findings.some(f => f.id === 'finding-cash')) return chars('经营现金流对利润覆盖偏弱');
-    if (findings.some(f => f.id === 'finding-leverage')) return chars('资产负债率偏高，留意偿债');
-    if (topFinding) {
-      const d = deltas.find(x => x.metric === topFinding.metric)?.amount;
-      if (d !== undefined && Math.abs(d) >= 30) return chars('波动偏大，建议核对原文口径');
-      if (d !== undefined && d < 0) return chars('同比回落，宜对照管理层说明');
-      if (d !== undefined) return chars('同比改善，可对照原文核验');
-    }
-    return chars(previous ? '暂无显著异常，先核核心指标' : '暂无同比，先核验本期数字');
-  }
-  const briefInsightText = briefInsight();
+  const briefConclusion = periodConclusion(reports, selected);
   const leverage = debtRatio(selected), conversion = cashConversion(selected), margin = grossMargin(selected);
   const absolutes = [
     { label: '资产负债率', value: leverage, suffix: '%', detail: leverage === undefined ? '需要资产总计与负债合计两行' : '负债合计 ÷ 资产总计', metric: 'total_liabilities' as MetricName },
@@ -477,52 +520,103 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     } catch { setFeedback(prev => { const next = { ...prev }; delete next[metric]; return next; }); setError('核验反馈没能提交，请稍后再试。'); }
     finally { setFeedbackBusy(false); }
   }
-  function citeRefLabel(c: Citation) {
-    // Chip text is page-only (P5); period/company stay in the title tooltip.
-    return pageLabel(c.page);
+  function printedPage(c: Citation) {
+    return pageLabels.find(p => p.page === c.page)?.printed ?? c.page;
+  }
+  function citeSource(c: Citation) {
+    return {
+      companyName: c.companyName || selected.company_name,
+      period: c.period || period(selected),
+      page: printedPage(c),
+    };
+  }
+  function askOpenFiling(href: string, detail: string) {
+    setJumpBlocked(false);
+    setJumpAsk({ href, title: '在新标签页打开这份财报？', detail });
+  }
+  function filingTarget(c: Citation) {
+    if (!c.reportId || c.reportId === selected.id) return null;
+    const local = reports.find(r => r.id === c.reportId);
+    const peer = analysis.peers?.find(p => p.company_name === c.companyName);
+    const code = (c.code && /^\d{6}$/.test(c.code) ? c.code : '')
+      || local?.code
+      || peer?.code
+      || ((!c.companyName || c.companyName === selected.company_name) ? selected.code : '');
+    const href = filingPageHref(code, local ? period(local) : c.period);
+    if (!href) return null;
+    const name = local?.company_name ?? c.companyName ?? (code === selected.code ? selected.company_name : code);
+    const token = local ? period(local) : c.period;
+    const detail = code === selected.code
+      ? `将打开本公司${token ? ` ${token}` : ''} 财报。当前页面保持不变。`
+      : `将打开 ${name}${token ? ` ${token}` : ''} 财报。当前页面保持不变。`;
+    return { href, detail };
   }
   function jumpCitation(c: Citation, expand = false) {
-    if (c.reportId && c.reportId !== selected.id) {
-      const other = reports.find(r => r.id === c.reportId);
-      if (!other) return;
-      selectReport(other);
+    if (!c.reportId || c.reportId === selected.id) {
+      cite(c, expand);
+      return;
     }
-    cite(c, expand);
+    const target = filingTarget(c);
+    if (target) {
+      askOpenFiling(target.href, target.detail);
+      return;
+    }
+    setJumpBlocked(false);
+    setJumpAsk({
+      href: '',
+      title: '暂时无法打开这份财报',
+      detail: `还找不到 ${c.companyName ?? '该公司'}${c.period ? ` ${c.period}` : ''} 的页面链接。当前页面保持不变。`,
+    });
   }
   function citationLink(c: Citation, key: string | number) {
     const otherId = c.reportId && c.reportId !== selected.id ? c.reportId : undefined;
-    const loadable = !otherId || reports.some(r => r.id === otherId);
-    const label = citeRefLabel(c);
-    const title = `${c.companyName ? `${c.companyName} ` : ''}${c.period ? `${c.period} ` : ''}${pageDescription(c.page)}：${c.quote}`.trim();
-    if (otherId && !loadable) return <span className="cd-cite cd-answer-ref" key={key} title={title}>{label}</span>;
-    return <button type="button" className="cd-cite cd-answer-ref" key={key} title={title} onClick={() => jumpCitation(c)} onDoubleClick={() => jumpCitation(c, true)}>{label}</button>;
+    const hover = citeHoverText(citeSource(c));
+    return (
+      <button
+        type="button"
+        className={`cd-cite cd-answer-ref${otherId ? ' cd-cite-cross' : ''}`}
+        key={key}
+        aria-label={hover}
+        onClick={() => jumpCitation(c)}
+        onDoubleClick={() => jumpCitation(c, true)}
+      >
+        [{pageLabel(c.page)}]
+        <span className="cd-cite-tip" role="tooltip">{hover}</span>
+      </button>
+    );
   }
-  function renderAnswer(message: Message) {
+  function confirmJumpAsk() {
+    if (!jumpAsk?.href) {
+      setJumpAsk(null);
+      setJumpBlocked(false);
+      return;
+    }
+    const opened = window.open(jumpAsk.href, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      setJumpBlocked(true);
+      return;
+    }
+    setJumpAsk(null);
+    setJumpBlocked(false);
+  }
+  function renderCiteChunk(message: Message) {
     let prevCiteId: string | null = null;
-    // Normalize glued markers so +54.63%【E1】【E2】 doesn't collapse visually into P6P6.
-    const text = message.text.replace(/(】)(?=【)/g, '$1 ').replace(/(\])(?=\[P)/g, '$1 ');
-    return text.split(/(【(?:E\d+|第\s*\d+\s*页)】|\[P\d+\])/g).map((part,i) => {
-      const marked = part.match(/^【(?:E(\d+)|第\s*(\d+)\s*页)】$/);
-      const bare = part.match(/^\[P(\d+)\]$/);
-      if (!marked && !bare) {
-        // Whitespace-only between markers: keep as thin gap, do not reset cite id.
-        if (!part.trim()) return part ? <Fragment key={i}>{part}</Fragment> : null;
+    return (chunk: string) => tokenizeAnswerCites(chunk).map((token, i) => {
+      if (token.kind === 'text') {
+        if (!token.text.trim()) return token.text ? <Fragment key={i}>{token.text}</Fragment> : null;
         prevCiteId = null;
-        return <Fragment key={i}>{part}</Fragment>;
+        return <Fragment key={i}>{token.text}</Fragment>;
       }
-      const printed = bare?.[1];
-      const c = marked
-        ? message.citations?.find(c => marked[1] ? c.id === `E${marked[1]}` : c.page === Number(marked[2]))
-        : printed
-          ? message.citations?.find(c => pageLabel(c.page) === `P${printed}` || c.page === Number(printed))
-          : undefined;
-      if (!c) { prevCiteId = null; return <span className="cd-note" key={i}>{part}（待核验）</span>; }
-      const citeKey = c.id ?? `${c.reportId ?? ''}:${c.page}:${c.quote}`;
-      // Same evidence twice in a row → hide duplicate. Different evidence (even same page) stays clickable with its own quote.
+      const c = matchAnswerCitation(token, message.citations, pageLabel);
+      if (!c) { prevCiteId = null; return <span className="cd-note" key={i}>{token.raw}（待核验）</span>; }
+      const citeKey = `${c.reportId ?? ''}:${c.page}`;
       if (citeKey === prevCiteId) return null;
       prevCiteId = citeKey;
       return citationLink(c, i);
     });
+  }
+  function answerSources(message: Message) {
+    return uniqueAnswerSources(message.text, message.citations, pageLabel);
   }
   function focusModule(id: string) { if (sourceDrawerOpen) closeSource(); setExpanded(e => e.includes(id) ? e : [...e,id]); setFocused(id); setMobilePane('dashboard'); const more = document.getElementById('cd-more'); if (more instanceof HTMLDetailsElement) more.open = true; window.setTimeout(() => document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 80); }
   function resizeComposer() {
@@ -699,23 +793,75 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
   function onSourceTextPick(text: string, page: number) { placePick(text, page); }
 
-  async function ask(text: string) {
+  function stopAsk() {
+    requestRef.current?.abort();
+  }
+
+  function setAnswerVote(index: number, value: 'up' | 'down') {
+    setMessages(m => m.map((item, i) => {
+      if (i !== index || item.role !== 'assistant') return item;
+      if (item.feedback === value) return { ...item, feedback: undefined, feedbackDone: false };
+      return { ...item, feedback: value, feedbackDone: false };
+    }));
+  }
+
+  function submitAnswerFeedback(index: number) {
+    setMessages(m => m.map((item, i) => i === index && item.role === 'assistant' ? { ...item, feedbackDone: true } : item));
+  }
+
+  async function copyAnswer(text: string, index: number) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    setCopiedSlot(index);
+    window.setTimeout(() => setCopiedSlot(slot => slot === index ? null : slot), 1600);
+  }
+
+  function regenerate(index: number, rewrite: 'detailed' | 'brief' | 'retry') {
+    const user = messages[index - 1];
+    setRegenMenu(null);
+    if (!user || user.role !== 'user' || busyRef.current) return;
+    void ask(user.ask?.question ?? user.text, { replaceAt: index, focus: user.ask?.focus, rewrite });
+  }
+
+  async function ask(text: string, extra?: { replaceAt?: number; focus?: FocusItem[]; rewrite?: 'detailed' | 'brief' | 'retry' }) {
+    const replacing = extra?.replaceAt;
     const typed = text.trim();
-    if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
-    const focusPayload: FocusItem[] = clips.map(c => ({
+    if (replacing != null) {
+      if (busyRef.current || !memoryReady.current) return;
+    } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
+    const focusPayload: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
       kind: c.kind,
       text: c.quote,
       ...(c.page !== undefined ? { page: c.page } : {}),
       ...(c.title ? { title: c.title } : {}),
-    }));
+    })));
     const question = typed || (focusPayload.length ? '怎么看待这些数据' : '');
     const assembled = assembleFocusPrompt(question, focusPayload);
     const display = displayFocusPrompt(question, focusPayload);
+    setRegenMenu(null);
     const controller = new AbortController(); requestRef.current = controller; busyRef.current = true;
     const id = selected.id;
-    const asked = messages.filter(m => m.role === 'user').map(m => m.text);
-    const slot = messages.length + 1;
-    setAsking(true); setThinking(false); setQuestion(''); setClips([]); setPick(null); setMessages(m => [...m,{ role:'user',text:display },{ role:'assistant',text:'' }]);
+    const prior = replacing != null ? messages.slice(0, replacing - 1) : messages;
+    const asked = prior.filter(m => m.role === 'user').map(m => m.text);
+    const slot = replacing != null ? replacing : messages.length + 1;
+    setAsking(true); setThinking(false);
+    if (replacing == null) {
+      setQuestion(''); setClips([]); setPick(null);
+      setMessages(m => [...m, { role:'user', text:display, ask:{ question, ...(focusPayload.length ? { focus: focusPayload } : {}) } }, { role:'assistant', text:'' }]);
+    } else {
+      setMessages(m => [...m.slice(0, replacing), { role:'assistant', text:'' }]);
+    }
     const targetModule = moduleForQuestion(assembled); if (targetModule) focusModule(targetModule);
     let answer = '';
     let answerMode = '';
@@ -731,7 +877,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           }
         } catch { /* ignore — anonymous users can ask without persisted memory */ }
       }
-      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:crypto.randomUUID(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), stream:true }) });
+      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:crypto.randomUUID(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), stream:true }) });
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
@@ -740,9 +886,22 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         for (const event of events) { const raw = event.split('\n').find(l=>l.startsWith('data: '))?.slice(6); if (!raw || raw==='[DONE]') continue; const p = JSON.parse(raw) as {content?:string;evidence?:Citation[];status?:string;error?:string;mode?:string;result?:{answer:string;evidence:Citation[];mode?:string}}; if(p.status==='reasoning') setThinking(true); if(p.content||p.result) setThinking(false); answer = p.result ? p.result.answer : answer + (p.content ?? ''); if(p.result?.mode) answerMode=p.result.mode; else if(p.mode) answerMode=p.mode; if(p.error) answer=p.error; update(p.result?.evidence ?? p.evidence); }
         if(done) break;
       }
-      if (!answer) { answer='暂无法回答：未返回足够证据。可尝试询问本期营业收入或净利润。'; update(); }
-    } catch (error) { if (!controller.signal.aborted) { answer = error instanceof Error ? error.message : '问答服务暂时不可用，请稍后重试。'; update(); } }
-    finally { if (activeId.current === id && !controller.signal.aborted) { busyRef.current = false; setAsking(false); setThinking(false); } }
+      if (!answer && !controller.signal.aborted) { answer='暂无法回答：未返回足够证据。可尝试询问本期营业收入或净利润。'; update(); }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        if (activeId.current === id) {
+          setMessages(m => m.map((item,i) => i === m.length-1 && item.role === 'assistant'
+            ? { ...item, text: answer || '已停止生成' }
+            : item));
+        }
+      } else {
+        answer = error instanceof Error ? error.message : '问答服务暂时不可用，请稍后重试。';
+        update();
+      }
+    }
+    finally {
+      if (activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
+    }
     if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked, answerMode);
   }
   askRef.current = ask;
@@ -835,7 +994,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         <div className="cd-source-toolbar">
           <label><select aria-label="原文模式" value={sourceMode} onChange={e=>{const m=e.target.value as 'pdf'|'text';setSourceMode(m);if(m==='pdf')pageEnter.current='start';}}><option value="pdf">原始PDF</option><option value="text">原文文本</option></select></label>
           <label><select aria-label="跳转原文页码" value={sourcePage} onChange={e=>{readingPosition.current=null;pageEnter.current='start';scrollPageSync.current=false;setSourcePage(Number(e.target.value));setPdfJumpNonce((n)=>n+1);setHighlight('');}}>{[...new Set([1,sourcePage,...(pageLabels.length?pageLabels:outline.pages).map(p=>p.page)])].sort((a,b)=>a-b).map(p=><option key={p} value={p}>{pageLabel(p)}</option>)}</select></label>
-          <span className="cd-pdf-pick-hint">划词智析</span>
+          <span className="cd-pdf-pick-hint" tabIndex={0}>
+            划词智析
+            <span className="cd-pdf-pick-tip" role="tooltip">
+              在 PDF 中划选一段文字，点「加入AI分析」，即可针对原文做智能解读。
+            </span>
+          </span>
         </div>
         {!printedKnown && pageLabels.length>0 && <p className="cd-page-notice">这份 PDF 没能识别出正文页码，下面统一按 PDF 实际页数显示。</p>}
         <div className="cd-source-scroll" ref={sourceRef} aria-live="polite">
@@ -867,11 +1031,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             <button type="button" className="cd-pick-cancel" onMouseDown={e => e.preventDefault()} onClick={() => { setOverviewPick(null); window.getSelection()?.removeAllRanges(); }}>取消</button>
           </div>}
           <section className="cd-brief" aria-label="本期结论">
-            <h2 className="cd-brief-title">{briefSignal}</h2>
-            <p className="cd-brief-insight">{briefInsightText}</p>
-            <div className="cd-brief-actions">
-              <button type="button" disabled={asking||memoryLoading} onClick={()=>draftAsk(topFinding ? `为什么${topFinding.headline}？请引用原文说明。` : '本期最值得关注的变化是什么？请给出原文页码。')}>追问本期</button>
-            </div>
+            <p className="cd-brief-kicker">本期结论</p>
+            <h2 className="cd-brief-title">{briefConclusion}</h2>
           </section>
 
           <div className="cd-metrics" aria-label="四项核心指标">{metricNames.map(m => {
@@ -925,18 +1086,111 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           <p className="cd-chat-lead">中间栏已经给出结论与发现。这里继续追问原因、对比或原文依据；没有证据时会明确说明。</p>
           <div className="cd-suggest-label">推荐追问</div><div className="cd-suggestions">{suggestions.map(q=><button key={q} disabled={asking} onClick={()=>draftAsk(q)}>{q}<span>↗</span></button>)}</div>
           {messages.length>0&&<div className="cd-conversation-label">围绕 {period(selected)} 的对话</div>}
-          {messages.map((m,i)=><div key={i} className={`cd-message cd-message-${m.role}`}>{m.role==='assistant'&&<b className="cd-answer-label">✧ Eva</b>}<p>{m.role==='assistant'?renderAnswer(m):m.text}{!m.text&&asking?(thinking?'模型正在推理，请稍候…':'正在检索财报证据…'):''}</p>
-            {m.role==='assistant'&&(m.followupBusy||m.followups?.length)?<div className="cd-followups"><small>{m.followupBusy?'正在生成相关追问…':'继续追问'}</small>{m.followups?.length?<div className="cd-followup-list">{m.followups.map(q=><button key={q} disabled={asking} onClick={()=>draftAsk(q)}>{q}<span>↗</span></button>)}</div>:null}</div>:null}</div>)}<div ref={chatEnd}/>
-        </div><form className="cd-chat-input" onSubmit={e=>{e.preventDefault();void ask(question);}}>
+          {messages.map((m,i)=>{
+            const waiting = m.role==='assistant' && asking && !m.text.trim() && i===messages.length-1;
+            const streaming = m.role==='assistant' && asking && i===messages.length-1;
+            const sources = m.role==='assistant' ? answerSources(m) : [];
+            return <div key={i} className={`cd-message cd-message-${m.role}`}>
+              {waiting
+                ? <EvaAnalyzing phase={thinking ? 'reasoning' : 'retrieving'} />
+                : m.role==='assistant'
+                  ? <>
+                      <b className="cd-answer-label">✧ Eva</b>
+                      <AnswerMarkdown
+                        text={m.text}
+                        renderCites={renderCiteChunk(m)}
+                        onFilingJump={(target) => {
+                          const parsed = parseFilingHref(target.href);
+                          const href = parsed ? filingPageHref(parsed.code, parsed.period) : target.href;
+                          askOpenFiling(href, `将打开 ${target.label}。当前页面保持不变。`);
+                        }}
+                      />
+                      {sources.length > 0 && (
+                          <details className="cd-answer-refs">
+                            <summary>参考来源 <small>References · {sources.length}</small></summary>
+                            <ol>
+                              {sources.map((c, n) => (
+                                <li key={`${c.reportId ?? ''}:${c.page}:${n}`}>
+                                  <button type="button" onClick={() => jumpCitation(c)}>
+                                    <span className="cd-answer-refs-n">[{n + 1}]</span>
+                                    {citeReferenceText(citeSource(c))}
+                                  </button>
+                                </li>
+                              ))}
+                            </ol>
+                          </details>
+                        )}
+                    </>
+                  : <p>{m.text}</p>}
+              {m.role==='assistant' && m.text.trim() && !streaming && <div className="cd-answer-tools">
+                <div className="cd-actions">
+                <button type="button" className={m.feedback==='up'?'on':''} aria-label="满意" title="满意" aria-pressed={m.feedback==='up'} aria-expanded={m.feedback==='up' && !m.feedbackDone} onClick={()=>setAnswerVote(i,'up')}>
+                  <ActIcon><path d="M7 10v12" /><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /></ActIcon>
+                </button>
+                <button type="button" className={m.feedback==='down'?'on':''} aria-label="不满意" title="不满意" aria-pressed={m.feedback==='down'} aria-expanded={m.feedback==='down' && !m.feedbackDone} onClick={()=>setAnswerVote(i,'down')}>
+                  <ActIcon><path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" /></ActIcon>
+                </button>
+                <div className={`cd-regen${regenMenu===i?' open':''}`}>
+                  <button type="button" aria-label="重新回答" title="重新回答" aria-haspopup="menu" aria-expanded={regenMenu===i} disabled={asking} onClick={()=>setRegenMenu(n=>n===i?null:i)}>
+                    <ActIcon><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></ActIcon>
+                  </button>
+                  {regenMenu===i && <div className="cd-regen-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={()=>regenerate(i,'detailed')}>详尽一点</button>
+                    <button type="button" role="menuitem" onClick={()=>regenerate(i,'brief')}>简单一点</button>
+                    <button type="button" role="menuitem" onClick={()=>regenerate(i,'retry')}>重试</button>
+                  </div>}
+                </div>
+                <button type="button" aria-label="复制" title="复制" onClick={()=>void copyAnswer(m.text, i)}>
+                  <ActIcon><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></ActIcon>
+                </button>
+                {copiedSlot===i && <span className="cd-copied" role="status">已复制</span>}
+                </div>
+                <AnswerFeedback
+                  kind={m.feedback}
+                  submitted={m.feedbackDone}
+                  elicitation={m.followups}
+                  asking={asking}
+                  onSubmit={()=>submitAnswerFeedback(i)}
+                  onAsk={(q)=>void ask(q)}
+                />
+              </div>}
+              {m.role==='assistant'&&!m.feedback&&(m.followupBusy||m.followups?.length)?<div className="cd-followups"><small>{m.followupBusy?'正在生成相关追问…':'继续追问'}</small>{m.followups?.length?<div className="cd-followup-list">{m.followups.map(q=><button key={q} disabled={asking} onClick={()=>draftAsk(q)}>{q}<span>↗</span></button>)}</div>:null}</div>:null}
+            </div>;
+          })}<div ref={chatEnd}/>
+        </div><form className="cd-chat-input" onSubmit={e=>{e.preventDefault(); if (!asking) void ask(question);}}>
           {clipToast && <div className="cd-clip-toast" role="status">{clipToast}</div>}
           {clips.length>0 && <div className={`cd-clips ${clipsFlash?'cd-clips-flash':''}`} aria-label="AI分析关注">
             <ul>{clips.map(c => <li key={c.id}><span>{clipChipLabel(c)}</span><button type="button" aria-label="移除" onClick={()=>removeClip(c.id)}>×</button></li>)}</ul>
           </div>}
-          <div className="cd-composer"><textarea ref={questionRef} aria-label="向 Eva 提问" placeholder="随意划词，灵活追问" rows={1} value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void ask(question);}}}/><button aria-label="发送问题" disabled={asking||memoryLoading||(!question.trim()&&!clips.length)} type="submit">{asking?'…':<svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z"/></svg>}</button></div>
+          <div className="cd-composer">
+            <textarea ref={questionRef} aria-label="向 Eva 提问" placeholder="随意划词，灵活追问" rows={1} value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault(); if(!asking) void ask(question);}}}/>
+            {asking
+              ? <button type="button" className="cd-stop" aria-label="停止生成" title="停止生成" onClick={stopAsk}>
+                  <svg className="cd-stop-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
+                    <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
+                  </svg>
+                </button>
+              : <button aria-label="发送问题" disabled={memoryLoading||(!question.trim()&&!clips.length)} type="submit">
+                  <svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z"/></svg>
+                </button>}
+          </div>
           {memoryLoading && <small>正在恢复历史会话…</small>}</form>
       </aside>
       {sourceCollapsed && <div className="cd-rail cd-rail-left"><button aria-label="展开来源栏" title="展开来源栏" aria-expanded={false} aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(false);setMobilePane('sources');}}><DockIcon side="left" /></button><span>来源</span></div>}
       {chatCollapsed && <div className="cd-rail cd-rail-right"><button aria-label="展开对话" title="展开对话" aria-expanded={false} aria-controls="cd-chat-panel" onClick={()=>{setChatCollapsed(false);setMobilePane('chat');}}><DockIcon side="right" /></button><span>对话</span></div>}
     </div>
+    {jumpAsk && (
+      <div className="cd-jump-backdrop" role="presentation" onClick={() => { setJumpAsk(null); setJumpBlocked(false); }}>
+        <div className="cd-jump-dialog" role="dialog" aria-modal="true" aria-labelledby="cd-jump-title" onClick={e => e.stopPropagation()}>
+          <h3 id="cd-jump-title">{jumpAsk.title}</h3>
+          <p>{jumpAsk.detail}</p>
+          {jumpBlocked && <p className="cd-jump-warn">浏览器拦截了新标签页，请允许弹出窗口后重试。</p>}
+          <div className="cd-jump-actions">
+            <button type="button" className="cd-jump-cancel" onClick={() => { setJumpAsk(null); setJumpBlocked(false); }}>{jumpAsk.href ? '取消' : '知道了'}</button>
+            {jumpAsk.href ? <button type="button" className="cd-jump-ok" onClick={confirmJumpAsk}>新标签页打开</button> : null}
+          </div>
+        </div>
+      </div>
+    )}
   </section>;
 }

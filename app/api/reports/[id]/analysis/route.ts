@@ -1,4 +1,5 @@
 import { getDb } from '@/lib/db';
+import { canonicalPeriodFromTitle } from '@/lib/ingest-period';
 
 type Metric = { metric: string; value: number; unit: string; period: string };
 
@@ -10,12 +11,12 @@ function change(current?: number, previous?: number) {
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const db = getDb();
-  const [target] = await db<Array<{ code: string; industry: string; report_type: string }>>`
-    SELECT a.code, c.industry, a.report_type FROM announcements a JOIN companies c ON c.code=a.code WHERE a.id=${id}
+  const [target] = await db<Array<{ code: string; industry: string; report_type: string; title: string; published_at: string }>>`
+    SELECT a.code, c.industry, a.report_type, a.title, a.published_at FROM announcements a JOIN companies c ON c.code=a.code WHERE a.id=${id}
   `;
   if (!target) return Response.json({ error: '报告不存在' }, { status: 404 });
   const reportMetrics = await db<Metric[]>`SELECT metric, value, unit, period FROM financial_metrics WHERE announcement_id=${id}`;
-  const period = reportMetrics[0]?.period;
+  const period = canonicalPeriodFromTitle(target.title, target.published_at) ?? reportMetrics[0]?.period;
   const peers: Array<{ code: string; company_name: string; metric: string; value: number; unit: string }> = period ? await db<Array<{ code: string; company_name: string; metric: string; value: number; unit: string }>>`
     SELECT DISTINCT ON (a.code, m.metric) a.code, a.company_name, m.metric, m.value, m.unit
     FROM financial_metrics m JOIN announcements a ON a.id=m.announcement_id JOIN companies c ON c.code=a.code

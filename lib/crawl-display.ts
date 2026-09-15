@@ -97,13 +97,13 @@ export const INDUSTRY_CHIPS: IndustryGroup[] = ['科技', '消费', '新能源',
 
 export function mapIndustryGroup(industry: string, sector?: string | null): IndustryGroup {
   if (sector && (INDUSTRY_CHIPS as string[]).includes(sector)) return sector as IndustryGroup;
-  if (/银行|非银金融|保险|金融/.test(industry)) return '金融';
-  if (/医药|生物/.test(industry)) return '医药';
-  if (/新能源|锂电|光伏|电力设备|储能/.test(industry)) return '新能源';
-  if (/电子|计算机|通信|半导体|光通信|AI|存储|消费电子/.test(industry)) return '科技';
-  if (/食品饮料|家用电器|农林牧渔|商贸零售|社会服务|传媒|白酒/.test(industry)) return '消费';
-  if (/汽车|机械|化工|有色|煤炭|石油|建筑|交通|公用|房地产|材料|制造|军工|周期/.test(industry)) return '周期';
-  if (/制造军工|军工/.test(industry)) return '制造军工';
+  if (/银行|非银金融|保险|券商|证券|金融/.test(industry)) return '金融';
+  if (/医药|生物|创新药|医疗|中药|疫苗|CXO/.test(industry)) return '医药';
+  if (/新能源|锂电|光伏|电力设备|储能|锂矿/.test(industry)) return '新能源';
+  if (/电子|计算机|通信|半导体|光通信|AI|存储|消费电子|面板|芯片/.test(industry)) return '科技';
+  if (/食品饮料|家用电器|家电|农林牧渔|商贸零售|社会服务|传媒|白酒|乳|调味|啤酒|免税/.test(industry)) return '消费';
+  if (/军工|制造军工|轨交|工控|机器人/.test(industry)) return '制造军工';
+  if (/汽车|机械|化工|有色|煤炭|石油|建筑|交通|公用|房地产|材料|制造|周期/.test(industry)) return '周期';
   return '其他';
 }
 

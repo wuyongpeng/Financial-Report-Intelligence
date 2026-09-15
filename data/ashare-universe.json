@@ -875,8 +875,28 @@
     "exchange": "SSE"
   },
   {
+    "code": "600001",
+    "name": "邯郸钢铁",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600002",
+    "name": "齐鲁石化",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600003",
+    "name": "ST东北高",
+    "exchange": "SSE"
+  },
+  {
     "code": "600004",
     "name": "白云机场",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600005",
+    "name": "武钢股份",
     "exchange": "SSE"
   },
   {
@@ -1110,6 +1130,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600065",
+    "name": "*ST联谊",
+    "exchange": "SSE"
+  },
+  {
     "code": "600066",
     "name": "宇通客车",
     "exchange": "SSE"
@@ -1117,6 +1142,21 @@
   {
     "code": "600067",
     "name": "冠城新材",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600068",
+    "name": "葛洲坝",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600069",
+    "name": "退市银鸽",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600070",
+    "name": "*ST富润",
     "exchange": "SSE"
   },
   {
@@ -1135,6 +1175,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600074",
+    "name": "退市保千",
+    "exchange": "SSE"
+  },
+  {
     "code": "600075",
     "name": "新疆天业",
     "exchange": "SSE"
@@ -1142,6 +1187,11 @@
   {
     "code": "600076",
     "name": "康欣新材",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600077",
+    "name": "*ST宋都",
     "exchange": "SSE"
   },
   {
@@ -1170,6 +1220,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600083",
+    "name": "*ST博信",
+    "exchange": "SSE"
+  },
+  {
     "code": "600084",
     "name": "*ST尼雅",
     "exchange": "SSE"
@@ -1180,6 +1235,16 @@
     "exchange": "SSE"
   },
   {
+    "code": "600086",
+    "name": "退市金钰",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600087",
+    "name": "退市长油",
+    "exchange": "SSE"
+  },
+  {
     "code": "600088",
     "name": "中视传媒",
     "exchange": "SSE"
@@ -1187,6 +1252,26 @@
   {
     "code": "600089",
     "name": "特变电工",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600090",
+    "name": "退市济堂",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600091",
+    "name": "退市明科",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600092",
+    "name": "S*ST精密",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600093",
+    "name": "退市易见",
     "exchange": "SSE"
   },
   {
@@ -1227,6 +1312,11 @@
   {
     "code": "600101",
     "name": "明星电力",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600102",
+    "name": "莱钢股份",
     "exchange": "SSE"
   },
   {
@@ -1275,6 +1365,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600112",
+    "name": "*ST天成",
+    "exchange": "SSE"
+  },
+  {
     "code": "600113",
     "name": "浙江东日",
     "exchange": "SSE"
@@ -1317,6 +1412,11 @@
   {
     "code": "600121",
     "name": "郑州煤电",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600122",
+    "name": "*ST宏图",
     "exchange": "SSE"
   },
   {
@@ -1390,6 +1490,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600139",
+    "name": "*ST西源",
+    "exchange": "SSE"
+  },
+  {
     "code": "600141",
     "name": "兴发集团",
     "exchange": "SSE"
@@ -1397,6 +1502,16 @@
   {
     "code": "600143",
     "name": "金发科技",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600145",
+    "name": "退市新亿",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600146",
+    "name": "退市环球",
     "exchange": "SSE"
   },
   {
@@ -1520,6 +1635,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600175",
+    "name": "退市美都",
+    "exchange": "SSE"
+  },
+  {
     "code": "600176",
     "name": "中国巨石",
     "exchange": "SSE"
@@ -1542,6 +1662,11 @@
   {
     "code": "600180",
     "name": "*ST瑞茂",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600181",
+    "name": "S*ST云大",
     "exchange": "SSE"
   },
   {
@@ -1582,6 +1707,11 @@
   {
     "code": "600189",
     "name": "泉阳泉",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600190",
+    "name": "退市锦港",
     "exchange": "SSE"
   },
   {
@@ -1645,6 +1775,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600205",
+    "name": "S山东铝",
+    "exchange": "SSE"
+  },
+  {
     "code": "600206",
     "name": "有研新材",
     "exchange": "SSE"
@@ -1660,6 +1795,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600209",
+    "name": "退市罗顿",
+    "exchange": "SSE"
+  },
+  {
     "code": "600210",
     "name": "紫江企业",
     "exchange": "SSE"
@@ -1672,6 +1812,11 @@
   {
     "code": "600212",
     "name": "绿能慧充",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600213",
+    "name": "*ST亚星",
     "exchange": "SSE"
   },
   {
@@ -1700,6 +1845,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600220",
+    "name": "ST阳光",
+    "exchange": "SSE"
+  },
+  {
     "code": "600221",
     "name": "海航控股",
     "exchange": "SSE"
@@ -1712,6 +1862,11 @@
   {
     "code": "600223",
     "name": "福瑞达",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600225",
+    "name": "退市卓朗",
     "exchange": "SSE"
   },
   {
@@ -1785,8 +1940,18 @@
     "exchange": "SSE"
   },
   {
+    "code": "600240",
+    "name": "退市华业",
+    "exchange": "SSE"
+  },
+  {
     "code": "600241",
     "name": "时代万恒",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600242",
+    "name": "退市中昌",
     "exchange": "SSE"
   },
   {
@@ -1797,6 +1962,11 @@
   {
     "code": "600246",
     "name": "万通发展",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600247",
+    "name": "*ST成城",
     "exchange": "SSE"
   },
   {
@@ -1825,6 +1995,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600253",
+    "name": "天方药业",
+    "exchange": "SSE"
+  },
+  {
     "code": "600255",
     "name": "鑫科材料",
     "exchange": "SSE"
@@ -1850,6 +2025,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600260",
+    "name": "*ST凯乐",
+    "exchange": "SSE"
+  },
+  {
     "code": "600261",
     "name": "阳光照明",
     "exchange": "SSE"
@@ -1857,6 +2037,11 @@
   {
     "code": "600262",
     "name": "北方股份",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600263",
+    "name": "路桥建设",
     "exchange": "SSE"
   },
   {
@@ -1885,6 +2070,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600270",
+    "name": "外运发展",
+    "exchange": "SSE"
+  },
+  {
     "code": "600271",
     "name": "航天信息",
     "exchange": "SSE"
@@ -1900,8 +2090,18 @@
     "exchange": "SSE"
   },
   {
+    "code": "600275",
+    "name": "退市昌鱼",
+    "exchange": "SSE"
+  },
+  {
     "code": "600276",
     "name": "恒瑞医药",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600277",
+    "name": "ST亿利",
     "exchange": "SSE"
   },
   {
@@ -1945,6 +2145,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600286",
+    "name": "S*ST国瓷",
+    "exchange": "SSE"
+  },
+  {
     "code": "600287",
     "name": "苏豪时尚",
     "exchange": "SSE"
@@ -1960,6 +2165,16 @@
     "exchange": "SSE"
   },
   {
+    "code": "600290",
+    "name": "*ST华仪",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600291",
+    "name": "退市西水",
+    "exchange": "SSE"
+  },
+  {
     "code": "600292",
     "name": "电投水电",
     "exchange": "SSE"
@@ -1972,6 +2187,16 @@
   {
     "code": "600295",
     "name": "鄂尔多斯",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600296",
+    "name": "S兰铝",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600297",
+    "name": "广汇汽车",
     "exchange": "SSE"
   },
   {
@@ -2010,6 +2235,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600306",
+    "name": "退市商城",
+    "exchange": "SSE"
+  },
+  {
     "code": "600307",
     "name": "酒钢宏兴",
     "exchange": "SSE"
@@ -2027,6 +2257,11 @@
   {
     "code": "600310",
     "name": "广西能源",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600311",
+    "name": "*ST荣华",
     "exchange": "SSE"
   },
   {
@@ -2050,6 +2285,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600317",
+    "name": "营口港",
+    "exchange": "SSE"
+  },
+  {
     "code": "600318",
     "name": "新力金融",
     "exchange": "SSE"
@@ -2062,6 +2302,11 @@
   {
     "code": "600320",
     "name": "振华重工",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600321",
+    "name": "正源股份",
     "exchange": "SSE"
   },
   {
@@ -2205,6 +2450,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600357",
+    "name": "承德钒钛",
+    "exchange": "SSE"
+  },
+  {
     "code": "600358",
     "name": "国旅联合",
     "exchange": "SSE"
@@ -2325,8 +2575,18 @@
     "exchange": "SSE"
   },
   {
+    "code": "600385",
+    "name": "退市金泰",
+    "exchange": "SSE"
+  },
+  {
     "code": "600386",
     "name": "北巴传媒",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600387",
+    "name": "退市海越",
     "exchange": "SSE"
   },
   {
@@ -2352,6 +2612,11 @@
   {
     "code": "600392",
     "name": "盛和资源",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600393",
+    "name": "ST粤泰",
     "exchange": "SSE"
   },
   {
@@ -2382,6 +2647,11 @@
   {
     "code": "600400",
     "name": "红豆股份",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600401",
+    "name": "退市海润",
     "exchange": "SSE"
   },
   {
@@ -2475,6 +2745,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600432",
+    "name": "退市吉恩",
+    "exchange": "SSE"
+  },
+  {
     "code": "600433",
     "name": "冠豪高新",
     "exchange": "SSE"
@@ -2555,8 +2830,18 @@
     "exchange": "SSE"
   },
   {
+    "code": "600462",
+    "name": "退市九有",
+    "exchange": "SSE"
+  },
+  {
     "code": "600463",
     "name": "空港股份",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600466",
+    "name": "*ST蓝光",
     "exchange": "SSE"
   },
   {
@@ -2577,6 +2862,11 @@
   {
     "code": "600470",
     "name": "六国化工",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600472",
+    "name": "包头铝业",
     "exchange": "SSE"
   },
   {
@@ -2622,6 +2912,11 @@
   {
     "code": "600483",
     "name": "福能股份",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600485",
+    "name": "*ST信威",
     "exchange": "SSE"
   },
   {
@@ -2830,6 +3125,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600532",
+    "name": "退市未来",
+    "exchange": "SSE"
+  },
+  {
     "code": "600533",
     "name": "栖霞建设",
     "exchange": "SSE"
@@ -2910,6 +3210,16 @@
     "exchange": "SSE"
   },
   {
+    "code": "600553",
+    "name": "太行水泥",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600555",
+    "name": "退市海创",
+    "exchange": "SSE"
+  },
+  {
     "code": "600556",
     "name": "天下秀",
     "exchange": "SSE"
@@ -2947,6 +3257,11 @@
   {
     "code": "600563",
     "name": "法拉电子",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600565",
+    "name": "ST迪马",
     "exchange": "SSE"
   },
   {
@@ -3070,6 +3385,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600591",
+    "name": "*ST上航",
+    "exchange": "SSE"
+  },
+  {
     "code": "600592",
     "name": "龙溪股份",
     "exchange": "SSE"
@@ -3145,6 +3465,11 @@
     "exchange": "SSE"
   },
   {
+    "code": "600607",
+    "name": "上实医药",
+    "exchange": "SSE"
+  },
+  {
     "code": "600608",
     "name": "退市沪科",
     "exchange": "SSE"
@@ -3172,6 +3497,11 @@
   {
     "code": "600613",
     "name": "神奇制药",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600614",
+    "name": "退市鹏起",
     "exchange": "SSE"
   },
   {
@@ -3225,8 +3555,18 @@
     "exchange": "SSE"
   },
   {
+    "code": "600625",
+    "name": "PT水仙",
+    "exchange": "SSE"
+  },
+  {
     "code": "600626",
     "name": "申达股份",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600627",
+    "name": "上电股份",
     "exchange": "SSE"
   },
   {
@@ -3245,8 +3585,23 @@
     "exchange": "SSE"
   },
   {
+    "code": "600631",
+    "name": "百联股份",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600632",
+    "name": "华联商厦",
+    "exchange": "SSE"
+  },
+  {
     "code": "600633",
     "name": "浙数文化",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600634",
+    "name": "退市富控",
     "exchange": "SSE"
   },
   {
@@ -3305,6 +3660,16 @@
     "exchange": "SSE"
   },
   {
+    "code": "600646",
+    "name": "ST国嘉",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600647",
+    "name": "退市同达",
+    "exchange": "SSE"
+  },
+  {
     "code": "600648",
     "name": "外高桥",
     "exchange": "SSE"
@@ -3322,6 +3687,11 @@
   {
     "code": "600651",
     "name": "飞乐音响",
+    "exchange": "SSE"
+  },
+  {
+    "code": "600652",
+    "name": "退市游久",
     "exchange": "SSE"
   },
   {

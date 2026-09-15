@@ -2,7 +2,7 @@ import { getDb } from '@/lib/db';
 import { apiError } from '@/lib/api';
 import { getIngestControl } from '@/lib/ingest-control';
 import { periodFromTitle } from '@/lib/ingest-period';
-import { getDownloadGate, listIngestProgress } from '@/lib/ingest-progress';
+import { getDownloadGate, getGapScanState, listIngestProgress } from '@/lib/ingest-progress';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +33,8 @@ export async function GET() {
         COUNT(*) FILTER (WHERE status='parse_parked')::int AS parse_parked,
         COUNT(*) FILTER (WHERE status='review')::int AS review,
         COUNT(*) FILTER (WHERE status='online')::int AS online,
-        COUNT(*) FILTER (WHERE status IN ('discovered','download_failed','downloading'))::int AS pending_download,
+        -- 排队下载：待领任务；正在下载单独计入 downloading / downloadSlots
+        COUNT(*) FILTER (WHERE status IN ('discovered','download_failed'))::int AS pending_download,
         -- 排队解析：已下载待排 + 可重试 partial；不含正在解析、不含搁置
         COUNT(*) FILTER (WHERE status='downloaded')::int AS pending_parse,
         -- 已入库：解析成功（review 待审 / online 已上线）
@@ -168,10 +169,18 @@ export async function GET() {
         const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
         let reason = '';
         let waitSec: number | undefined;
-        if (control.downloadPaused) {
-          reason = '下载已暂停';
+        if (!control.autoCrawlEnabled || control.downloadPaused) {
+          reason = '自动抓取已关：排队任务暂不开始下载';
         } else if (row.status === 'download_failed') {
-          reason = '上次失败，等待重试';
+          const failedAt = new Date(row.updated_at).getTime();
+          const cooldownMs = Math.max(pauseMs * 15, 30_000);
+          const remain = Number.isFinite(failedAt)
+            ? Math.max(0, Math.ceil((failedAt + cooldownMs - Date.now()) / 1000))
+            : 0;
+          const unit = Math.max(1, Math.ceil(pauseMs / 1000));
+          const gated = gateWaitSec > 0 ? gateWaitSec : 0;
+          waitSec = Math.max(remain, gated) + i * unit;
+          reason = waitSec > 0 ? `上次失败，${waitSec}s 后重试` : '上次失败，即将重试';
         } else if (downloadSlots.used >= downloadSlots.max) {
           reason = i === 0 ? '等待下载槽空闲' : `排队第 ${i + 1} 位`;
         } else {
@@ -200,8 +209,7 @@ export async function GET() {
         if (!row.pdf_key) reason = '缺少 PDF';
         else if (row.parse_error) reason = row.parse_error;
         else if (row.status === 'parse_partial') reason = '解析不完整，等待重试';
-        else if (control.downloadPaused) reason = '下载已暂停（解析仍可进行）';
-        else if (!control.autoCrawlEnabled) reason = i === 0 ? '自动已关：仍消化解析排队' : `排队第 ${i + 1} 位`;
+        else if (!control.autoCrawlEnabled || control.downloadPaused) reason = i === 0 ? '自动抓取已关：已下载 PDF 仍会解析' : `排队第 ${i + 1} 位`;
         else if (i === 0) reason = '即将解析';
         else reason = `排队第 ${i + 1} 位`;
         return {
@@ -300,11 +308,19 @@ export async function GET() {
     const pendingParseItems = queueItems.filter((q) => q.stage === 'parse');
     const activeParseItems = [...activeParseFromDb, ...activeParseFromMem];
 
+    const coverageBootstrap = getGapScanState();
     return Response.json({
       mode: 'live',
       running,
       autoCrawlEnabled: control.autoCrawlEnabled,
       downloadPaused: control.downloadPaused,
+      coverageBootstrap: {
+        mode: coverageBootstrap.mode,
+        missingPeriods: coverageBootstrap.missingPeriods,
+        missingCompanies: coverageBootstrap.missingCompanies,
+        hunted: coverageBootstrap.huntedCodes.length,
+        completedAt: coverageBootstrap.completedAt,
+      },
       downloadGate,
       workerHint: running ? 'ingest_run' : 'idle',
       lastPollAt: latestRun?.finished_at ?? latestRun?.started_at ?? null,

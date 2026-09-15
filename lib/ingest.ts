@@ -11,13 +11,20 @@ import { asIsoDate, periodFromTitle } from './ingest-period';
 import {
   announcementMeetsAutoCutoff,
   autoCollectSearchDays,
+  expectedPeriodsThroughLatest,
+  latestExpectedPeriod,
   MANUAL_HISTORY_DAYS,
+  missingExpectedPeriods,
+  nextCoverageBootstrapState,
+  pickGapCompanyCodes,
 } from './ingest-lookback';
 import {
   clearIngestProgress,
+  getGapScanState,
   listIngestProgress,
   patchIngestProgress,
   setDownloadGate,
+  setGapScanState,
   setIngestProgress,
 } from './ingest-progress';
 
@@ -94,7 +101,15 @@ async function seedCompanies(now: string) {
     for (const company of companies) {
       await tx`
         INSERT INTO companies (code, name, exchange, industry, rank, weight, enabled, created_at, updated_at)
-        VALUES (${company.code}, ${company.name}, ${company.exchange}, ${company.industry}, ${company.rank}, ${company.weight}, true, ${now}, ${now})
+        VALUES (
+          ${company.code},
+          ${company.name ?? company.code},
+          ${company.exchange ?? (company.code.startsWith('6') || company.code.startsWith('9') ? 'SSE' : 'SZSE')},
+          ${company.industry ?? '待分类'},
+          ${company.rank ?? 999},
+          ${company.weight ?? 60},
+          true, ${now}, ${now}
+        )
         ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, exchange=EXCLUDED.exchange,
           industry=EXCLUDED.industry, rank=EXCLUDED.rank, weight=EXCLUDED.weight, enabled=true, updated_at=EXCLUDED.updated_at
       `;
@@ -213,7 +228,10 @@ export async function processBacklog(options: {
         SELECT id, source, source_id, code, company_name, title, report_type, published_at, pdf_url, pdf_key, status
         FROM announcements
         WHERE (
-            status IN ('discovered', 'download_failed')
+            (status = 'discovered')
+            OR (status = 'download_failed' AND (
+              ${!codeFilter} OR ${!idFilter} OR updated_at < NOW() - INTERVAL '30 seconds'
+            ))
             OR (${fullHistory} AND status = 'auto_skipped')
           )
           AND (${codeFilter} OR code=ANY(${codes}::text[]))
@@ -528,52 +546,106 @@ export async function runIngestion(options: {
 
 
 
-/** Auto: discover (+ light download) for enabled companies still missing in-window filings. */
+/** Hunt 2025Q1+ gaps until every enabled company has been scanned once, then stop. */
 export async function fillCoverageGaps(options: { companyLimit?: number; downloadLimit?: number } = {}) {
-  const companyLimit = Math.max(1, Math.min(options.companyLimit ?? 3, 8));
-  const downloadLimit = Math.max(0, Math.min(options.downloadLimit ?? 2, 3));
+  const companyLimit = Math.max(1, Math.min(options.companyLimit ?? 8, 12));
+  const downloadLimit = Math.max(0, Math.min(options.downloadLimit ?? 0, 3));
   const db = getDb();
   const enabled = await db<Array<{ code: string; name: string; rank: number }>>`
     SELECT code, name, rank FROM companies WHERE enabled=true ORDER BY rank ASC, code ASC
   `;
-  if (!enabled.length) return { checked: 0, filled: 0, codes: [] as string[] };
+  const currentLatest = latestExpectedPeriod();
+  const prev = getGapScanState();
+  if (!enabled.length) {
+    setGapScanState({
+      lastCode: null,
+      mode: 'steady',
+      expectedLatest: currentLatest,
+      huntedCodes: [],
+      missingPeriods: 0,
+      missingCompanies: 0,
+      completedAt: prev.completedAt ?? new Date().toISOString(),
+    });
+    return { checked: 0, filled: 0, codes: [] as string[], missingPeriods: 0, bootstrapComplete: true };
+  }
 
   const codes = enabled.map((r) => r.code);
-  const anns = await db<Array<{ code: string; title: string; published_at: string; status: string; pdf_key: string | null }>>`
-    SELECT code, title, published_at, status, pdf_key FROM announcements
+  const anns = await db<Array<{ code: string; title: string; published_at: string; status: string }>>`
+    SELECT code, title, published_at, status FROM announcements
     WHERE code = ANY(${codes}::text[])
   `;
-  const byCode = new Map<string, Array<{ title: string; published_at: string; status: string; pdf_key: string | null }>>();
+  const byCode = new Map<string, Array<{ title: string; published_at: string; status: string }>>();
   for (const row of anns) {
     const list = byCode.get(row.code) ?? [];
     list.push(row);
     byCode.set(row.code, list);
   }
 
-  const gaps: string[] = [];
+  const expected = expectedPeriodsThroughLatest();
+  const missingByCode = new Map<string, string[]>();
+  let missingPeriods = 0;
   for (const company of enabled) {
-    const rows = byCode.get(company.code) ?? [];
-    // 窗口内至少有一份有效公告（含已发现待下）即不算缺口；纯无公告 / 仅搁置才补发现
-    const hasInWindow = rows.some((r) =>
-      r.status !== 'parse_parked'
-      && announcementMeetsAutoCutoff(r.title, r.published_at),
-    );
-    if (!hasInWindow) gaps.push(company.code);
-    if (gaps.length >= companyLimit) break;
+    const missing = missingExpectedPeriods(byCode.get(company.code) ?? [], expected);
+    if (!missing.length) continue;
+    missingByCode.set(company.code, missing);
+    missingPeriods += missing.length;
   }
-  if (!gaps.length) return { checked: enabled.length, filled: 0, codes: [] as string[] };
 
-  // Discover and start downloading so 排队下载立刻有货，而不是空等下一轮 backlog
+  const decision = nextCoverageBootstrapState({
+    mode: prev.mode,
+    expectedLatest: prev.expectedLatest,
+    currentLatest,
+    missingCompanyCodes: [...missingByCode.keys()],
+    huntedCodes: prev.huntedCodes,
+  });
+
+  const writeState = (mode: 'bootstrap' | 'steady', huntedCodes: string[], lastCode: string | null) => {
+    setGapScanState({
+      lastCode,
+      mode,
+      expectedLatest: currentLatest,
+      huntedCodes,
+      missingPeriods,
+      missingCompanies: missingByCode.size,
+      completedAt: mode === 'steady'
+        ? (prev.completedAt && !decision.reopen ? prev.completedAt : new Date().toISOString())
+        : null,
+    });
+  };
+
+  if (decision.mode === 'steady') {
+    writeState('steady', decision.huntedCodes, prev.lastCode);
+    return { checked: enabled.length, filled: 0, codes: [] as string[], missingPeriods, bootstrapComplete: true };
+  }
+
+  const huntMap = new Map([...missingByCode.entries()].filter(([code]) => decision.remainingToHunt.includes(code)));
+  const gaps = pickGapCompanyCodes(enabled, huntMap, decision.reopen ? null : prev.lastCode, companyLimit);
+  if (!gaps.length) {
+    writeState('steady', decision.huntedCodes, enabled[enabled.length - 1]?.code ?? null);
+    return { checked: enabled.length, filled: 0, codes: [] as string[], missingPeriods, bootstrapComplete: true };
+  }
+
   const result = await prioritizeCompanyCrawl(gaps, {
     downloadLimit,
     parseLimit: 0,
     days: autoCollectSearchDays(),
     fullHistory: false,
   });
+  const nextHunted = [...new Set([...decision.huntedCodes, ...gaps])];
+  const after = nextCoverageBootstrapState({
+    mode: 'bootstrap',
+    expectedLatest: currentLatest,
+    currentLatest,
+    missingCompanyCodes: [...missingByCode.keys()],
+    huntedCodes: nextHunted,
+  });
+  writeState(after.mode, nextHunted, gaps[gaps.length - 1]);
   return {
     checked: enabled.length,
     filled: gaps.length,
     codes: gaps,
+    missingPeriods,
+    bootstrapComplete: after.mode === 'steady',
     discovered: 'discovered' in result ? result.discovered : 0,
     inserted: 'inserted' in result ? result.inserted : 0,
     downloaded: 'downloaded' in result ? result.downloaded : 0,

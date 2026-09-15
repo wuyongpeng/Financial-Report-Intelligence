@@ -1,4 +1,5 @@
-// The four headline metrics drive the cards, the trend chart and the peer table.
+import { canonicalPeriodFromTitle, reportKindFromPeriod } from './ingest-period';
+
 export const metricNames = ['revenue', 'net_profit', 'eps', 'roe'] as const;
 // Balance-sheet and cash-flow rows power the health module; they are not headline cards.
 export const supportMetricNames = ['total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost'] as const;
@@ -7,14 +8,19 @@ export type HeadlineMetric = typeof metricNames[number];
 export type MetricName = typeof allMetricNames[number];
 export type Metric = { metric: MetricName; value: number; unit: string; source_page: number | null; source_label: string | null; confidence: number; verified: number; period: string };
 export type Report = { id: string; code: string; company_name: string; title: string; report_type: string; published_at: string; parsed_at: string | null; industry: string; status: string; metrics: Metric[] };
-export type Citation = { id?: string; reportId?: string; companyName?: string; period?: string; page: number; quote: string };
+export type Citation = { id?: string; reportId?: string; companyName?: string; period?: string; page: number; quote: string; code?: string };
 export const labels: Record<MetricName, string> = {
   revenue: '营业收入', net_profit: '归母净利润', eps: '每股收益 EPS', roe: '净资产收益率 ROE',
   total_assets: '资产总计', total_liabilities: '负债合计', operating_cash_flow: '经营现金流净额', operating_cost: '营业成本',
 };
 const currencyMetrics = new Set<MetricName>(['revenue', 'net_profit', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost']);
 export function value(report: Report | undefined, metric: MetricName) { return report?.metrics.find(item => item.metric === metric)?.value; }
-export function period(report: Report) { return report.metrics[0]?.period ?? report.title; }
+export function period(report: Report) {
+  return canonicalPeriodFromTitle(report.title, report.published_at) ?? report.metrics[0]?.period ?? report.title;
+}
+export function filingType(report: Report) {
+  return reportKindFromPeriod(period(report)) ?? (report.report_type === 'annual' || report.report_type === 'semiannual' || report.report_type === 'quarterly' ? report.report_type : 'other');
+}
 export function format(n: number | undefined, metric: MetricName) {
   if (n === undefined || !Number.isFinite(n)) return '—';
   return currencyMetrics.has(metric) ? `${(n / 1e8).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 亿` : `${n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}${metric === 'roe' ? '%' : ' 元'}`;
@@ -49,7 +55,7 @@ export function comparableHistory(reports: Report[], selected: Report) {
   const suffix = period(selected).replace(/20\d{2}/, '');
   const unique = new Map<string, Report>();
   for (const r of [...reports].sort((a,b) => b.published_at.localeCompare(a.published_at))) {
-    if (r.report_type !== selected.report_type || periodKey(r) > periodKey(selected) || period(r).replace(/20\d{2}/, '') !== suffix || !r.metrics.length) continue;
+    if (filingType(r) !== filingType(selected) || periodKey(r) > periodKey(selected) || period(r).replace(/20\d{2}/, '') !== suffix || !r.metrics.length) continue;
     if (!unique.has(period(r))) unique.set(period(r), r);
   }
   return [...unique.values()].sort((a,b) => periodKey(a)-periodKey(b));
@@ -58,7 +64,7 @@ export function priorYear(reports: Report[], selected: Report) {
   const p = period(selected); const year = p.match(/20\d{2}/)?.[0];
   if (!year) return undefined;
   const prior = p.replace(year, String(Number(year) - 1));
-  return reports.find(r => r.report_type === selected.report_type && period(r) === prior);
+  return reports.find(r => filingType(r) === filingType(selected) && period(r) === prior);
 }
 export function moduleForQuestion(q: string) {
   if (/为什么|原因|归因|利润.*下降|利润.*变化/.test(q)) return 'attribution';
@@ -125,4 +131,29 @@ export function keyFindings(reports: Report[], selected: Report): Finding[] {
   return out
     .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'watch' ? -1 : 1))
     .slice(0, 3);
+}
+
+function clipChars(text: string, max = 50) {
+  const chars = [...text];
+  return chars.length <= max ? text : `${chars.slice(0, max - 1).join('')}…`;
+}
+
+/** One-line overview conclusion; keep it short enough to scan. */
+export function periodConclusion(reports: Report[], selected: Report, maxChars = 50) {
+  const findings = keyFindings(reports, selected);
+  const top = findings[0];
+  const revenue = value(selected, 'revenue');
+  const profit = value(selected, 'net_profit');
+  let text = '';
+  if (top) {
+    text = top.severity === 'watch' ? `${top.headline}，需关注` : top.headline;
+  } else if (revenue !== undefined || profit !== undefined) {
+    const bits = [`${period(selected)}`];
+    if (revenue !== undefined) bits.push(`营收 ${format(revenue, 'revenue')}`);
+    if (profit !== undefined) bits.push(`净利 ${format(profit, 'net_profit')}`);
+    text = bits.join('，');
+  } else {
+    text = `${period(selected)} 核心指标解析中`;
+  }
+  return clipChars(text, maxChars);
 }

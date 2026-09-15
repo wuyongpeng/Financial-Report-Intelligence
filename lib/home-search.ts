@@ -5,8 +5,10 @@
 import type { CrawlCompanyCoverage, CrawlReportType } from '@/lib/crawl-display';
 import { getAshareUniverse } from '@/lib/ashare-universe';
 import type { Report } from '@/lib/detail-model';
-import { pinyinKeys } from '@/lib/company-query';
-import { period as reportPeriodLabel, periodKey } from '@/lib/detail-model';
+import { matchesCompanyQuery, pinyinKeys } from '@/lib/company-query';
+import { nameVariants, officialNameForToken, officialNameFromAlias } from '@/lib/company-aliases';
+import { period as reportPeriodLabel, periodKey, filingType } from '@/lib/detail-model';
+import { isCanonicalPeriod } from '@/lib/ingest-period';
 
 export type PeriodKind = 'annual' | 'semiannual' | 'quarterly';
 
@@ -68,6 +70,9 @@ export function parsePeriodHints(raw: string): ParsedPeriod {
     if (fullYear) out.year = Number(fullYear[1]);
     else if (shortYear) out.year = expandTwoDigitYear(Number(shortYear[1]));
     else if (fullYearBare) out.year = Number(fullYearBare[1]);
+    else if (/今年/.test(text)) out.year = new Date().getFullYear();
+    else if (/去年/.test(text)) out.year = new Date().getFullYear() - 1;
+    else if (/前年/.test(text)) out.year = new Date().getFullYear() - 2;
   }
 
   if (!out.kind) {
@@ -107,12 +112,16 @@ export function stripQueryNoise(raw: string): string {
   // QUESTION_HINT must be global — a single replace leaves leftovers like「是否缓慢」.
   const questionNoise = new RegExp(QUESTION_HINT.source, 'g');
   return raw
+    // 怎么样 before 怎么, otherwise leftover「样」.
+    .replace(/怎么样/g, ' ')
     .replace(/(20\d{2}|\d{2})\s*年/g, ' ')
+    .replace(/今年|去年|前年|明年/g, ' ')
     .replace(/半年度报告|半年度|半年报|中报|年度报告|年报|一季报|二季报|三季报|季报|第一季度|第二季度|第三季度/g, ' ')
     .replace(/\b(?:FY|H1|Q[1-3])\b/gi, ' ')
     // Keep embedded 6-digit codes; drop surrounding parentheses for name matching.
     .replace(/[（(]\s*(\d{6})\s*[）)]/g, ' $1 ')
     .replace(questionNoise, ' ')
+    .replace(/业绩|财报|报表|情况|表现|数据|营收|利润|净利润|收入/g, ' ')
     .replace(/[？?，,。.!！、\s]+/g, ' ')
     .trim();
 }
@@ -158,6 +167,13 @@ export function matchByNameOrCode(
     if (company.name && q.includes(company.name)) return company;
   }
 
+  const aliasOfficial = officialNameFromAlias(q);
+  if (aliasOfficial) {
+    const aliasHit = byNameLen.find((c) => c.name === aliasOfficial)
+      ?? byNameLen.find((c) => c.name.includes(aliasOfficial) || aliasOfficial.includes(c.name));
+    if (aliasHit) return aliasHit;
+  }
+
   const cleaned = stripQueryNoise(q);
   if (cleaned) {
     const lower = cleaned.toLowerCase();
@@ -165,6 +181,20 @@ export function matchByNameOrCode(
       (c) => c.name === cleaned || c.name.toLowerCase() === lower || c.code === cleaned,
     );
     if (exact) return exact;
+
+    const cleanedAlias = officialNameForToken(cleaned) ?? officialNameFromAlias(cleaned);
+    if (cleanedAlias) {
+      const aliasHit = list.find((c) => c.name === cleanedAlias)
+        ?? list.find((c) => c.name.includes(cleanedAlias) || cleanedAlias.includes(c.name));
+      if (aliasHit) return aliasHit;
+    }
+
+    const variantHits = list.filter((c) => nameVariants(c.name).includes(cleaned));
+    if (variantHits.length === 1) return variantHits[0];
+    if (variantHits.length > 1) {
+      return [...variantHits].sort((a, b) => a.name.length - b.name.length || a.code.localeCompare(b.code))[0] ?? null;
+    }
+
     const starts = list.filter(
       (c) => c.name.startsWith(cleaned) || c.name.toLowerCase().startsWith(lower),
     );
@@ -198,6 +228,15 @@ export function matchByNameOrCode(
   return null;
 }
 
+/** Card filter + submit path share this: keyword haystack, then precise name/code/alias. */
+export function queryMatchesCompany(
+  query: string,
+  item: ListedNameCode & { industry?: string; industryGroup?: string; theme?: string },
+): boolean {
+  if (matchesCompanyQuery(query, item)) return true;
+  return matchByNameOrCode(query, [{ code: item.code, name: item.name }])?.code === item.code;
+}
+
 /** Identify a listed A-share from free text using the recognition universe (not monitor pool). */
 export function resolveListedCompany(
   query: string,
@@ -220,21 +259,29 @@ function kindFromReportType(type: string | null | undefined): PeriodKind | undef
   return undefined;
 }
 
+function kindFromReport(report: Report): PeriodKind | undefined {
+  const fromPeriod = filingType(report);
+  if (fromPeriod === 'annual' || fromPeriod === 'semiannual' || fromPeriod === 'quarterly') return fromPeriod;
+  return kindFromReportType(report.report_type);
+}
+
 function tokenFromReport(report: Report): string {
+  const fromTitle = reportPeriodLabel(report);
+  if (isCanonicalPeriod(fromTitle)) return fromTitle;
   const fromMetric = report.metrics[0]?.period;
   if (fromMetric && /20\d{2}(FY|H1|Q[1-3])/.test(fromMetric)) return fromMetric;
-  const label = reportPeriodLabel(report);
-  const m = label.match(/20\d{2}(FY|H1|Q[1-3])/);
+  const m = fromTitle.match(/20\d{2}(FY|H1|Q[1-3])/);
   if (m) return m[0];
-  const year = label.match(/20\d{2}/)?.[0];
-  if (year && report.report_type === 'annual') return `${year}FY`;
-  if (year && report.report_type === 'semiannual') return `${year}H1`;
-  if (year && report.report_type === 'quarterly') {
-    if (/Q3|三季/.test(label)) return `${year}Q3`;
-    if (/Q1|一季/.test(label)) return `${year}Q1`;
-    if (/Q2|二季|H1|半年|中报/.test(label)) return `${year}Q2`;
+  const year = fromTitle.match(/20\d{2}/)?.[0];
+  const kind = kindFromReport(report);
+  if (year && kind === 'annual') return `${year}FY`;
+  if (year && kind === 'semiannual') return `${year}H1`;
+  if (year && kind === 'quarterly') {
+    if (/Q3|三季/.test(fromTitle)) return `${year}Q3`;
+    if (/Q1|一季/.test(fromTitle)) return `${year}Q1`;
+    if (/Q2|二季|H1|半年|中报/.test(fromTitle)) return `${year}Q2`;
   }
-  return label;
+  return fromTitle;
 }
 
 export function reportMatchesPeriod(report: Report, hint: ParsedPeriod): boolean {
@@ -245,7 +292,7 @@ export function reportMatchesPeriod(report: Report, hint: ParsedPeriod): boolean
   const yearOk = hint.year ? token.includes(String(hint.year)) || report.title.includes(String(hint.year)) : true;
   if (!yearOk) return false;
 
-  const kind = kindFromReportType(report.report_type);
+  const kind = kindFromReport(report);
   if (hint.kind && kind && hint.kind !== kind) {
     // Allow Q2 hint to match semiannual H1 disclosures
     if (!(hint.kind === 'quarterly' && hint.quarter === 2 && kind === 'semiannual')) return false;

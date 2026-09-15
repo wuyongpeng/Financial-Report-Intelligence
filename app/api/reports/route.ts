@@ -1,5 +1,7 @@
 import { getDb } from '@/lib/db';
 import { ApiError, apiError } from '@/lib/api';
+import { classifyReportTitle, canonicalPeriodFromTitle } from '@/lib/ingest-period';
+import { healFilingLabels } from '@/lib/period-heal';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +27,11 @@ export async function GET(request: Request) {
       ? await db<ReportRow[]>`SELECT a.*, c.industry, c.rank FROM announcements a JOIN companies c ON c.code=a.code WHERE a.code=${code} ORDER BY a.published_at DESC LIMIT ${limit}`
       : await db<ReportRow[]>`SELECT a.*, c.industry, c.rank FROM announcements a JOIN companies c ON c.code=a.code ORDER BY a.published_at DESC LIMIT ${limit}`;
     if (reports.length) {
+      await healFilingLabels(db, reports.map((item) => ({
+        id: item.id,
+        title: String(item.title ?? ''),
+        published_at: item.published_at,
+      }))).catch(() => undefined);
       // Company previews still need the prior-year value for their delta cards.
       // Fetch it explicitly rather than relying on a global recent-report limit.
       if (byCompany && !code) {
@@ -44,7 +51,17 @@ export async function GET(request: Request) {
       `;
       const metricsByReport = new Map<string, MetricRow[]>();
       for (const metric of metrics) metricsByReport.set(metric.announcement_id, [...(metricsByReport.get(metric.announcement_id) ?? []), metric]);
-      return Response.json({ source: 'postgresql', count: reports.length, reports: reports.map((item) => ({ ...item, metrics: metricsByReport.get(item.id) ?? [] })) }, {
+      return Response.json({ source: 'postgresql', count: reports.length, reports: reports.map((item) => {
+        const token = canonicalPeriodFromTitle(String(item.title ?? ''), item.published_at);
+        const kind = classifyReportTitle(String(item.title ?? ''));
+        const raw = metricsByReport.get(item.id) ?? [];
+        const healed = token ? raw.map((metric) => ({ ...metric, period: token })) : raw;
+        return {
+          ...item,
+          report_type: kind === 'other' ? item.report_type : kind,
+          metrics: healed,
+        };
+      }) }, {
         headers: { 'cache-control': 'no-store' },
       });
     }

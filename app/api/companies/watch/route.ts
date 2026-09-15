@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import ashareUniverse from '@/data/ashare-universe.json';
 import { demoAccessEnabled, isAppUser } from '@/lib/auth';
+import { classifyCompany } from '@/lib/company-classify';
 import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -105,6 +106,12 @@ export async function POST(request: Request) {
   }
 
   const now = new Date().toISOString();
+  let classified: { industry: string; sector: string; source: string };
+  try {
+    classified = await classifyCompany({ code, name, exchange });
+  } catch {
+    classified = { industry: '待分类', sector: '其他', source: 'fallback' };
+  }
 
   // Optional seed sync only. Runtime watchlist is the companies table.
   let existing: CompanyFileRow | undefined;
@@ -114,6 +121,7 @@ export async function POST(request: Request) {
     const raw = await readFile(filePath, 'utf8');
     rows = JSON.parse(raw) as CompanyFileRow[];
     existing = rows.find((row) => row.code === code);
+    const untagged = !existing?.industry || existing.industry === '待分类';
     if (!existing) {
       const nextRank = rows.reduce((max, row) => Math.max(max, row.rank || 0), 0) + 1;
       rows.push({
@@ -121,18 +129,28 @@ export async function POST(request: Request) {
         code,
         name,
         exchange,
-        industry: '待分类',
-        sector: '其他',
-        theme: '待分类',
+        industry: classified.industry,
+        sector: classified.sector,
+        theme: classified.industry,
         heat: 'B',
         weight: 60,
       });
       rows.sort((a, b) => a.rank - b.rank || a.code.localeCompare(b.code));
       await writeFile(filePath, `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
       existing = rows.find((row) => row.code === code);
-    } else if (providedName && existing.name !== providedName) {
-      existing.name = providedName;
-      await writeFile(filePath, `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
+    } else {
+      let dirty = false;
+      if (providedName && existing.name !== providedName) {
+        existing.name = providedName;
+        dirty = true;
+      }
+      if (untagged && classified.industry !== '待分类') {
+        existing.industry = classified.industry;
+        existing.sector = classified.sector;
+        existing.theme = classified.industry;
+        dirty = true;
+      }
+      if (dirty) await writeFile(filePath, `${JSON.stringify(rows, null, 2)}\n`, 'utf8');
     }
   } catch {
     /* non-fatal — Docker worker may not share this file */
@@ -154,7 +172,8 @@ export async function POST(request: Request) {
   const db = getDb();
   const rank = existing?.rank ?? rows.find((row) => row.code === code)?.rank ?? 999;
   const weight = existing?.weight ?? 60;
-  const industry = existing?.industry ?? '待分类';
+  const untaggedDb = !existing?.industry || existing.industry === '待分类';
+  const industry = untaggedDb ? classified.industry : (existing?.industry ?? classified.industry);
   const finalName = existing && !providedName ? existing.name : name;
 
   await db`
@@ -163,7 +182,10 @@ export async function POST(request: Request) {
     ON CONFLICT (code) DO UPDATE SET
       name=EXCLUDED.name,
       exchange=EXCLUDED.exchange,
-      industry=COALESCE(companies.industry, EXCLUDED.industry),
+      industry=CASE
+        WHEN companies.industry IS NULL OR companies.industry IN ('', '待分类') THEN EXCLUDED.industry
+        ELSE companies.industry
+      END,
       rank=EXCLUDED.rank,
       weight=EXCLUDED.weight,
       enabled=true,
@@ -174,9 +196,18 @@ export async function POST(request: Request) {
 
   return Response.json({
     ok: true,
-    company: { code, name: finalName, exchange, industry, rank, weight },
+    company: {
+      code,
+      name: finalName,
+      exchange,
+      industry,
+      sector: untaggedDb ? classified.sector : (existing?.sector ?? classified.sector),
+      rank,
+      weight,
+    },
     enabledCount: enabled[0]?.n ?? null,
     fromUniverse: Boolean(listed),
+    tagSource: classified.source,
     note: `已将「${finalName}」加入监控池`,
   }, { headers: { 'cache-control': 'no-store' } });
 }

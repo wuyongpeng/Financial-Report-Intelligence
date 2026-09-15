@@ -5,7 +5,7 @@ import { boundedMemory } from '../lib/conversations';
 import { hasCoreMetrics } from '../lib/metric-quality';
 import { buildOutline } from '../lib/outline';
 import { excerpt, retrievalQuestion, type RagContext } from '../lib/rag';
-import { generateAnswer, parseSse, validateCitations } from '../lib/answer';
+import { generateAnswer, modelMessages, parseAnswerRewrite, parseSse, validateCitations } from '../lib/answer';
 import { readObject } from '../lib/api';
 import { collectPages } from '../lib/sources';
 import type { Announcement } from '../lib/types';
@@ -59,6 +59,19 @@ const context: RagContext = {
   evidence: [{ id: 'E1', reportId: 'test', companyName: '样本', period: '2026H1', page: 2, quote: '净利润增加' }],
   passages: [], fallback: '原文：净利润增加【E1】', mode: 'evidence-retrieval', metrics: [], peers: [],
 };
+
+test('rewrite styles append targeted instructions', () => {
+  assert.equal(parseAnswerRewrite('detailed'), 'detailed');
+  assert.equal(parseAnswerRewrite('nope'), undefined);
+  const detailed = modelMessages(context, [], 'detailed');
+  const brief = modelMessages(context, [], 'brief');
+  const retry = modelMessages(context, [], 'retry');
+  const plain = modelMessages(context, []);
+  assert.match(detailed[detailed.length - 1].content, /更详尽/);
+  assert.match(brief[brief.length - 1].content, /更简短/);
+  assert.match(retry[retry.length - 1].content, /重新作答/);
+  assert.doesNotMatch(plain[plain.length - 1].content, /重写要求/);
+});
 
 test('deterministic answers avoid model calls; unknown citations trigger fallback', async t => {
   process.env.LLM_BASE_URL = 'http://model.invalid/v1'; process.env.LLM_MODEL = 'test';

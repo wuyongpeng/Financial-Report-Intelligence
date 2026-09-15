@@ -190,6 +190,20 @@ button:disabled {
   max-width: 620px;
 }
 
+.honest-empty.page-opening{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:min(52vh,440px);margin-top:36px;padding:48px 24px;
+  background:#fff;border:1px solid #e6eaf0;border-style:solid;border-radius:12px;
+}
+.honest-empty.page-opening b{font-size:16px;font-weight:600;margin-top:18px;color:#203047}
+.honest-empty.page-opening p{font-size:13px;color:#738198;margin-top:8px;max-width:none}
+.page-opening-spin{
+  display:block;width:36px;height:36px;border-radius:50%;box-sizing:border-box;
+  flex-shrink:0;border:3px solid #d5deeb;border-top-color:#3064db;
+  animation:page-opening-spin .7s linear infinite !important;
+}
+@keyframes page-opening-spin{to{transform:rotate(360deg)}}
+
 .real-history {
   margin-bottom: 14px;
 }

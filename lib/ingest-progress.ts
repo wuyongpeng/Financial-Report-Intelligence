@@ -97,3 +97,55 @@ function downloadPauseDefault() {
   const base = Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
   return Number.isFinite(base) ? Math.max(400, base) : 1200;
 }
+
+const GAP_CURSOR_FILE = join(process.cwd(), '.data', 'ingest-gap-cursor.json');
+
+export type GapScanState = {
+  lastCode: string | null;
+  mode: 'bootstrap' | 'steady';
+  expectedLatest: string;
+  huntedCodes: string[];
+  missingPeriods: number;
+  missingCompanies: number;
+  completedAt: string | null;
+};
+
+const EMPTY_GAP_STATE: GapScanState = {
+  lastCode: null,
+  mode: 'bootstrap',
+  expectedLatest: '',
+  huntedCodes: [],
+  missingPeriods: 0,
+  missingCompanies: 0,
+  completedAt: null,
+};
+
+export function getGapScanState(): GapScanState {
+  try {
+    const parsed = JSON.parse(readFileSync(GAP_CURSOR_FILE, 'utf8')) as Partial<GapScanState> & { lastCode?: string };
+    return {
+      lastCode: parsed.lastCode ?? null,
+      mode: parsed.mode === 'steady' ? 'steady' : 'bootstrap',
+      expectedLatest: parsed.expectedLatest ?? '',
+      huntedCodes: Array.isArray(parsed.huntedCodes) ? parsed.huntedCodes.filter((c): c is string => typeof c === 'string') : [],
+      missingPeriods: Number(parsed.missingPeriods) || 0,
+      missingCompanies: Number(parsed.missingCompanies) || 0,
+      completedAt: parsed.completedAt ?? null,
+    };
+  } catch {
+    return { ...EMPTY_GAP_STATE };
+  }
+}
+
+export function setGapScanState(state: GapScanState) {
+  mkdirSync(dirname(GAP_CURSOR_FILE), { recursive: true });
+  writeFileSync(GAP_CURSOR_FILE, JSON.stringify(state));
+}
+
+export function getGapScanCursor(): string | null {
+  return getGapScanState().lastCode;
+}
+
+export function setGapScanCursor(lastCode: string | null) {
+  setGapScanState({ ...getGapScanState(), lastCode });
+}

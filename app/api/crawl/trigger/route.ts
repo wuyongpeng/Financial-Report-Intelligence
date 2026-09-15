@@ -41,41 +41,19 @@ export async function POST(request: Request) {
     ? body.announcementIds.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(0, 10)
     : [];
   const control = await getIngestControl();
-  const paused = !control.autoCrawlEnabled || control.downloadPaused;
-  const downloadPaused = control.downloadPaused;
-
-  if (downloadPaused && !parseOnly && (discover || codes.length)) {
-    return Response.json(
-      {
-        ok: false,
-        error: '下载已暂停：请先关闭「暂停抓取」后再下载；解析已下载 PDF 不受影响。',
-        downloadPaused: true,
-      },
-      { status: 409, headers: { 'cache-control': 'no-store' } },
-    );
-  }
-
-  // Auto off blocks discover / gap fill (not draining existing queue).
-  if (!control.autoCrawlEnabled && !downloadPaused && !fullHistory && !parseOnly && (discover || (codes.length && body.mode === 'discover'))) {
-    return Response.json(
-      {
-        ok: false,
-        error: '自动抓取已关闭，请先开启自动抓取；已有排队仍会消化，解析已下载 PDF 不受影响。',
-        paused: true,
-      },
-      { status: 409, headers: { 'cache-control': 'no-store' } },
-    );
-  }
+  const autoOn = control.autoCrawlEnabled;
+  const envDownload = Math.min(Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2), 2);
+  const envParse = Math.min(Number(process.env.INGEST_PARSE_LIMIT ?? 1), 1);
 
   try {
     if (discover) {
       const result = await runIngestion({
         days: Number(process.env.INGEST_DAYS ?? 2),
-        downloadLimit: Math.min(Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2), 2),
-        parseLimit: Math.min(Number(process.env.INGEST_PARSE_LIMIT ?? 1), 1),
+        downloadLimit: autoOn ? envDownload : 0,
+        parseLimit: envParse,
         fullHistory,
       });
-      return Response.json({ mode: 'discover', auth, fullHistory, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ mode: 'discover', auth, fullHistory, autoCrawlEnabled: autoOn, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
     }
 
 
@@ -91,7 +69,7 @@ export async function POST(request: Request) {
       });
       return Response.json({ mode: 'parse', auth, codes, periods, announcementIds, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
     }
-    // Per-company crawl. Sources page passes fullHistory to reach older than last-year H1.
+    // Per-company crawl. Manual 抓取 still downloads even when auto crawl is off.
     if (codes.length) {
       const result = await prioritizeCompanyCrawl(codes, {
         downloadLimit: 1,
@@ -104,23 +82,22 @@ export async function POST(request: Request) {
     }
 
     const result = await processBacklog({
-      downloadLimit: downloadPaused ? 0 : 1,
+      downloadLimit: autoOn ? 1 : 0,
       parseLimit: 1,
       fullHistory,
     });
-    const gaps = (!control.autoCrawlEnabled || downloadPaused)
-      ? { filled: 0, codes: [] as string[] }
-      : await fillCoverageGaps({ companyLimit: 2, downloadLimit: 1 });
+    const gaps = await fillCoverageGaps({ companyLimit: autoOn ? 8 : 4, downloadLimit: 0 });
     return Response.json({
-      mode: downloadPaused ? 'paused' : (!control.autoCrawlEnabled ? 'backlog-drain' : 'backlog'),
+      mode: autoOn ? 'backlog' : 'scan-hold-download',
       auth,
-      paused: !control.autoCrawlEnabled,
-      downloadPaused,
-      note: downloadPaused
-        ? '下载已暂停：排队保持不变，本轮不发起新下载。'
-        : (!control.autoCrawlEnabled
-          ? '自动抓取已关：不发现新公告，正在消化已有排队下载/解析。'
-          : `温和模式：下载/解析各限流；本轮补发现 ${gaps.filled} 家缺口公司。`),
+      paused: !autoOn,
+      autoCrawlEnabled: autoOn,
+      downloadPaused: !autoOn,
+      note: autoOn
+        ? (gaps.bootstrapComplete
+          ? '已完成全量补齐，之后只扫最近 2 天公告。'
+          : `全量补齐中：本轮检索 ${gaps.filled} 家缺口公司（仍缺 ${gaps.missingPeriods ?? 0} 个 2025Q1+ 期次）。`)
+        : '自动抓取已关：仍扫描新公告与缺口期次；下载中的任务会完成，排队任务不再自动开始下载。',
       ...result,
       gaps,
       ok: true,

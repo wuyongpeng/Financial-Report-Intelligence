@@ -66,3 +66,68 @@ export function expectedPeriodsThroughLatest(now = new Date()): string[] {
   }
   return tokens;
 }
+
+/** H1 and Q2 are the same mid-year filing. */
+export function canonicalCollectToken(token: string) {
+  const t = token.trim().toUpperCase();
+  return /Q2$/.test(t) ? `${t.slice(0, 4)}H1` : t;
+}
+
+type CoverageRow = { title: string; status: string; publishedAt?: unknown; published_at?: unknown };
+
+function rowCountsTowardCoverage(status: string) {
+  return status !== 'auto_skipped';
+}
+
+/** Expected 2025Q1+ periods that have no local announcement yet (so they belong on the pending-download hunt list). */
+export function missingExpectedPeriods(
+  rows: CoverageRow[],
+  expected = expectedPeriodsThroughLatest(),
+): string[] {
+  const covered = new Set<string>();
+  for (const row of rows) {
+    if (!rowCountsTowardCoverage(row.status)) continue;
+    const token = canonicalCollectToken(periodFromTitle(row.title, row.publishedAt ?? row.published_at));
+    if (periodMeetsAutoCutoff(token)) covered.add(token);
+  }
+  return expected.filter((token) => !covered.has(canonicalCollectToken(token)));
+}
+
+export function pickGapCompanyCodes<T extends { code: string }>(
+  companies: T[],
+  missingByCode: Map<string, string[]>,
+  lastCode: string | null,
+  limit: number,
+) {
+  if (!companies.length || limit <= 0) return [] as string[];
+  const start = lastCode ? companies.findIndex((c) => c.code === lastCode) + 1 : 0;
+  const rotated = start > 0
+    ? [...companies.slice(start), ...companies.slice(0, start)]
+    : companies;
+  const codes: string[] = [];
+  for (const company of rotated) {
+    if (!(missingByCode.get(company.code)?.length)) continue;
+    codes.push(company.code);
+    if (codes.length >= limit) break;
+  }
+  return codes;
+}
+
+export type CoverageBootstrapMode = 'bootstrap' | 'steady';
+
+/** After every enabled company with a gap has been hunted once, stop historical scans. */
+export function nextCoverageBootstrapState(input: {
+  mode: CoverageBootstrapMode;
+  expectedLatest: string;
+  currentLatest: string;
+  missingCompanyCodes: string[];
+  huntedCodes: string[];
+}) {
+  const hunted = input.expectedLatest === input.currentLatest ? new Set(input.huntedCodes) : new Set<string>();
+  const remainingToHunt = input.missingCompanyCodes.filter((code) => !hunted.has(code));
+  const reopen = input.expectedLatest !== input.currentLatest;
+  if (!remainingToHunt.length) {
+    return { mode: 'steady' as const, reopen, remainingToHunt, huntedCodes: [...hunted] };
+  }
+  return { mode: 'bootstrap' as const, reopen, remainingToHunt, huntedCodes: [...hunted] };
+}

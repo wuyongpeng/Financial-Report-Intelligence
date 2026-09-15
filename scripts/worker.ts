@@ -3,10 +3,11 @@ import { refreshAshareUniverse } from './refresh-ashare-universe';
 import { closeDb } from '../lib/db';
 import { ensureSchema } from '../lib/migrate';
 import { sendAlert } from '../lib/alerts';
-import { getIngestControl, isAutoCrawlEnabled } from '../lib/ingest-control';
-import { setDownloadGate } from '../lib/ingest-progress';
+import { getIngestControl } from '../lib/ingest-control';
+import { getGapScanState, setDownloadGate } from '../lib/ingest-progress';
 
 const intervalMs = Number(process.env.INGEST_INTERVAL_MS ?? 600_000);
+const bootstrapGapMs = Number(process.env.INGEST_BOOTSTRAP_GAP_MS ?? 90_000);
 const backlogIntervalMs = Number(process.env.INGEST_BACKLOG_INTERVAL_MS ?? 45_000);
 const days = Number(process.env.INGEST_DAYS ?? 2);
 const downloadLimit = Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2);
@@ -16,6 +17,7 @@ const downloadPauseMs = Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
 const maxPages = Number(process.env.INGEST_MAX_PAGES ?? 8);
 let busy = false;
 let discoverTimer: NodeJS.Timeout | undefined;
+let bootstrapTimer: NodeJS.Timeout | undefined;
 let backlogTimer: NodeJS.Timeout | undefined;
 let universeTimer: NodeJS.Timeout | undefined;
 let lastUniverseDay = '';
@@ -23,15 +25,9 @@ let lastUniverseDay = '';
 async function withLock(
   label: string,
   fn: () => Promise<unknown>,
-  opts?: { allowWhenPaused?: boolean },
 ) {
   if (busy) {
     console.info(`[worker] skip ${label}: busy`);
-    return;
-  }
-  const autoOn = await isAutoCrawlEnabled();
-  if (!autoOn && !opts?.allowWhenPaused) {
-    console.info(`[worker] auto crawl paused (${label})`);
     return;
   }
   busy = true;
@@ -47,42 +43,38 @@ async function withLock(
 }
 
 async function discoverTick() {
-  // Discover hits exchanges — skip entirely while auto is paused.
+  const control = await getIngestControl();
+  const autoOn = control.autoCrawlEnabled;
   await withLock('discover', async () => {
-    const feed = await runIngestion({ days, downloadLimit, parseLimit });
-    // Feed only covers recent days; backfill enabled companies still missing in-window filings.
-    const gaps = await fillCoverageGaps({ companyLimit: 2 });
-    return { feed, gaps };
+    const feed = await runIngestion({
+      days,
+      downloadLimit: autoOn ? downloadLimit : 0,
+      parseLimit,
+    });
+    const gaps = await fillCoverageGaps({
+      companyLimit: 8,
+      downloadLimit: 0,
+    });
+    return { feed, gaps, autoCrawlEnabled: autoOn, coverageMode: getGapScanState().mode };
   });
+}
+
+async function coverageBootstrapTick() {
+  if (getGapScanState().mode === 'steady') return;
+  await withLock('coverage-bootstrap', () => fillCoverageGaps({ companyLimit: 8, downloadLimit: 0 }));
 }
 
 async function backlogTick() {
   const control = await getIngestControl();
-  if (control.downloadPaused) {
-    setDownloadGate({ nextAt: null, pauseMs: Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200), mode: 'paused' });
-    // Pause: no PDF downloads; still parse already-downloaded.
-    await withLock(
-      'backlog-parse-only',
-      () => processBacklog({ downloadLimit: 0, parseLimit }),
-      { allowWhenPaused: true },
-    );
-    return;
-  }
   const autoOn = control.autoCrawlEnabled;
   if (!autoOn) {
-    // Auto off: still drain existing 排队下载 + 排队解析; do NOT discover / fill gaps.
-    await withLock(
-      'backlog-drain',
-      () => processBacklog({ downloadLimit, parseLimit }),
-      { allowWhenPaused: true },
-    );
+    setDownloadGate({ nextAt: null, pauseMs: Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200), mode: 'paused' });
+    await withLock('backlog-parse-hold-download', () => processBacklog({ downloadLimit: 0, parseLimit }));
     return;
   }
   await withLock('backlog', async () => {
     const processed = await processBacklog({ downloadLimit, parseLimit });
-    // 每轮 backlog 也补 1～2 家缺口，避免只靠 10 分钟 discover、队列长期为空
-    const gaps = await fillCoverageGaps({ companyLimit: 2, downloadLimit });
-    return { processed, gaps };
+    return { processed };
   });
 }
 
@@ -93,20 +85,17 @@ async function ashareUniverseTick() {
   const day = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   if (now.getHours() < 1) return;
   if (lastUniverseDay === day) return;
-  await withLock(
-    'ashare-universe',
-    async () => {
-      const result = await refreshAshareUniverse();
-      lastUniverseDay = day;
-      return result;
-    },
-    { allowWhenPaused: true },
-  );
+  await withLock('ashare-universe', async () => {
+    const result = await refreshAshareUniverse();
+    lastUniverseDay = day;
+    return result;
+  });
 }
 
 async function shutdown(signal: string) {
   console.info(`[worker] received ${signal}, shutting down`);
   if (discoverTimer) clearInterval(discoverTimer);
+  if (bootstrapTimer) clearInterval(bootstrapTimer);
   if (backlogTimer) clearInterval(backlogTimer);
   if (universeTimer) clearInterval(universeTimer);
   await closeDb();
@@ -122,10 +111,11 @@ async function main() {
   void ashareUniverseTick();
   backlogTimer = setInterval(() => void backlogTick(), backlogIntervalMs);
   discoverTimer = setInterval(() => void discoverTick(), intervalMs);
-  // 每 30 分钟检查一次：本地日历日 01:00 后跑一轮全 A 名录刷新（一天只跑一次）
+  bootstrapTimer = setInterval(() => void coverageBootstrapTick(), bootstrapGapMs);
   universeTimer = setInterval(() => { void ashareUniverseTick(); }, 30 * 60 * 1000);
+  const coverage = getGapScanState();
   console.info(
-    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms; days=${days} downloadLimit=${downloadLimit} parseLimit=${parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${downloadPauseMs} maxPages=${maxPages}; ashare-universe daily after 01:00`,
+    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms, coverage-bootstrap every ${bootstrapGapMs}ms (until steady); days=${days} downloadLimit=${downloadLimit} parseLimit=${parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${downloadPauseMs} maxPages=${maxPages}; coverageMode=${coverage.mode}; ashare-universe daily after 01:00`,
   );
 }
 

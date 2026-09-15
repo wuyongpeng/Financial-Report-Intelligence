@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { change, comparableHistory, keyFindings, moduleForQuestion, priorYear, profitBridge, sourceRange, type Report } from '../lib/detail-model';
+import { change, comparableHistory, keyFindings, moduleForQuestion, period, periodConclusion, priorYear, profitBridge, sourceRange, type Report } from '../lib/detail-model';
 import { rankEvidence, unsupportedYears } from '../lib/chat-evidence';
 function report(id: string, period: string, value: number, type='annual', published='2026-04-01'): Report { return { id, code:'1',company_name:'测试',title:period,report_type:type,published_at:published,parsed_at:published,industry:'测试',status:'online',metrics:[{metric:'revenue',value,unit:'元',source_page:2,source_label:'营业收入',confidence:1,verified:1,period}] }; }
 test('history excludes later periods and other fiscal durations, deduplicates corrected filings',()=>{
@@ -12,6 +12,12 @@ test('history excludes later periods and other fiscal durations, deduplicates co
  assert.deepEqual(comparableHistory([q,report('q1','2025Q1',1,'quarterly')],q).map(r=>r.id),['q']);
  const corrected=report('corrected','2024FY',11,'annual','2026-05-01');
  assert.equal(comparableHistory([old,corrected,current],current)[0].id,'corrected');
+});
+test('period prefers 一季度 title over stale FY metric', () => {
+  const r = report('q1', '2026FY', 1, 'quarterly', '2026-04-29');
+  r.title = '美的集团2026年一季度报告';
+  r.metrics[0].period = '2026FY';
+  assert.equal(period(r), '2026Q1');
 });
 test('profit bridge reconciles positive and loss periods without fabricated allocation',()=>{
  for(const [r,p,pr,pp] of [[120,8,100,10],[80,-4,100,-10],[100,0,100,5]]) {
@@ -72,4 +78,18 @@ test('YoY headline uses two decimal places (Maotai-like revenue)', () => {
   assert.ok(rev);
   assert.ok(rev!.headline.includes('1.47'), `expected 1.47 in ${rev!.headline}`);
   assert.ok(!rev!.headline.includes('+1.5%'));
+});
+
+test('period conclusion stays within 50 characters', () => {
+  const metric = (name: string, value: number) => ({ metric: name as never, value, unit: '元', source_page: 6, source_label: name, confidence: 0.9, verified: 0, period: '' });
+  const build = (id: string, period: string, revenue: number, profit: number) => ({
+    id, code: '600000', company_name: '示例', title: period, report_type: 'annual', published_at: `${period.slice(0, 4)}-04-01`,
+    parsed_at: '2026-01-01', industry: '银行', status: 'online',
+    metrics: [{ ...metric('revenue', revenue), period }, { ...metric('net_profit', profit), period }],
+  });
+  const previous = build('prev', '2025FY', 1e10, 1e9);
+  const current = build('curr', '2026FY', 1.05e10, 4e8);
+  const text = periodConclusion([previous, current], current);
+  assert.ok([...text].length <= 50);
+  assert.ok(text.includes('归母净利润') || text.includes('营收'));
 });

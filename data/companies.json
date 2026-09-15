@@ -664,9 +664,9 @@
     "code": "002714",
     "name": "牧原股份",
     "exchange": "SZSE",
-    "industry": "待分类",
-    "sector": "其他",
-    "theme": "待分类",
+    "industry": "农林牧渔",
+    "sector": "消费",
+    "theme": "农林牧渔",
     "heat": "B",
     "weight": 60
   },
@@ -675,9 +675,9 @@
     "code": "300498",
     "name": "温氏股份",
     "exchange": "SZSE",
-    "industry": "待分类",
-    "sector": "其他",
-    "theme": "待分类",
+    "industry": "农林牧渔",
+    "sector": "消费",
+    "theme": "农林牧渔",
     "heat": "B",
     "weight": 60
   },
@@ -686,9 +686,9 @@
     "code": "600018",
     "name": "上港集团",
     "exchange": "SSE",
-    "industry": "待分类",
-    "sector": "其他",
-    "theme": "待分类",
+    "industry": "交通运输",
+    "sector": "周期",
+    "theme": "交通运输",
     "heat": "B",
     "weight": 60
   }

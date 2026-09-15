@@ -78,8 +78,8 @@ export default function OpsPage() {
   const limits = live?.limits ?? {};
 
   return (
-    <main className="app-shell" style={{ minHeight: '100dvh', background: '#f5f7fb' }}>
-      <section style={{ width: 'min(720px, calc(100% - 40px))', margin: '0 auto', padding: '24px 0 40px', color: '#203047' }}>
+    <main className="app-shell" style={{ minHeight: '100dvh' }}>
+      <section style={{ width: 'min(720px, calc(100% - 40px))', margin: '0 auto', padding: '24px 0 40px' }}>
         <p style={{ margin: '0 0 8px' }}>
           <Link href="/sources" style={{ color: '#3064db', textDecoration: 'none', fontWeight: 600 }}>← 返回数据采集</Link>
         </p>

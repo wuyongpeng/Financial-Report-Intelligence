@@ -7,6 +7,7 @@ import {
   parseHomeQuery,
   resolveListedCompany,
   parsePeriodHints,
+  stripQueryNoise,
   pickBestReport,
   reportMatchesPeriod,
 } from '../lib/home-search';
@@ -111,6 +112,23 @@ test('pickBestReport prefers matching period', () => {
   assert.equal(reportMatchesPeriod(reports[0], hint), false);
 });
 
+test('reportMatchesPeriod uses title when metric period is wrongly FY', () => {
+  const report = {
+    id: 'q',
+    code: '000333',
+    company_name: '美的集团',
+    title: '美的集团2026年一季度报告',
+    report_type: 'quarterly',
+    published_at: '2026-04-29',
+    parsed_at: '2026-04-30',
+    industry: '家电',
+    status: 'online',
+    metrics: [{ metric: 'revenue', value: 1, unit: '元', source_page: 1, source_label: null, confidence: 1, verified: 1, period: '2026FY' }],
+  } as Report;
+  assert.equal(reportMatchesPeriod(report, parsePeriodHints('2026Q1')), true);
+  assert.equal(reportMatchesPeriod(report, parsePeriodHints('2026年报')), false);
+});
+
 test('buildCompanyAskUrl', () => {
   assert.equal(
     buildCompanyAskUrl('600519', '增长是否缓慢', '2026H1'),
@@ -136,6 +154,24 @@ test('resolveListedCompany recognizes 沐曦股份 / 688802', () => {
   assert.equal(resolveListedCompany('沐曦股份')?.code, '688802');
   assert.equal(resolveListedCompany('688802')?.code, '688802');
   assert.equal(resolveListedCompany('沐曦股份(688802)')?.code, '688802');
+});
+
+test('resolveListedCompany recognizes short names and noisy questions', () => {
+  assert.equal(resolveListedCompany('美的')?.code, '000333');
+  assert.equal(resolveListedCompany('美的今年业绩怎么样')?.code, '000333');
+  assert.equal(resolveListedCompany('招行今年业绩怎样')?.code, '600036');
+  assert.equal(resolveListedCompany('000333今年')?.code, '000333');
+  assert.equal(resolveListedCompany('000333今年业绩怎样')?.code, '000333');
+  assert.equal(resolveListedCompany('茅台')?.code, '600519');
+  assert.equal(resolveListedCompany('燧原科技')?.code, '688801');
+});
+
+test('stripQueryNoise keeps short names / codes', () => {
+  assert.equal(stripQueryNoise('美的今年业绩怎么样'), '美的');
+  assert.equal(stripQueryNoise('招行今年业绩怎样'), '招行');
+  assert.equal(stripQueryNoise('000333今年'), '000333');
+  assert.equal(stripQueryNoise('000333今年业绩怎样'), '000333');
+  assert.equal(parsePeriodHints('美的今年业绩怎么样').year, new Date().getFullYear());
 });
 
 test('pickRecentPeriods newest first capped at 3', () => {

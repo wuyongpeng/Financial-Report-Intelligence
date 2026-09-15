@@ -14,7 +14,7 @@ import {
   type CrawlStats,
   type ParseStatus,
 } from '@/lib/crawl-display';
-import { matchesCompanyQuery } from '@/lib/company-query';
+import { parseHomeQuery, queryMatchesCompany } from '@/lib/home-search';
 import { periodMeetsAutoCutoff } from '@/lib/ingest-lookback';
 import './crawl-overview.css';
 
@@ -44,6 +44,13 @@ type LivePayload = {
   running: boolean;
   autoCrawlEnabled?: boolean;
   downloadPaused?: boolean;
+  coverageBootstrap?: {
+    mode: 'bootstrap' | 'steady';
+    missingPeriods: number;
+    missingCompanies: number;
+    hunted: number;
+    completedAt: string | null;
+  };
   downloadGate?: { nextAt: string | null; pauseMs: number; mode: string };
   lastPollAt: string | null;
   counts: {
@@ -58,6 +65,7 @@ type LivePayload = {
     ingested?: number;
     target_companies: number;
     download_failed: number;
+    downloading?: number;
   };
   downloadSlots: { used: number; max: number };
   parseSlots: { used: number; max: number };
@@ -163,19 +171,18 @@ function SourceDots({ health }: { health: SourceProbe[] | undefined }) {
         const meta = SOURCE_META[item.source] ?? { short: item.source, name: item.source, url: '#' };
         const ok = item.ok;
         const cls = ok === null ? 'unknown' : ok ? 'ok' : 'fail';
-        const status = ok === null ? '未检测' : ok ? '连通正常' : `异常${item.lastError ? ` · ${item.lastError}` : ''}`;
         return (
           <span key={item.source} className="co-sb-src">
-            <span className="co-sb-src-label">
+            <a
+              className="co-sb-src-label"
+              href={meta.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={meta.name}
+              aria-label={meta.name}
+            >
               {meta.short} <i className={`co-sb-dot ${cls}`} aria-hidden="true" />
-            </span>
-            <span className="co-sb-src-tip" role="tooltip">
-              <strong>{meta.name}</strong>
-              <em>{status}</em>
-              <a href={meta.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                打开官网 ↗
-              </a>
-            </span>
+            </a>
           </span>
         );
       })}
@@ -190,6 +197,34 @@ function sourceShort(source?: string | null) {
   if (source === 'SZSE') return '深交所';
   if (source === 'BSE') return '北交所';
   return source;
+}
+
+function PulseDot({ on }: { on: boolean }) {
+  if (!on) return null;
+  return <span className="co-pulse-dot" aria-hidden="true" />;
+}
+
+type OptimisticJob = {
+  key: string;
+  code: string;
+  name: string;
+  label: string;
+  period?: string;
+  stage: 'download' | 'parse';
+  bucket: 'queue' | 'active';
+};
+
+function jobCovered(
+  job: OptimisticJob,
+  items: Array<{ code: string; period?: string }>,
+) {
+  return items.some((item) => item.code === job.code && (!job.period || !item.period || item.period === job.period));
+}
+
+function holdOptimistic(startedAt: number, minMs = 1800) {
+  const remain = minMs - (Date.now() - startedAt);
+  if (remain <= 0) return Promise.resolve();
+  return new Promise<void>((resolve) => window.setTimeout(resolve, remain));
 }
 
 function QueuePopover({
@@ -433,10 +468,9 @@ export default function CrawlOverview() {
   const parseQueueBtnRef = useRef<HTMLButtonElement>(null);
   const parseActiveBtnRef = useRef<HTMLButtonElement>(null);
   const [autoCrawlEnabled, setAutoCrawlEnabled] = useState(true);
-  const [downloadPaused, setDownloadPaused] = useState(false);
   const [autoCrawlSaving, setAutoCrawlSaving] = useState(false);
   const [triggerMsg, setTriggerMsg] = useState('');
-  const [priorityCodes, setPriorityCodes] = useState<string[]>([]);
+  const [optimisticJobs, setOptimisticJobs] = useState<OptimisticJob[]>([]);
   const [rowTriggering, setRowTriggering] = useState<string | null>(null);
   const [actionConfirm, setActionConfirm] = useState<null | {
     mode: 'crawl' | 'parse';
@@ -483,9 +517,6 @@ export default function CrawlOverview() {
       if (typeof payload.autoCrawlEnabled === 'boolean') {
         setAutoCrawlEnabled(payload.autoCrawlEnabled);
       }
-      if (typeof payload.downloadPaused === 'boolean') {
-        setDownloadPaused(payload.downloadPaused);
-      }
     } catch {
       /* live bar is optional; coverage table still works */
     }
@@ -528,7 +559,7 @@ export default function CrawlOverview() {
 
 
   // 采集页打开时每 20s 软消化一轮积压（不替代 worker）。
-  // 自动关时 API 仍消化已有排队，但不补发现/缺口。
+  // 自动关时 API 只解析已下载 PDF，不从排队领取新下载。
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
@@ -562,22 +593,25 @@ export default function CrawlOverview() {
     || (live?.activeItems?.length ?? 0) > 0
     || (live?.counts.pending_download ?? 0) > 0
     || (live?.counts.pending_parse ?? 0) > 0
-    || priorityCodes.length > 0,
+    || (live?.downloadSlots.used ?? 0) > 0
+    || (live?.parseSlots.used ?? 0) > 0
+    || optimisticJobs.length > 0
+    || Boolean(rowTriggering),
   );
   useEffect(() => {
     if (!queueBusy) return;
-    // 有待下载时更勤快刷新，避免「抓取中」一闪而过看不见
-    const ms = (live?.counts.pending_download ?? 0) > 0 || (live?.downloadSlots.used ?? 0) > 0 ? 2_500 : 5_000;
+    const ms = optimisticJobs.length || (live?.counts.pending_download ?? 0) > 0 || (live?.downloadSlots.used ?? 0) > 0
+      ? 1_200
+      : 5_000;
     const timer = window.setInterval(() => {
       void refreshLive();
       void refreshCoverage();
     }, ms);
     return () => window.clearInterval(timer);
-  }, [queueBusy, refreshLive, refreshCoverage, live?.counts.pending_download, live?.downloadSlots.used]);
+  }, [queueBusy, refreshLive, refreshCoverage, live?.counts.pending_download, live?.downloadSlots.used, optimisticJobs.length]);
 
   useEffect(() => {
     if (!focusCode) return;
-    setPriorityCodes((prev) => [focusCode, ...prev.filter((c) => c !== focusCode)].slice(0, 12));
     setSearch((prev) => prev || focusCode);
     setExpanded(focusCode);
   }, [focusCode]);
@@ -596,13 +630,15 @@ export default function CrawlOverview() {
   }, [focusCode, loading, all.length]);
 
   const rows = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
+    const keyword = search.trim();
+    const parsed = parseHomeQuery(keyword);
+    const needle = parsed.companyQuery || keyword;
     let list = all.filter((item) => {
       if (source !== 'all' && item.source !== source) return false;
       if (onlyFailed && item.parseStatus !== 'failed') return false;
       if (onlyParsing && item.parseStatus !== 'parsing' && item.parseStatus !== 'queued') return false;
       if (!keyword) return true;
-      return matchesCompanyQuery(keyword, item);
+      return queryMatchesCompany(needle, item) || queryMatchesCompany(keyword, item);
     });
     list = [...list];
     if (timeSort !== 'default') {
@@ -618,13 +654,7 @@ export default function CrawlOverview() {
     return list;
   }, [all, search, source, onlyFailed, onlyParsing, timeSort]);
 
-  const queueCount = live?.counts.pending_download
-    ?? stats?.pending
-    ?? all.filter((c) => c.parseStatus === 'pending').length;
-  const downloadUsed = live?.downloadSlots.used ?? 0;
   const downloadMax = live?.downloadSlots.max ?? 2;
-  const parseUsed = live?.parseSlots.used
-    ?? all.filter((c) => c.parseStatus === 'parsing').length;
   const parseMax = live?.parseSlots.max ?? 1;
   const ingested = live
     ? (live.counts.ingested ?? ((live.counts.review ?? 0) + (live.counts.online ?? 0)))
@@ -632,6 +662,10 @@ export default function CrawlOverview() {
   const covered = stats?.covered ?? all.filter((c) => c.covered || c.parseStatus === 'completed').length;
   const universe = stats?.universe ?? live?.counts.target_companies ?? (all.length || 60);
   const paused = !autoCrawlEnabled;
+  const coverageReady = live?.coverageBootstrap?.mode === 'steady';
+  const coverageHint = coverageReady
+    ? '已初始化：默认只扫最近 2 天公告；下载与解析按排队继续。'
+    : `全量补齐中：已扫 ${live?.coverageBootstrap?.hunted ?? 0} 家，仍缺 ${live?.coverageBootstrap?.missingPeriods ?? '—'} 个 2025Q1+ 期次。`;
 
 
   function companyHref(item: CrawlCompanyCoverage) {
@@ -664,7 +698,6 @@ export default function CrawlOverview() {
         return;
       }
       setAutoCrawlEnabled(payload.autoCrawlEnabled ?? next);
-      if (typeof payload.downloadPaused === 'boolean') setDownloadPaused(payload.downloadPaused);
       setTriggerMsg(payload.note ?? (next ? '已开启自动抓取' : '已关闭自动抓取'));
       await refreshLive();
     } catch (err) {
@@ -674,40 +707,6 @@ export default function CrawlOverview() {
       window.setTimeout(() => setTriggerMsg(''), 4000);
     }
   }
-
-  async function toggleDownloadPause() {
-    const next = !downloadPaused;
-    setAutoCrawlSaving(true);
-    setTriggerMsg('');
-    try {
-      const response = await fetch('/api/crawl/control', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ downloadPaused: next }),
-      });
-      const payload = await response.json() as {
-        ok?: boolean; error?: string; downloadPaused?: boolean; autoCrawlEnabled?: boolean; note?: string;
-      };
-      if (!response.ok) {
-        setTriggerMsg(payload.error ?? '切换暂停抓取失败');
-        return;
-      }
-      setDownloadPaused(payload.downloadPaused ?? next);
-      if (typeof payload.autoCrawlEnabled === 'boolean') {
-        setAutoCrawlEnabled(payload.autoCrawlEnabled);
-      }
-      setTriggerMsg(payload.note ?? (next ? '已暂停抓取' : '已恢复下载'));
-      await refreshLive();
-    } catch (err) {
-      setTriggerMsg(`网络异常：${String(err)}`);
-    } finally {
-      setAutoCrawlSaving(false);
-      window.setTimeout(() => setTriggerMsg(''), 4000);
-    }
-  }
-
-
-
 
   function openPeriodPicker(mode: 'crawl' | 'parse', item: CrawlCompanyCoverage) {
     const all = item.periodStatuses ?? [];
@@ -825,9 +824,19 @@ export default function CrawlOverview() {
     const key = triggerKey('crawl', code, period);
     if (rowTriggering === key) return;
     const label = period ? `${name} ${period}` : `${name}（${code}）`;
+    const job: OptimisticJob = {
+      key,
+      code,
+      name,
+      label,
+      period,
+      stage: 'download',
+      bucket: 'active',
+    };
     setRowTriggering(key);
-    setPriorityCodes((prev) => (prev.includes(code) ? prev : [code, ...prev].slice(0, 8)));
+    setOptimisticJobs((prev) => [job, ...prev.filter((item) => item.key !== key)].slice(0, 12));
     setTriggerMsg(`正在抓取 ${label}…`);
+    void refreshLive();
     try {
       const response = await fetch('/api/crawl/trigger', {
         method: 'POST',
@@ -859,6 +868,9 @@ export default function CrawlOverview() {
     } catch (error) {
       setTriggerMsg(String(error));
     } finally {
+      // Keep the breathing dot visible briefly after a fast trigger returns.
+      await holdOptimistic(Date.now(), 1400);
+      setOptimisticJobs((prev) => prev.filter((item) => item.key !== key));
       setRowTriggering(null);
       window.setTimeout(() => setTriggerMsg(''), 6000);
     }
@@ -873,7 +885,17 @@ export default function CrawlOverview() {
     if (rowTriggering === key) return;
     const label = chosen?.period ? `${name} ${chosen.period}` : `${name}（${code}）`;
     setRowTriggering(key);
+    setOptimisticJobs((prev) => [{
+      key,
+      code,
+      name,
+      label,
+      period: chosen?.period,
+      stage: 'parse',
+      bucket: 'active',
+    }, ...prev.filter((item) => item.key !== key)].slice(0, 12));
     setTriggerMsg(`正在解析 ${label}…`);
+    void refreshLive();
     try {
       const response = await fetch('/api/crawl/trigger', {
         method: 'POST',
@@ -902,6 +924,8 @@ export default function CrawlOverview() {
     } catch (error) {
       setTriggerMsg(String(error));
     } finally {
+      await holdOptimistic(Date.now(), 1400);
+      setOptimisticJobs((prev) => prev.filter((item) => item.key !== key));
       setRowTriggering(null);
       window.setTimeout(() => setTriggerMsg(''), 6000);
     }
@@ -922,18 +946,8 @@ export default function CrawlOverview() {
   }
 
   const downloadQueueItems = useMemo(() => {
-    const priority = priorityCodes.map((code, i) => {
-      const hit = all.find((c) => c.code === code);
-      return {
-        code,
-        name: hit?.name ?? code,
-        label: hit?.name ?? code,
-        position: i + 1,
-        status: 'priority',
-      };
-    });
     const rest = (live?.queueItems ?? [])
-      .filter((q) => q.stage === 'download' && !priorityCodes.includes(q.code))
+      .filter((q) => q.stage === 'download')
       .map((q) => {
         const raw = typeof q.waitSec === 'number' ? q.waitSec : 0;
         const waitSec = Math.max(0, raw - queueWaitTick);
@@ -945,16 +959,29 @@ export default function CrawlOverview() {
           position: q.position,
           status: q.status,
           source: q.source,
-          reason: waitSec > 0 ? `约 ${waitSec}s 后可下载` : q.reason,
+          reason: waitSec > 0
+            ? (q.status === 'retry' ? `上次失败，${waitSec}s 后重试` : `约 ${waitSec}s 后可下载`)
+            : q.reason,
           waitSec: waitSec > 0 ? waitSec : undefined,
         };
       });
-    return [...priority, ...rest];
-  }, [priorityCodes, all, live?.queueItems, queueWaitTick]);
+    const extra = optimisticJobs
+      .filter((job) => job.stage === 'download' && job.bucket === 'queue' && !jobCovered(job, rest))
+      .map((job, i) => ({
+        code: job.code,
+        name: job.name,
+        label: job.label,
+        period: job.period,
+        position: i + 1,
+        status: 'queued',
+        reason: '刚加入排队，等待领取',
+      }));
+    return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
+  }, [optimisticJobs, live?.queueItems, queueWaitTick]);
 
   const parseQueueItems = useMemo(() => {
     const list = live?.pendingParseItems ?? live?.queueItems?.filter((q) => q.stage === 'parse') ?? [];
-    return list.map((q) => ({
+    const rest = list.map((q) => ({
       code: q.code,
       name: q.name,
       label: queueDisplayName(q),
@@ -964,10 +991,22 @@ export default function CrawlOverview() {
       source: q.source,
       reason: q.reason,
     }));
-  }, [live?.pendingParseItems, live?.queueItems]);
+    const extra = optimisticJobs
+      .filter((job) => job.stage === 'parse' && job.bucket === 'queue' && !jobCovered(job, rest))
+      .map((job, i) => ({
+        code: job.code,
+        name: job.name,
+        label: job.label,
+        period: job.period,
+        position: i + 1,
+        status: 'queued',
+        reason: '刚加入排队解析',
+      }));
+    return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
+  }, [optimisticJobs, live?.pendingParseItems, live?.queueItems]);
 
   const downloadingItems = useMemo(() => {
-    return (live?.activeItems ?? [])
+    const rest = (live?.activeItems ?? [])
       .filter((q) => q.stage === 'download')
       .map((q) => ({
         code: q.code,
@@ -980,11 +1019,23 @@ export default function CrawlOverview() {
         reason: q.reason,
         progress: q.progress,
       }));
-  }, [live?.activeItems]);
+    const extra = optimisticJobs
+      .filter((job) => job.stage === 'download' && job.bucket === 'active' && !jobCovered(job, [...rest, ...downloadQueueItems]))
+      .map((job, i) => ({
+        code: job.code,
+        name: job.name,
+        label: job.label,
+        period: job.period,
+        position: i + 1,
+        status: 'downloading',
+        reason: '正在下载指定财报…',
+      }));
+    return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
+  }, [optimisticJobs, live?.activeItems, downloadQueueItems]);
 
   const parsingItems = useMemo(() => {
     const list = live?.activeParseItems ?? (live?.activeItems ?? []).filter((q) => q.stage === 'parse');
-    return list.map((q) => ({
+    const rest = list.map((q) => ({
       code: q.code,
       name: q.name,
       label: queueDisplayName(q),
@@ -995,9 +1046,28 @@ export default function CrawlOverview() {
       reason: q.reason,
       progress: q.progress,
     }));
-  }, [live?.activeParseItems, live?.activeItems]);
+    const extra = optimisticJobs
+      .filter((job) => job.stage === 'parse' && job.bucket === 'active' && !jobCovered(job, rest))
+      .map((job, i) => ({
+        code: job.code,
+        name: job.name,
+        label: job.label,
+        period: job.period,
+        position: i + 1,
+        status: 'parsing',
+        reason: '正在解析指定财报…',
+      }));
+    return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
+  }, [optimisticJobs, live?.activeParseItems, live?.activeItems]);
 
-  const parseQueueCount = live?.counts.pending_parse ?? parseQueueItems.length;
+  const queueCount = Math.max(live?.counts.pending_download ?? 0, downloadQueueItems.length);
+  const downloadUsed = Math.max(live?.downloadSlots.used ?? 0, downloadingItems.length);
+  const parseUsed = Math.max(
+    live?.parseSlots.used ?? 0,
+    parsingItems.length,
+    all.filter((c) => c.parseStatus === 'parsing').length,
+  );
+  const parseQueueCount = Math.max(live?.counts.pending_parse ?? 0, parseQueueItems.length);
 
   return (
     <main className="app-shell co-shell">
@@ -1009,7 +1079,7 @@ export default function CrawlOverview() {
             {loading ? '加载中' : ''}
           </span>
           <div className="co-title-actions">
-            <label className={`co-auto-toggle ${!autoCrawlEnabled ? 'paused' : ''}`} title={autoCrawlEnabled ? '已开启：自动发现新公告并加入排队下载' : '已关闭：不再发现新公告/补缺口；已有排队仍会下载（除非暂停抓取）'}>
+            <label className={`co-auto-toggle ${!autoCrawlEnabled ? 'paused' : ''}`} title={autoCrawlEnabled ? (coverageReady ? '已开启：初始化完成，每 10 分钟只扫最近 2 天公告；排队下载与解析继续。' : '已开启：先全量补齐 2025Q1 及之后缺口，完成后再只扫最近 2 天公告。') : '已关闭：下载中任务会完成，排队不再自动开始下载；仍会定时扫描新公告与缺口'}>
               <span>自动抓取</span>
               <button
                 type="button"
@@ -1017,26 +1087,17 @@ export default function CrawlOverview() {
                 aria-checked={autoCrawlEnabled}
                 aria-label={autoCrawlEnabled ? '自动抓取：开' : '自动抓取：关'}
                 className={`co-switch ${autoCrawlEnabled ? 'on' : ''}`}
-                disabled={autoCrawlSaving || downloadPaused}
+                disabled={autoCrawlSaving}
                 onClick={() => void toggleAutoCrawl()}
               >
                 <span className="co-switch-knob" aria-hidden="true" />
               </button>
             </label>
-            <label className={`co-auto-toggle ${downloadPaused ? 'paused danger' : ''}`} title={downloadPaused ? '已暂停：停止新下载，排队不变也不再新增' : '关闭时正常下载排队任务'}>
-              <span>暂停抓取</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={downloadPaused}
-                aria-label={downloadPaused ? '暂停抓取：开' : '暂停抓取：关'}
-                className={`co-switch ${downloadPaused ? 'on danger' : ''}`}
-                disabled={autoCrawlSaving}
-                onClick={() => void toggleDownloadPause()}
-              >
-                <span className="co-switch-knob" aria-hidden="true" />
-              </button>
-            </label>
+            {live?.coverageBootstrap ? (
+            <span className={`co-coverage-mode ${coverageReady ? 'ready' : 'boot'}`} title={coverageHint}>
+              {coverageReady ? '已初始化 · 近2天' : '全量补齐中'}
+            </span>
+            ) : null}
             <span className="co-coverage">{covered}/{universe} 家已覆盖</span>
             <span className="co-ops-help" tabIndex={0} aria-label="采集参数说明">
               <svg className="co-ops-help-ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
@@ -1044,15 +1105,15 @@ export default function CrawlOverview() {
               </svg>
               <span className="co-ops-tip" role="tooltip">
                 <strong>采集说明</strong>
-                <p className="co-ops-tip-lead">自动抓取=发现新公告并入排队。暂停抓取=立刻停下载（排队不动）；开启暂停会顺带关掉自动抓取。</p>
+                <p className="co-ops-tip-lead">先全量补齐 2025Q1 及之后缺口：找到下载源进入排队下载，下完自动排队解析。全部扫过且不再缺可补期次后进入已初始化，默认只扫最近 2 天公告。关闭后仍扫描公告，但排队不再自动开始下载。</p>
                 <ul>
                   <li><em>自动抓取</em><span>{autoCrawlEnabled ? '开' : '关'}</span></li>
-                  <li><em>暂停抓取</em><span>{downloadPaused ? '开' : '关'}</span></li>
+                  <li><em>覆盖状态</em><span>{coverageReady ? '已初始化' : '全量补齐中'}</span></li>
                   <li><em>下载并发</em><span>{downloadMax}</span></li>
                   <li><em>解析并发</em><span>{parseMax}</span></li>
                   <li><em>轮询间隔</em><span>约 {Math.round((live?.limits?.intervalMs ?? 600_000) / 60000)} 分钟</span></li>
                   <li><em>超时</em><span>下载/解析各 5 分钟</span></li>
-                  <li><em>采集窗口</em><span>最早 2025Q1</span></li>
+                  <li><em>采集窗口</em><span>{coverageReady ? '近 2 天公告' : '最早 2025Q1'}</span></li>
                 </ul>
               </span>
             </span>
@@ -1071,6 +1132,7 @@ export default function CrawlOverview() {
                 aria-expanded={queuePopover === 'download'}
                 onClick={() => setQueuePopover((v) => (v === 'download' ? null : 'download'))}
               >
+                <PulseDot on={queueCount > 0} />
                 排队下载(<b>{queueCount}</b>)
               </button>
               <QueuePopover
@@ -1078,13 +1140,11 @@ export default function CrawlOverview() {
                 title="排队下载"
                 items={downloadQueueItems}
                 empty="暂无排队下载"
-                note={downloadPaused
-                  ? '下载已暂停：排队保持不变，不会进入下载中。'
-                  : (!autoCrawlEnabled
-                    ? '自动抓取已关：不再发现新公告；下列已有任务仍会进入「下载中」（看右侧倒计时）。'
-                    : (queueCount > 0 && downloadUsed === 0
-                      ? '下载槽空闲：下方倒计时为防封控间隔，到点后领取下载。'
-                      : undefined))}
+                note={!autoCrawlEnabled
+                  ? '自动抓取已关：排队任务暂不开始下载；下载中的会完成。仍会定时扫描新公告。'
+                  : (queueCount > 0 && downloadUsed === 0
+                    ? '下载槽空闲：下方倒计时为防封控间隔，到点后领取下载。'
+                    : undefined)}
                 onClose={() => setQueuePopover(null)}
                 anchorRef={dlQueueBtnRef}
               />
@@ -1099,6 +1159,7 @@ export default function CrawlOverview() {
                 title="点击查看下载中任务与来源"
                 onClick={() => setQueuePopover((v) => (v === 'downloading' ? null : 'downloading'))}
               >
+                <PulseDot on={downloadUsed > 0} />
                 下载中(<b>{downloadUsed}/{downloadMax}</b>)
               </button>
               <QueuePopover
@@ -1107,7 +1168,7 @@ export default function CrawlOverview() {
                 items={downloadingItems}
                 empty={queueCount > 0 ? '槽位空闲，排队等待 Worker 领取（约 20s/45s 一轮）' : '当前无下载任务'}
                 note={paused
-                  ? '自动抓取已关：不发现新公告，已有排队仍会进入下载槽。'
+                  ? '自动抓取已关：下载中的任务会完成，排队不再自动进入下载槽。'
                   : (queueCount > 0 && downloadUsed === 0 ? '有排队但下载槽空闲：等待 Worker 或本页软触发领取。' : undefined)}
                 onClose={() => setQueuePopover(null)}
                 anchorRef={dlActiveBtnRef}
@@ -1122,6 +1183,7 @@ export default function CrawlOverview() {
                 aria-expanded={queuePopover === 'parse'}
                 onClick={() => setQueuePopover((v) => (v === 'parse' ? null : 'parse'))}
               >
+                <PulseDot on={parseQueueCount > 0} />
                 排队解析(<b>{parseQueueCount}</b>)
               </button>
               <QueuePopover
@@ -1144,6 +1206,7 @@ export default function CrawlOverview() {
                 title="点击查看解析中任务"
                 onClick={() => setQueuePopover((v) => (v === 'parsing' ? null : 'parsing'))}
               >
+                <PulseDot on={parseUsed > 0} />
                 解析中(<b>{Math.min(parseUsed, parseMax)}/{parseMax}</b>)
               </button>
               <QueuePopover
@@ -1373,7 +1436,14 @@ export default function CrawlOverview() {
               {!rows.length && (
                 <tr>
                   <td colSpan={3}>
-                    <div className="co-empty">没有符合条件的抓取记录</div>
+                    <div className={`co-empty ${loading ? 'co-loading' : ''}`} role="status" aria-live="polite">
+                      {loading ? (
+                        <>
+                          <span className="co-loading-spin" aria-hidden="true" />
+                          正在加载…
+                        </>
+                      ) : '没有符合条件的抓取记录'}
+                    </div>
                   </td>
                 </tr>
               )}
@@ -1422,7 +1492,16 @@ export default function CrawlOverview() {
               </details>
             </article>
           ))}
-          {!rows.length && <div className="co-empty">没有符合条件的抓取记录</div>}
+          {!rows.length && (
+            <div className={`co-empty ${loading ? 'co-loading' : ''}`} role="status" aria-live="polite">
+              {loading ? (
+                <>
+                  <span className="co-loading-spin" aria-hidden="true" />
+                  正在加载…
+                </>
+              ) : '没有符合条件的抓取记录'}
+            </div>
+          )}
         </div>
       </section>
     </main>

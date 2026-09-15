@@ -17,8 +17,9 @@ import {
   type PeriodCollectState,
 } from '@/lib/crawl-display';
 import { getCrawlCoverage, getCrawlStats } from '@/lib/crawl-mock';
-import { periodFromTitle } from '@/lib/ingest-period';
+import { canonicalPeriodFromTitle } from '@/lib/ingest-period';
 import { expectedPeriodsThroughLatest, latestExpectedPeriod } from '@/lib/ingest-lookback';
+import { classifyFromName } from '@/lib/company-classify';
 
 export const dynamic = 'force-dynamic';
 
@@ -175,7 +176,12 @@ export async function GET() {
         `
       : [];
     metricsByAnnouncement = new Map<string, MetricRow[]>();
+    const tokenByAnn = new Map(
+      announcementPeriods.map((row) => [row.id, canonicalPeriodFromTitle(row.title, row.published_at)]),
+    );
     for (const metric of metrics) {
+      const token = tokenByAnn.get(metric.announcement_id);
+      if (token) metric.period = token;
       const list = metricsByAnnouncement.get(metric.announcement_id) ?? [];
       list.push(metric);
       metricsByAnnouncement.set(metric.announcement_id, list);
@@ -210,7 +216,7 @@ export async function GET() {
           return !row.has_roe;
         });
         return {
-          period: row.period || periodFromTitle(row.title, row.published_at),
+          period: canonicalPeriodFromTitle(row.title, row.published_at) || row.period,
           status: row.status,
           pdf_key: row.pdf_key,
           title: row.title,
@@ -282,13 +288,18 @@ export async function GET() {
       const anyDownloaded = rows.find((r) => r.downloaded_at || r.pdf_key);
       const anyParsed = rows.find((r) => r.parsed_at);
       const lastCrawlAt = ann?.discovered_at ?? ann?.published_at ?? fallbackLatest?.discovered_at ?? null;
+      const nameTags = (!company.industry || company.industry === '待分类')
+        ? classifyFromName(company.name)
+        : null;
+      const industry = nameTags?.industry ?? company.industry;
+      const industryGroup = mapIndustryGroup(industry, nameTags?.sector ?? meta?.sector);
 
       return {
         code: company.code,
         name: company.name,
-        industry: company.industry,
-        industryGroup: mapIndustryGroup(company.industry, meta?.sector),
-        theme: meta?.theme ?? meta?.industry ?? company.industry,
+        industry,
+        industryGroup,
+        theme: meta?.theme ?? meta?.industry ?? industry,
         exchange: company.exchange,
         covered: rows.length > 0 || Boolean(fallbackLatest),
         lastCrawlAt,

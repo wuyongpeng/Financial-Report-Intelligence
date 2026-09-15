@@ -2,9 +2,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 export type IngestControl = {
-  /** Discover new announcements / fill gaps into 排队下载 */
+  /** Scan + auto-identify PDFs and start concurrent downloads */
   autoCrawlEnabled: boolean;
-  /** Hard stop on PDF downloads (queue kept); also blocks adding new download tasks */
+  /** Hold auto-started downloads (queue kept). Inverted pair of autoCrawlEnabled. */
   downloadPaused: boolean;
 };
 
@@ -14,21 +14,23 @@ function controlPath() {
   return resolve(/* turbopackIgnore: true */ process.cwd(), 'data', 'ingest-control.json');
 }
 
+function normalize(autoCrawlEnabled: boolean, downloadPaused: boolean): IngestControl {
+  const on = autoCrawlEnabled && !downloadPaused;
+  return { autoCrawlEnabled: on, downloadPaused: !on };
+}
+
 export async function getIngestControl(): Promise<IngestControl> {
   try {
     const raw = await readFile(controlPath(), 'utf8');
     const parsed = JSON.parse(raw) as Partial<IngestControl>;
-    return {
-      autoCrawlEnabled: parsed.autoCrawlEnabled !== false,
-      downloadPaused: parsed.downloadPaused === true,
-    };
+    return normalize(parsed.autoCrawlEnabled !== false, parsed.downloadPaused === true);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ...DEFAULT_CONTROL };
     throw error;
   }
 }
 
-/** Merge patch with linkage: pause→auto off; auto on→pause off. */
+/** One switch: auto on ⇔ downloads run; auto off ⇔ hold queued downloads (scan continues). */
 export async function setIngestControl(patch: Partial<IngestControl>): Promise<IngestControl> {
   const cur = await getIngestControl();
   let autoCrawlEnabled = cur.autoCrawlEnabled;
@@ -36,14 +38,14 @@ export async function setIngestControl(patch: Partial<IngestControl>): Promise<I
 
   if (typeof patch.downloadPaused === 'boolean') {
     downloadPaused = patch.downloadPaused;
-    if (downloadPaused) autoCrawlEnabled = false;
+    autoCrawlEnabled = !downloadPaused;
   }
   if (typeof patch.autoCrawlEnabled === 'boolean') {
     autoCrawlEnabled = patch.autoCrawlEnabled;
-    if (autoCrawlEnabled) downloadPaused = false;
+    downloadPaused = !autoCrawlEnabled;
   }
 
-  const normalized: IngestControl = { autoCrawlEnabled, downloadPaused };
+  const normalized = normalize(autoCrawlEnabled, downloadPaused);
   const target = controlPath();
   await mkdir(dirname(target), { recursive: true });
   const temporary = `${target}.part`;
@@ -54,7 +56,7 @@ export async function setIngestControl(patch: Partial<IngestControl>): Promise<I
 
 export async function isAutoCrawlEnabled(): Promise<boolean> {
   const control = await getIngestControl();
-  return control.autoCrawlEnabled && !control.downloadPaused;
+  return control.autoCrawlEnabled;
 }
 
 export async function isDownloadPaused(): Promise<boolean> {

@@ -3,7 +3,7 @@ import { ensureConversationOwner } from '@/lib/auth';
 import { apiError, ApiError, readObject, requiredText, uuid } from '@/lib/api';
 import { beginTurn, finishTurn, type AnswerResult, type MemoryMessage } from '@/lib/conversations';
 import { loadRagContext } from '@/lib/rag';
-import { generateAnswer } from '@/lib/answer';
+import { generateAnswer, parseAnswerRewrite } from '@/lib/answer';
 import { assembleFocusPrompt, focusContextBlock, parseFocus, QUESTION_MAX } from '@/lib/focus-prompt';
 
 export const dynamic = 'force-dynamic';
@@ -36,11 +36,12 @@ export async function POST(request: Request) {
       const block = focusContextBlock(focus);
       if (block) context.structuredContext = `${block}\n\n${context.structuredContext}`;
     }
+    const rewrite = parseAnswerRewrite(body.rewrite);
     const persist = async (result: AnswerResult) => {
       if (lease) await finishTurn(lease.owner, lease.conversationId, lease.requestId, result);
     };
     if (!body.stream) {
-      const result = replay ?? await generateAnswer(context!, history, request.signal);
+      const result = replay ?? await generateAnswer(context!, history, request.signal, undefined, rewrite);
       await persist(result);
       const headers = new Headers({ 'cache-control': 'no-store' });
       if (setCookie) headers.append('set-cookie', setCookie);
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
           const result = replay ?? await generateAnswer(context!, history, abort.signal, event => {
             if (event.content) emitted = true;
             emit(event);
-          });
+          }, rewrite);
           await persist(result);
           if (!emitted) emit({ content: result.answer });
           // Final result replaces provisional deltas if validation required a fallback.

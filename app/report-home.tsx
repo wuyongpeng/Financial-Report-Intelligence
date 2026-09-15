@@ -17,15 +17,14 @@ import {
 import {
   buildCompanyAskUrl,
   coverageHasMatchingReport,
-  hasQuestionIntent,
   matchCompany,
   parseHomeQuery,
+  queryMatchesCompany,
   resolveListedCompany,
   periodLabelZh,
   pickBestReport,
   type ParsedPeriod,
 } from '@/lib/home-search';
-import { matchesCompanyQuery } from '@/lib/company-query';
 import type { Report } from '@/lib/detail-model';
 import './report-home.css';
 
@@ -56,7 +55,7 @@ function deltaLabel(n: number | undefined) {
 }
 
 function matchKeyword(item: CrawlCompanyCoverage, keyword: string) {
-  return matchesCompanyQuery(keyword, item);
+  return queryMatchesCompany(keyword, item);
 }
 
 function isConnected(item: CrawlCompanyCoverage) {
@@ -269,11 +268,23 @@ export default function ReportHome() {
 
   const starredSet = useMemo(() => new Set(starred), [starred]);
 
-  const liveFilter = !hasQuestionIntent(search);
-  const keyword = liveFilter ? search.trim().toLowerCase() : '';
+  const parsedSearch = useMemo(() => parseHomeQuery(search), [search]);
+  const recognizedListed = useMemo(() => {
+    const raw = search.trim();
+    if (!raw) return null;
+    return resolveListedCompany(raw) ?? resolveListedCompany(parsedSearch.companyQuery || raw);
+  }, [search, parsedSearch.companyQuery]);
+  const keyword = search.trim();
   const filtered = useMemo(() => {
-    let rows = coverage.filter((item) => matchKeyword(item, keyword));
-    if (industry !== '全部') rows = rows.filter((item) => item.industryGroup === industry);
+    let rows = coverage;
+    if (recognizedListed) {
+      rows = coverage.filter((item) => item.code === recognizedListed.code);
+    } else if (keyword) {
+      rows = coverage.filter((item) => matchKeyword(item, parsedSearch.companyQuery || keyword));
+      // Free-text questions without a resolvable company keep the full card grid.
+      if (parsedSearch.hasQuestionIntent && !parsedSearch.companyQuery) rows = coverage;
+    }
+    if (industry !== '全部' && !recognizedListed) rows = rows.filter((item) => item.industryGroup === industry);
     rows = [...rows];
 
     if (listSort && viewMode === 'list') {
@@ -314,7 +325,7 @@ export default function ReportHome() {
     // Starred companies first; keep relative order within each group.
     rows.sort((a, b) => Number(starredSet.has(b.code)) - Number(starredSet.has(a.code)));
     return rows;
-  }, [coverage, keyword, industry, sortMode, listSort, viewMode, starredSet]);
+  }, [coverage, keyword, industry, sortMode, listSort, viewMode, starredSet, recognizedListed, parsedSearch]);
 
   const gridCols = viewMode === 'list' ? 1 : 3;
   const initialRows = 3;
@@ -606,11 +617,10 @@ export default function ReportHome() {
     }
   }
 
-  const filtering = Boolean(keyword || industry !== '全部');
-  const listedOutsidePool = (() => {
-    if (!search.trim() || filtered.length) return null;
-    return resolveListedCompany(search.trim()) ?? resolveListedCompany(parseHomeQuery(search.trim()).companyQuery || search.trim());
-  })();
+  const listedOutsidePool = recognizedListed
+    && !coverage.some((item) => item.code === recognizedListed.code)
+    ? recognizedListed
+    : null;
 
   return (
     <section className="rh-home">
