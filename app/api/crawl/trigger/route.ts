@@ -1,6 +1,6 @@
 import { fillCoverageGaps, processBacklog, prioritizeCompanyCrawl, runIngestion } from '@/lib/ingest';
 import { demoAccessEnabled, isAppUser } from '@/lib/auth';
-import { isAutoCrawlEnabled } from '@/lib/ingest-control';
+import { getIngestControl } from '@/lib/ingest-control';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,16 +40,27 @@ export async function POST(request: Request) {
   const announcementIds = Array.isArray(body.announcementIds)
     ? body.announcementIds.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(0, 10)
     : [];
-  const paused = !(await isAutoCrawlEnabled());
+  const control = await getIngestControl();
+  const paused = !control.autoCrawlEnabled || control.downloadPaused;
+  const downloadPaused = control.downloadPaused;
 
-  // Paused blocks auto discover/download (anti 封控). Still allow:
-  // - parse-only of already-downloaded PDFs
-  // - explicit fullHistory / 数据采集 manual crawl
-  if (paused && !fullHistory && !parseOnly && (discover || codes.length)) {
+  if (downloadPaused && !parseOnly && (discover || codes.length)) {
     return Response.json(
       {
         ok: false,
-        error: '自动抓取已暂停，请先在「数据源采集」开启自动抓取；解析已下载 PDF 不受影响。',
+        error: '下载已暂停：请先关闭「暂停抓取」后再下载；解析已下载 PDF 不受影响。',
+        downloadPaused: true,
+      },
+      { status: 409, headers: { 'cache-control': 'no-store' } },
+    );
+  }
+
+  // Auto off blocks discover / gap fill (not draining existing queue).
+  if (!control.autoCrawlEnabled && !downloadPaused && !fullHistory && !parseOnly && (discover || (codes.length && body.mode === 'discover'))) {
+    return Response.json(
+      {
+        ok: false,
+        error: '自动抓取已关闭，请先开启自动抓取；已有排队仍会消化，解析已下载 PDF 不受影响。',
         paused: true,
       },
       { status: 409, headers: { 'cache-control': 'no-store' } },
@@ -93,20 +104,23 @@ export async function POST(request: Request) {
     }
 
     const result = await processBacklog({
-      downloadLimit: paused ? 0 : 1,
+      downloadLimit: downloadPaused ? 0 : 1,
       parseLimit: 1,
       fullHistory,
     });
-    const gaps = paused
+    const gaps = (!control.autoCrawlEnabled || downloadPaused)
       ? { filled: 0, codes: [] as string[] }
       : await fillCoverageGaps({ companyLimit: 2, downloadLimit: 1 });
     return Response.json({
-      mode: paused ? 'parse-only' : 'backlog',
+      mode: downloadPaused ? 'paused' : (!control.autoCrawlEnabled ? 'backlog-drain' : 'backlog'),
       auth,
-      paused,
-      note: paused
-        ? '自动抓取已暂停：仅解析已下载 PDF，未向交易所发起新下载。'
-        : `温和模式：下载/解析各限流；本轮补发现 ${gaps.filled} 家缺口公司。`,
+      paused: !control.autoCrawlEnabled,
+      downloadPaused,
+      note: downloadPaused
+        ? '下载已暂停：排队保持不变，本轮不发起新下载。'
+        : (!control.autoCrawlEnabled
+          ? '自动抓取已关：不发现新公告，正在消化已有排队下载/解析。'
+          : `温和模式：下载/解析各限流；本轮补发现 ${gaps.filled} 家缺口公司。`),
       ...result,
       gaps,
       ok: true,

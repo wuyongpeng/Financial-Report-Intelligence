@@ -1,16 +1,14 @@
 import { periodFromTitle } from './ingest-period';
 
 /**
- * Default auto-collect cutoff: previous calendar year’s H1 / Q2 (半年报).
- *
- * Example (today = Sep 2026): enqueue from 2025H1 / 2025Q2 onward
- * (2025Q3, 2025FY, 2026Q1, 2026H1, 2026Q3 when filed) — never 2024 or earlier.
- * 2025Q1 is before last year’s H1, so it is also excluded from auto collect.
- *
- * Manual crawl on 数据采集 (`fullHistory`) skips this filter.
+ * Absolute collect floor: never discover/download filings older than 2025Q1.
+ * Applies to auto worker and 数据采集 manual crawl alike.
  */
-export function autoCutoffPeriod(now = new Date()): string {
-  return `${now.getFullYear() - 1}H1`;
+export const COLLECT_MIN_PERIOD = '2025Q1';
+
+/** @deprecated alias — keep call sites working */
+export function autoCutoffPeriod(_now = new Date()): string {
+  return COLLECT_MIN_PERIOD;
 }
 
 /** Same ranking as crawl-display.periodTokenKey (H1 ≡ Q2). */
@@ -20,22 +18,23 @@ export function periodRank(token: string): number {
   return year * 10 + quarter;
 }
 
-export function periodMeetsAutoCutoff(period: string, now = new Date()): boolean {
-  return periodRank(period) >= periodRank(autoCutoffPeriod(now));
+export function periodMeetsAutoCutoff(period: string, _now = new Date()): boolean {
+  return periodRank(period) >= periodRank(COLLECT_MIN_PERIOD);
 }
 
 export function announcementMeetsAutoCutoff(title: string, publishedAt: unknown, now = new Date()): boolean {
   return periodMeetsAutoCutoff(periodFromTitle(title, publishedAt), now);
 }
 
-/** Search window wide enough to reach previous-year H1 filings (typically from June of that year). */
+/** Search window from 2025-01-01 (covers 2025Q1 filings). */
 export function autoCollectSearchDays(now = new Date()): number {
-  const start = new Date(now.getFullYear() - 1, 5, 1);
+  const start = new Date(2025, 0, 1);
   const days = Math.ceil((now.getTime() - start.getTime()) / 86400000) + 21;
-  return Math.min(Math.max(days, 180), 800);
+  return Math.min(Math.max(days, 120), 900);
 }
 
-export const MANUAL_HISTORY_DAYS = 365 * 8;
+/** Manual history also stops at 2025Q1 — same day window as auto. */
+export const MANUAL_HISTORY_DAYS = autoCollectSearchDays();
 
 /**
  * A-share “latest expected” period for coverage UI (not a hard filing deadline).
@@ -51,7 +50,7 @@ export function latestExpectedPeriod(now = new Date()): string {
 }
 
 export function expectedPeriodsThroughLatest(now = new Date()): string[] {
-  const cutoff = autoCutoffPeriod(now);
+  const cutoff = COLLECT_MIN_PERIOD;
   const latest = latestExpectedPeriod(now);
   const tokens: string[] = [];
   const startYear = Number(cutoff.slice(0, 4));

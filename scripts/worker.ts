@@ -3,7 +3,8 @@ import { refreshAshareUniverse } from './refresh-ashare-universe';
 import { closeDb } from '../lib/db';
 import { ensureSchema } from '../lib/migrate';
 import { sendAlert } from '../lib/alerts';
-import { isAutoCrawlEnabled } from '../lib/ingest-control';
+import { getIngestControl, isAutoCrawlEnabled } from '../lib/ingest-control';
+import { setDownloadGate } from '../lib/ingest-progress';
 
 const intervalMs = Number(process.env.INGEST_INTERVAL_MS ?? 600_000);
 const backlogIntervalMs = Number(process.env.INGEST_BACKLOG_INTERVAL_MS ?? 45_000);
@@ -56,12 +57,23 @@ async function discoverTick() {
 }
 
 async function backlogTick() {
-  const autoOn = await isAutoCrawlEnabled();
-  if (!autoOn) {
-    // Paused = no new downloads; still drain 待解析 from local PDFs.
+  const control = await getIngestControl();
+  if (control.downloadPaused) {
+    setDownloadGate({ nextAt: null, pauseMs: Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200), mode: 'paused' });
+    // Pause: no PDF downloads; still parse already-downloaded.
     await withLock(
-      'backlog-parse',
+      'backlog-parse-only',
       () => processBacklog({ downloadLimit: 0, parseLimit }),
+      { allowWhenPaused: true },
+    );
+    return;
+  }
+  const autoOn = control.autoCrawlEnabled;
+  if (!autoOn) {
+    // Auto off: still drain existing 排队下载 + 排队解析; do NOT discover / fill gaps.
+    await withLock(
+      'backlog-drain',
+      () => processBacklog({ downloadLimit, parseLimit }),
       { allowWhenPaused: true },
     );
     return;

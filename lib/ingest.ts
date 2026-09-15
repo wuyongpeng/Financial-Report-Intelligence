@@ -15,7 +15,9 @@ import {
 } from './ingest-lookback';
 import {
   clearIngestProgress,
+  listIngestProgress,
   patchIngestProgress,
+  setDownloadGate,
   setIngestProgress,
 } from './ingest-progress';
 
@@ -252,15 +254,15 @@ export async function processBacklog(options: {
         const token = periodFromTitle(record.title, record.published_at).toUpperCase();
         if (!periodFilter.has(token)) continue;
       }
-      // Auto policy: do not download filings older than last year's H1/Q2.
-      // Already-downloaded PDFs may still be parsed. Manual fullHistory skips this.
-      if (!fullHistory && !record.pdf_key && !announcementMeetsAutoCutoff(record.title, record.published_at)) {
+      // Never download filings older than 2025Q1 (auto + manual).
+      // Already-downloaded PDFs may still be parsed.
+      if (!record.pdf_key && !announcementMeetsAutoCutoff(record.title, record.published_at)) {
         skippedCutoff += 1;
         // 离开自动排队：否则会永远显示在「排队下载」却从不下载
         await db`
           UPDATE announcements
           SET status='auto_skipped',
-              parse_error='早于自动回溯窗口（去年 H1/Q2 起），不自动下载；可在数据采集行内手动抓取',
+              parse_error='早于采集窗口（最早 2025Q1），跳过下载',
               updated_at=NOW()
           WHERE id=${record.id} AND status IN ('discovered', 'download_failed')
         `;
@@ -321,7 +323,13 @@ export async function processBacklog(options: {
         patchIngestProgress(record.id, { detail: '下载完成，准备解析…' });
         downloaded += 1;
         if (downloaded < downloadLimit) {
-          await new Promise((resolve) => setTimeout(resolve, withDownloadJitter(pauseBetweenDownloads)));
+          const wait = withDownloadJitter(pauseBetweenDownloads);
+          setDownloadGate({
+            nextAt: new Date(Date.now() + wait).toISOString(),
+            pauseMs: pauseBetweenDownloads,
+            mode: 'inter-download',
+          });
+          await new Promise((resolve) => setTimeout(resolve, wait));
         }
         // Fall through: same-tick parse when parseLimit allows (bytes already in memory).
       } else if (pdfKey && parsed < parseLimit) {
@@ -432,6 +440,19 @@ export async function processBacklog(options: {
       }
     }
   }
+  const pendingLeft = Math.max(0, downloadCandidates.length - downloaded);
+  if (pendingLeft > 0 && downloaded >= downloadLimit) {
+    const roundMs = Number(process.env.INGEST_BACKLOG_INTERVAL_MS ?? 45_000);
+    const softMs = 20_000;
+    const wait = Math.max(pauseBetweenDownloads, Math.min(roundMs, softMs));
+    setDownloadGate({
+      nextAt: new Date(Date.now() + wait).toISOString(),
+      pauseMs: wait,
+      mode: 'inter-round',
+    });
+  } else if (downloaded > 0 || parsed > 0) {
+    setDownloadGate({ nextAt: null, pauseMs: pauseBetweenDownloads, mode: 'idle' });
+  }
   return { backlog: backlog.length, downloaded, parsed, failed, skippedCutoff, downloadCandidates: downloadCandidates.length, parseCandidates: parseCandidates.length };
 }
 
@@ -455,10 +476,9 @@ export async function runIngestion(options: {
     await updateSourceHealth(fetched.health, startedAt);
     const failedSources = Object.entries(fetched.health).filter(([, state]) => !state.ok);
     if (failedSources.length) await sendAlert('财报公告源采集异常', { sources: failedSources.map(([source, state]) => ({ source, error: state.error })) });
-    // Default auto-collect: previous calendar year H1/Q2 onward. Manual fullHistory keeps older filings.
+    // Collect from 2025Q1 onward only (auto + manual).
     const relevant = fetched.announcements.filter((item) => {
       if (!enabledCompanies.has(item.code)) return false;
-      if (options.fullHistory) return true;
       return announcementMeetsAutoCutoff(item.title, item.publishedAt);
     });
     const cutoff = new Date(Date.now() - (days + 1) * 86400000).toISOString();
@@ -601,10 +621,14 @@ export async function prioritizeCompanyCrawl(codes: string[], options: {
       }
 
       const foundRaw = await fetchReportsForCode(code, name, days);
-      // Auto: skip periods before last year's H1/Q2. Manual fullHistory on 数据采集 goes further.
-      const found = fullHistory
-        ? foundRaw
-        : foundRaw.filter((item) => announcementMeetsAutoCutoff(item.title, item.publishedAt));
+      const periodWanted = new Set((options.periods ?? []).map((p) => p.toUpperCase()));
+      // Skip periods before 2025Q1; if user picked specific periods, only enqueue those.
+      const found = foundRaw.filter((item) => {
+        if (!announcementMeetsAutoCutoff(item.title, item.publishedAt)) return false;
+        if (!periodWanted.size) return true;
+        const token = periodFromTitle(item.title, item.publishedAt).toUpperCase();
+        return periodWanted.has(token);
+      });
       discovered += found.length;
       for (const item of found) {
         const id = await logicalId(item);
@@ -627,7 +651,8 @@ export async function prioritizeCompanyCrawl(codes: string[], options: {
       downloadLimit,
       parseLimit,
       codes: unique,
-      fullHistory,
+      // Period-scoped crawl must not revive other auto_skipped filings for this code.
+      fullHistory: fullHistory && !(options.periods?.length),
       periods: options.periods,
       announcementIds: options.announcementIds,
     });

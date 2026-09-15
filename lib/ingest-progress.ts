@@ -67,3 +67,33 @@ export function listIngestProgress(): IngestProgressItem[] {
   if (dirty) writeAll(all);
   return Object.values(all).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
+
+export type DownloadGate = {
+  nextAt: string | null;
+  pauseMs: number;
+  mode: 'inter-download' | 'inter-round' | 'paused' | 'idle';
+};
+
+const GATE_FILE = join(process.cwd(), '.data', 'ingest-download-gate.json');
+
+export function getDownloadGate(): DownloadGate {
+  try {
+    return JSON.parse(readFileSync(GATE_FILE, 'utf8')) as DownloadGate;
+  } catch {
+    return { nextAt: null, pauseMs: 1200, mode: 'idle' };
+  }
+}
+
+export function setDownloadGate(gate: DownloadGate) {
+  mkdirSync(dirname(GATE_FILE), { recursive: true });
+  writeFileSync(GATE_FILE, JSON.stringify(gate));
+}
+
+export function clearDownloadGate() {
+  setDownloadGate({ nextAt: null, pauseMs: downloadPauseDefault(), mode: 'idle' });
+}
+
+function downloadPauseDefault() {
+  const base = Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
+  return Number.isFinite(base) ? Math.max(400, base) : 1200;
+}

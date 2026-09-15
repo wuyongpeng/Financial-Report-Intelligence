@@ -2,7 +2,7 @@ import { getDb } from '@/lib/db';
 import { apiError } from '@/lib/api';
 import { getIngestControl } from '@/lib/ingest-control';
 import { periodFromTitle } from '@/lib/ingest-period';
-import { listIngestProgress } from '@/lib/ingest-progress';
+import { getDownloadGate, listIngestProgress } from '@/lib/ingest-progress';
 
 export const dynamic = 'force-dynamic';
 
@@ -157,9 +157,29 @@ export async function GET() {
       LIMIT 8
     `;
 
+    const downloadGate = getDownloadGate();
+    const gateWaitSec = downloadGate.nextAt
+      ? Math.max(0, Math.ceil((new Date(downloadGate.nextAt).getTime() - Date.now()) / 1000))
+      : 0;
+    const pauseMs = downloadGate.pauseMs || Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
+
     const queueItems = [
       ...downloadQueue.map((row, i) => {
         const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
+        let reason = '';
+        let waitSec: number | undefined;
+        if (control.downloadPaused) {
+          reason = '下载已暂停';
+        } else if (row.status === 'download_failed') {
+          reason = '上次失败，等待重试';
+        } else if (downloadSlots.used >= downloadSlots.max) {
+          reason = i === 0 ? '等待下载槽空闲' : `排队第 ${i + 1} 位`;
+        } else {
+          const unit = Math.max(1, Math.ceil(pauseMs / 1000));
+          const base = gateWaitSec > 0 ? gateWaitSec : (downloadGate.mode === 'inter-round' || downloadGate.mode === 'inter-download' ? unit : 0);
+          waitSec = base + i * unit;
+          reason = waitSec > 0 ? `约 ${waitSec}s 后可下载` : (i === 0 ? '即将领取' : `排队第 ${i + 1} 位`);
+        }
         return {
           code: row.code,
           name: row.company_name,
@@ -170,6 +190,8 @@ export async function GET() {
           position: i + 1,
           title: row.title,
           source: row.source,
+          reason,
+          waitSec,
         };
       }),
       ...parseQueue.map((row, i) => {
@@ -178,7 +200,8 @@ export async function GET() {
         if (!row.pdf_key) reason = '缺少 PDF';
         else if (row.parse_error) reason = row.parse_error;
         else if (row.status === 'parse_partial') reason = '解析不完整，等待重试';
-        else if (!control.autoCrawlEnabled) reason = '自动抓取已关闭：仅消化已下载 PDF';
+        else if (control.downloadPaused) reason = '下载已暂停（解析仍可进行）';
+        else if (!control.autoCrawlEnabled) reason = i === 0 ? '自动已关：仍消化解析排队' : `排队第 ${i + 1} 位`;
         else if (i === 0) reason = '即将解析';
         else reason = `排队第 ${i + 1} 位`;
         return {
@@ -281,6 +304,8 @@ export async function GET() {
       mode: 'live',
       running,
       autoCrawlEnabled: control.autoCrawlEnabled,
+      downloadPaused: control.downloadPaused,
+      downloadGate,
       workerHint: running ? 'ingest_run' : 'idle',
       lastPollAt: latestRun?.finished_at ?? latestRun?.started_at ?? null,
       counts,
