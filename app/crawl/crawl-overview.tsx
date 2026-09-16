@@ -884,8 +884,7 @@ export default function CrawlOverview() {
     const key = triggerKey('parse', code, chosen?.period, chosen?.announcementId);
     if (rowTriggering === key) return;
     const label = chosen?.period ? `${name} ${chosen.period}` : `${name}（${code}）`;
-    setRowTriggering(key);
-    setOptimisticJobs((prev) => [{
+    const job: OptimisticJob = {
       key,
       code,
       name,
@@ -893,7 +892,9 @@ export default function CrawlOverview() {
       period: chosen?.period,
       stage: 'parse',
       bucket: 'active',
-    }, ...prev.filter((item) => item.key !== key)].slice(0, 12));
+    };
+    setRowTriggering(key);
+    setOptimisticJobs((prev) => [job, ...prev.filter((item) => item.key !== key)].slice(0, 12));
     setTriggerMsg(`正在解析 ${label}…`);
     void refreshLive();
     try {

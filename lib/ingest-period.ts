@@ -53,7 +53,7 @@ export function reportKindFromPeriod(period: string | null | undefined): FilingR
   return null;
 }
 
-export function isCanonicalPeriod(period: string | null | undefined): period is string {
+export function isCanonicalPeriod(period: string | null | undefined): boolean {
   return Boolean(period && /^20\d{2}(FY|H1|Q[1-3])$/.test(period));
 }
 

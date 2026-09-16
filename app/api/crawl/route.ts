@@ -54,7 +54,7 @@ function stateFromAnnouncement(
 }
 
 function buildPeriodStatuses(rows: Array<{
-  period: string; status: string | null; pdf_key: string | null; title: string | null;
+  period: string | null; status: string | null; pdf_key: string | null; title: string | null;
   hasMetrics: boolean; metricsComplete: boolean; missingMetrics?: CrawlPeriodStatus['missingMetrics'];
   parseError?: string | null; id?: string | null; source?: string | null;
   discoveredAt?: string | null; downloadedAt?: string | null; parsedAt?: string | null; publishedAt?: string | null;

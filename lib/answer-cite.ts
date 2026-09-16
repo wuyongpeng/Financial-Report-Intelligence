@@ -4,7 +4,7 @@ export type AnswerCiteToken =
 
 export function tokenizeAnswerCites(text: string): AnswerCiteToken[] {
   const normalized = text.replace(/(】)(?=【)/g, '$1 ').replace(/(\])(?=\[P)/g, '$1 ');
-  return normalized.split(/(【(?:E\d+|第\s*\d+\s*页)】|\[P\d+\])/g).flatMap((part) => {
+  return normalized.split(/(【(?:E\d+|第\s*\d+\s*页)】|\[P\d+\])/g).flatMap((part): AnswerCiteToken[] => {
     if (!part) return [];
     const marked = part.match(/^【(?:E(\d+)|第\s*(\d+)\s*页)】$/);
     if (marked) {
