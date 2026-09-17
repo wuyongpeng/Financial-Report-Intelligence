@@ -7,7 +7,6 @@ import { fetchAllSources, fetchCninfoReportsForCode, fetchReportsForCode } from 
 import { putReport, readReport, reportByteLength, reportPath } from './storage';
 import { sendAlert } from './alerts';
 import { hasCoreMetrics } from './metric-quality';
-import { refreshReportVerdict } from './report-verdict-store';
 import type { Announcement, Company } from './types';
 import { asIsoDate, buildCoveredPeriodKeys, isFullFinancialReport, pendingDownloadSkipMessage, pendingDownloadSkipReason, periodCoverageKey, periodFromTitle } from './ingest-period';
 import { DUPLICATE_PERIOD_KEEP_MESSAGE, duplicateIdsToSkip } from './period-dedupe';
@@ -623,9 +622,6 @@ export async function processBacklog(options: {
         });
         clearIngestProgress(record.id);
         parsed += 1;
-        // 概览是增强项：失败不回滚解析结果，也不占用 parsing 状态
-        void refreshReportVerdict(record.id).catch((error) =>
-          console.warn('[verdict] background generate failed', { id: record.id, error: String(error) }));
       }
     } catch (error) {
       failed += 1;

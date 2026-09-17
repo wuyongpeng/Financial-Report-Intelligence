@@ -8,6 +8,17 @@ const STALE_MS = 3 * 60 * 1000;
 const SLOT_WAIT_MS = 4 * 60 * 1000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
+export class LlmSlotBusyError extends Error {
+  constructor(message = 'LLM 槽位占用') {
+    super(message);
+    this.name = 'LlmSlotBusyError';
+  }
+}
+
+export function isLlmSlotBusyError(error: unknown) {
+  return error instanceof LlmSlotBusyError || (error instanceof Error && error.name === 'LlmSlotBusyError');
+}
+
 let tail: Promise<unknown> = Promise.resolve();
 
 function lockPath() {
@@ -65,10 +76,11 @@ function tryCreateLock(file: string) {
   writeFileSync(file, `${JSON.stringify({ pid: process.pid, at: Date.now() })}\n`, { flag: 'wx' });
 }
 
-async function acquireFileLock(signal?: AbortSignal) {
+async function acquireFileLock(signal?: AbortSignal, maxWaitMs = SLOT_WAIT_MS) {
   const file = lockPath();
   const started = Date.now();
-  while (Date.now() - started < SLOT_WAIT_MS) {
+  const budget = Number.isFinite(maxWaitMs) && maxWaitMs > 0 ? maxWaitMs : SLOT_WAIT_MS;
+  while (Date.now() - started < budget) {
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
     try {
       tryCreateLock(file);
@@ -83,6 +95,7 @@ async function acquireFileLock(signal?: AbortSignal) {
       await sleep(120 + Math.floor(Math.random() * 80), signal);
     }
   }
+  if (budget < SLOT_WAIT_MS) throw new LlmSlotBusyError();
   throw new Error('LLM 排队超时');
 }
 
@@ -185,11 +198,15 @@ async function fetchFromProvider(
 }
 
 /** One in-flight LLM call across this process and other local processes sharing the lock file. */
-export async function withLlmSlot<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+export async function withLlmSlot<T>(
+  fn: () => Promise<T>,
+  signal?: AbortSignal,
+  acquireTimeoutMs?: number,
+): Promise<T> {
   if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
   const run = tail.then(async () => {
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
-    await acquireFileLock(signal);
+    await acquireFileLock(signal, acquireTimeoutMs);
     try {
       return await fn();
     } finally {

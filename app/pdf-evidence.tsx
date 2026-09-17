@@ -107,9 +107,9 @@ function PageCanvas({
       }
     })();
     return () => { active = false; };
-    // Re-render when cite target lands on this page.
+    // Re-render when this page's cite highlight changes — not when the toolbar page follows scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdf, slot.page, highlightQuote, highlightPage]);
+  }, [pdf, slot.page, highlightQuote, highlightQuote ? highlightPage : 0]);
 
   const w = slot.width > 0 ? slot.width : 1;
   const h = slot.height > 0 ? slot.height : 1;
@@ -169,9 +169,20 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
   const resolveRef = useRef(onResolvePage);
   const pickRef = useRef(onTextPick);
   const visiblePageRef = useRef(onVisiblePage);
+  const pageRef = useRef(page);
+  const shiftedRef = useRef(shifted);
   const citeKey = useRef('');
   const suppressVisibleUntil = useRef(0);
   const lastReportedPage = useRef<number | null>(null);
+  const lockedCitePage = useRef(page);
+  const jumpSigRef = useRef(`${jumpNonce}::${quote}::${shifted ?? 'none'}`);
+  pageRef.current = page;
+  shiftedRef.current = shifted;
+  const jumpSig = `${jumpNonce}::${quote}::${shifted ?? 'none'}`;
+  if (jumpSigRef.current !== jumpSig) {
+    jumpSigRef.current = jumpSig;
+    lockedCitePage.current = shifted ?? page;
+  }
   const [docKey, setDocKey] = useState(reportId);
   if (reportId !== docKey) {
     setDocKey(reportId);
@@ -188,7 +199,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
   useEffect(() => { visiblePageRef.current = onVisiblePage; }, [onVisiblePage]);
   // Only mute follow-backs after an intentional jump (cite / 页码下拉), not scroll-follow page sync.
   useEffect(() => {
-    suppressVisibleUntil.current = Date.now() + 500;
+    suppressVisibleUntil.current = Date.now() + 800;
   }, [jumpNonce, quote]);
 
   // Load document once per reportId.
@@ -239,12 +250,14 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
   }, [reportId]);
 
   // Resolve cite page by quote search near requested page; seed visibility.
+  // Must not depend on `page`: scroll-follow updates the toolbar page and must not re-resolve or yank.
   useEffect(() => {
     if (!pdf || !numPages) return;
     let active = true;
-    const key = `${page}::${quote}`;
-    if (citeKey.current === key && shifted !== null) {
-      const around = shifted ?? page;
+    const requested = pageRef.current;
+    const key = `${jumpNonce}::${quote}`;
+    if (citeKey.current === key) {
+      const around = shiftedRef.current ?? requested;
       const id = window.setTimeout(() => {
         if (!active) return;
         setVisible((prev) => {
@@ -259,9 +272,9 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
     void (async () => {
       const needle = normalized(quote).slice(0, 40);
       const candidates = needle.length >= 4
-        ? [page, page - 1, page + 1, page - 2, page + 2].filter((p, i, all) => p >= 1 && p <= numPages && all.indexOf(p) === i)
-        : [Math.min(Math.max(1, page), numPages)];
-      let target = Math.min(Math.max(1, page), numPages);
+        ? [requested, requested - 1, requested + 1, requested - 2, requested + 2].filter((p, i, all) => p >= 1 && p <= numPages && all.indexOf(p) === i)
+        : [Math.min(Math.max(1, requested), numPages)];
+      let target = Math.min(Math.max(1, requested), numPages);
       for (const candidate of candidates) {
         try {
           const source = await pdf.getPage(candidate);
@@ -273,7 +286,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
         } catch { /* try next */ }
       }
       if (!active) return;
-      if (target !== page) {
+      if (target !== requested) {
         setShifted(target);
         resolveRef.current?.(target);
       } else {
@@ -286,7 +299,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
       });
     })();
     return () => { active = false; };
-  }, [pdf, numPages, page, quote, shifted]);
+  }, [pdf, numPages, quote, jumpNonce]);
 
   // Track ALL currently intersecting slots. IO only reports deltas — rebuilding from
   // the latest batch alone unmounts on-screen pages and paints the gray placeholders.
@@ -325,7 +338,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
 
     const rebuild = () => {
       const live = intersectingRef.current;
-      const cite = shifted ?? page;
+      const cite = shiftedRef.current ?? pageRef.current;
       const next = new Set<number>();
       const centers = live.size ? [...live] : [cite];
       if (!live.has(cite)) centers.push(cite);
@@ -374,18 +387,21 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
     const onScroll = () => { reportVisible(); };
     root.addEventListener('scroll', onScroll, { passive: true });
     return () => { observer.disconnect(); root.removeEventListener('scroll', onScroll); };
-  }, [numPages, slots.length, page, shifted]);
+    // Intentionally omit `page` / `shifted`: recreating the observer on toolbar page sync
+    // unmounts offscreen pages and the viewport jumps up while the wheel is moving.
+  }, [numPages, slots.length]);
 
   // Scroll into view only for intentional jumps / quote resolve — never when page came from onVisiblePage.
   useEffect(() => {
     if (busy || error || !slots.length) return;
-    const focus = shifted ?? page;
+    const focus = shifted ?? pageRef.current;
     const timer = window.setTimeout(() => {
       const stack = stackRef.current;
       const scroller = stack?.closest('.cd-source-scroll');
       if (!(scroller instanceof HTMLElement) || !stack) return;
       const node = stack.querySelector<HTMLElement>(`.cd-pdf-slot[data-pdf-page="${focus}"]`);
       if (!node) return;
+      suppressVisibleUntil.current = Date.now() + 800;
       const hy = highlightY.current;
       if (hy && hy.page === focus && hy.y !== null) {
         const canvas = node.querySelector('canvas');
@@ -401,7 +417,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
       scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 60);
     return () => window.clearTimeout(timer);
-  }, [busy, error, shifted, jumpNonce, quote, slots.length, page]);
+  }, [busy, error, shifted, jumpNonce, quote, slots.length]);
 
   // Text-layer划词 → parent pick bar (delegation on stack).
   useEffect(() => {
@@ -465,7 +481,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
                 pdf={pdf}
                 slot={slot}
                 highlightQuote={quote}
-                highlightPage={shifted ?? page}
+                highlightPage={quote ? (shifted ?? lockedCitePage.current) : 0}
                 onHighlightY={onHighlightY}
                 onReady={onReady}
               />

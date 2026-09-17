@@ -1,7 +1,7 @@
 import { getDb } from './db';
 import { ensureBackendSchema } from './backend-schema';
 import { acceptVerdictPayload, type ReportVerdict } from './report-verdict';
-import { generateReportVerdict } from './report-verdict-llm';
+import { generateReportVerdict, type VerdictGenerateOptions } from './report-verdict-llm';
 import { llmModelName } from './llm-providers';
 import { publicVerdictError } from './llm-error';
 
@@ -175,6 +175,102 @@ export async function listReportsNeedingVerdict(limit = 5000) {
     ORDER BY a.published_at DESC
     LIMIT ${cap}
   `;
+}
+
+export type VerdictQueueJob = {
+  id: string;
+  code: string;
+  company_name: string;
+  title: string;
+  published_at: string;
+};
+
+export async function countReportsNeedingVerdict() {
+  await ensureBackendSchema();
+  const [row] = await getDb()<Array<{ n: number }>>`
+    SELECT COUNT(*)::int AS n
+    FROM announcements a
+    JOIN companies c ON c.code=a.code AND c.enabled=true
+    LEFT JOIN report_verdicts v ON v.announcement_id=a.id
+    WHERE a.status IN ('review', 'online', 'parse_partial')
+      AND (v.announcement_id IS NULL OR v.status <> 'ready')
+  `;
+  return row?.n ?? 0;
+}
+
+export async function listDueVerdictJobs(limit = 12, failBackoffMs = 30 * 60_000) {
+  await ensureBackendSchema();
+  const cap = Math.min(Math.max(1, Math.floor(limit)), 80);
+  const failBackoffSec = Math.max(60, Math.floor(failBackoffMs / 1000));
+  return getDb()<VerdictQueueJob[]>`
+    SELECT a.id, a.code, a.company_name, a.title, a.published_at
+    FROM announcements a
+    JOIN companies c ON c.code=a.code AND c.enabled=true
+    LEFT JOIN report_verdicts v ON v.announcement_id=a.id
+    WHERE a.status IN ('review', 'online', 'parse_partial')
+      AND (
+        v.announcement_id IS NULL
+        OR (v.status = 'failed' AND v.updated_at < NOW() - ${failBackoffSec} * INTERVAL '1 second')
+        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '3 minutes')
+      )
+    ORDER BY a.published_at DESC
+    LIMIT ${cap}
+  `;
+}
+
+async function releaseQueueClaim(reportId: string, previous: VerdictRow | null) {
+  const db = getDb();
+  if (previous?.status === 'failed') {
+    await db`
+      UPDATE report_verdicts
+      SET status='failed', error=${previous.error}, model=${previous.model}, updated_at=${previous.updated_at}
+      WHERE announcement_id=${reportId} AND status='pending'
+    `;
+    return;
+  }
+  await db`
+    DELETE FROM report_verdicts
+    WHERE announcement_id=${reportId} AND status='pending' AND payload IS NULL
+  `;
+}
+
+export type QueuedVerdictOutcome = 'ok' | 'fail' | 'busy' | 'skip';
+
+/** One background job: never wait 4 minutes for another worker; yield if the LLM slot is taken. */
+export async function runQueuedVerdict(
+  reportId: string,
+  options: VerdictGenerateOptions = {},
+): Promise<{ outcome: QueuedVerdictOutcome; error: string | null }> {
+  const previous = await loadRow(reportId);
+  if (previous?.status === 'ready') return { outcome: 'skip', error: null };
+  if (previous?.status === 'pending' && !isStale(previous)) return { outcome: 'skip', error: null };
+  if (!(await reportExists(reportId))) return { outcome: 'skip', error: null };
+
+  const db = getDb();
+  await db`
+    INSERT INTO report_verdicts (announcement_id, status, generated_at, updated_at)
+    VALUES (${reportId}, 'pending', NOW(), NOW())
+    ON CONFLICT (announcement_id) DO UPDATE SET status='pending', error=NULL, updated_at=NOW()
+  `;
+  try {
+    const generated = await generateReportVerdict(reportId, options);
+    if (generated.ok) {
+      await markReady(reportId, generated.value);
+      return { outcome: 'ok', error: null };
+    }
+    if (generated.retryLater) {
+      await releaseQueueClaim(reportId, previous);
+      return { outcome: 'busy', error: generated.error };
+    }
+    await markFailed(reportId, publicVerdictError(generated.error));
+    return { outcome: 'fail', error: publicVerdictError(generated.error) };
+  } catch (error) {
+    const message = publicVerdictError(error instanceof Error ? error.message : String(error));
+    await markFailed(reportId, message);
+    return { outcome: 'fail', error: message };
+  } finally {
+    inflight.delete(reportId);
+  }
 }
 
 /** Force a new LLM call and overwrite the stored row on success. Keep the old ready payload if refresh fails. */

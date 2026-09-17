@@ -31,7 +31,7 @@ type QueueItem = {
   label?: string;
   period?: string;
   status: string;
-  stage: 'download' | 'parse';
+  stage: 'download' | 'parse' | 'verdict';
   position: number;
   title?: string;
   parseError?: string | null;
@@ -49,6 +49,7 @@ type QueueItem = {
 type LivePayload = {
   running: boolean;
   autoCrawlEnabled?: boolean;
+  autoVerdictEnabled?: boolean;
   downloadPaused?: boolean;
   coverageBootstrap?: {
     mode: 'bootstrap' | 'steady';
@@ -79,6 +80,16 @@ type LivePayload = {
   activeItems?: QueueItem[];
   activeParseItems?: QueueItem[];
   pendingParseItems?: QueueItem[];
+  verdictQueueItems?: QueueItem[];
+  verdictQueue?: {
+    enabled: boolean;
+    status: string;
+    pending: number;
+    note: string;
+    nextAt: string | null;
+    current: { code: string; name: string; period: string; title: string; startedAt?: string } | null;
+    last: { code: string; name: string; period: string; ok?: boolean; reason?: string; at?: string; elapsedMs?: number } | null;
+  };
   recentDownloads?: QueueItem[];
   queueTotal?: number;
   queueShown?: number;
@@ -541,14 +552,17 @@ export default function CrawlOverview() {
   const [onlyParsing, setOnlyParsing] = useState(false);
   const [timeCol, setTimeCol] = useState<TimeCol | null>(null);
   const [timeSort, setTimeSort] = useState<SortState>('default');
-  const [queuePopover, setQueuePopover] = useState<null | 'download' | 'parse' | 'downloading' | 'parsing'>(null);
+  const [queuePopover, setQueuePopover] = useState<null | 'download' | 'parse' | 'downloading' | 'parsing' | 'verdict'>(null);
   const [queueWaitTick, setQueueWaitTick] = useState(0);
   const dlQueueBtnRef = useRef<HTMLButtonElement>(null);
   const dlActiveBtnRef = useRef<HTMLButtonElement>(null);
   const parseQueueBtnRef = useRef<HTMLButtonElement>(null);
   const parseActiveBtnRef = useRef<HTMLButtonElement>(null);
+  const verdictBtnRef = useRef<HTMLButtonElement>(null);
   const [autoCrawlEnabled, setAutoCrawlEnabled] = useState(true);
   const [autoCrawlSaving, setAutoCrawlSaving] = useState(false);
+  const [autoVerdictEnabled, setAutoVerdictEnabled] = useState(true);
+  const [autoVerdictSaving, setAutoVerdictSaving] = useState(false);
   const [triggerMsg, setTriggerMsg] = useState('');
   const [optimisticJobs, setOptimisticJobs] = useState<OptimisticJob[]>([]);
   const [rowBusy, setRowBusy] = useState<Record<string, Partial<Record<'crawl' | 'parse' | 'verdict', true>>>>({});
@@ -599,6 +613,9 @@ export default function CrawlOverview() {
       setLive(payload);
       if (typeof payload.autoCrawlEnabled === 'boolean') {
         setAutoCrawlEnabled(payload.autoCrawlEnabled);
+      }
+      if (typeof payload.autoVerdictEnabled === 'boolean') {
+        setAutoVerdictEnabled(payload.autoVerdictEnabled);
       }
     } catch {
       /* live bar is optional; coverage table still works */
@@ -1010,6 +1027,32 @@ export default function CrawlOverview() {
       setTriggerMsg(`网络异常：${String(err)}`);
     } finally {
       setAutoCrawlSaving(false);
+      window.setTimeout(() => setTriggerMsg(''), 4000);
+    }
+  }
+
+  async function toggleAutoVerdict() {
+    const next = !autoVerdictEnabled;
+    setAutoVerdictSaving(true);
+    setTriggerMsg('');
+    try {
+      const response = await fetch('/api/crawl/control', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ autoVerdictEnabled: next }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; autoVerdictEnabled?: boolean; note?: string };
+      if (!response.ok) {
+        setTriggerMsg(payload.error ?? '切换自动智析失败');
+        return;
+      }
+      setAutoVerdictEnabled(payload.autoVerdictEnabled ?? next);
+      setTriggerMsg(payload.note ?? (next ? '已开启自动智析' : '已关闭自动智析'));
+      await refreshLive();
+    } catch (err) {
+      setTriggerMsg(`网络异常：${String(err)}`);
+    } finally {
+      setAutoVerdictSaving(false);
       window.setTimeout(() => setTriggerMsg(''), 4000);
     }
   }
@@ -1440,6 +1483,20 @@ export default function CrawlOverview() {
                 <span className="co-switch-knob" aria-hidden="true" />
               </button>
             </label>
+            <label className={`co-auto-toggle ${!autoVerdictEnabled ? 'paused' : ''}`} title={autoVerdictEnabled ? '已开启：空闲时单线程补齐未智析财报。单份模型调用限 90 秒，抢不到模型则让路；失败跳过，连续失败会冷却。' : '已关闭：不再自动领取未智析财报。详情页和批量智析仍可手动生成。'}>
+              <span>自动智析</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoVerdictEnabled}
+                aria-label={autoVerdictEnabled ? '自动智析：开' : '自动智析：关'}
+                className={`co-switch ${autoVerdictEnabled ? 'on' : ''}`}
+                disabled={autoVerdictSaving}
+                onClick={() => void toggleAutoVerdict()}
+              >
+                <span className="co-switch-knob" aria-hidden="true" />
+              </button>
+            </label>
             <span className="co-coverage">{covered}/{universe} 家已覆盖</span>
             <span className="co-ops-help" tabIndex={0} aria-label="采集参数说明">
               <svg className="co-ops-help-ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
@@ -1450,12 +1507,13 @@ export default function CrawlOverview() {
                 <p className="co-ops-tip-lead">先全量补齐 2025Q1 及之后缺口：找到下载源进入排队下载，下完自动排队解析。全部扫过且不再缺可补期次后进入已初始化，默认只扫最近 {lookbackDays} 天公告。关闭后仍扫描公告，但排队不再自动开始下载。</p>
                 <ul>
                   <li><em>自动抓取</em><span>{autoCrawlEnabled ? '开' : '关'}</span></li>
+                  <li><em>自动智析</em><span>{autoVerdictEnabled ? '开' : '关'}</span></li>
                   <li><em>覆盖状态</em><span>{coverageReady ? '已初始化' : '全量补齐中'}</span></li>
                   <li><em>下载并发</em><span>{downloadMax}</span></li>
                   <li><em>解析并发</em><span>{parseMax}</span></li>
                   <li><em>下载间隔</em><span>{downloadPauseSec} 秒</span></li>
                   <li><em>轮询间隔</em><span>{pollIntervalMin} 分钟</span></li>
-                  <li><em>超时</em><span>下载/解析各 5 分钟</span></li>
+                  <li><em>超时</em><span>下载/解析各 5 分钟 · 智析 90 秒</span></li>
                   <li><em>采集窗口</em><span>{coverageReady ? `近 ${lookbackDays} 天公告` : '最早 2025Q1'}</span></li>
                 </ul>
               </span>
@@ -1564,6 +1622,35 @@ export default function CrawlOverview() {
             </span>
             <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
             <span className="co-sb-node static">已入库(<b>{ingested}</b>)</span>
+            <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
+            <span className="co-sb-node-wrap">
+              <button
+                type="button"
+                ref={verdictBtnRef}
+                className={`co-sb-node clickable ${queuePopover === 'verdict' ? 'open' : ''}`}
+                aria-expanded={queuePopover === 'verdict'}
+                title="点击查看自动智析队列"
+                onClick={() => setQueuePopover((v) => (v === 'verdict' ? null : 'verdict'))}
+              >
+                <PulseDot on={Boolean(live?.verdictQueue?.current) || live?.verdictQueue?.status === 'running'} />
+                自动智析(<b>{live?.verdictQueue?.pending ?? 0}</b>)
+              </button>
+              <QueuePopover
+                open={queuePopover === 'verdict'}
+                title="自动智析"
+                items={live?.verdictQueueItems ?? []}
+                empty={autoVerdictEnabled ? '暂无待智析任务' : '自动智析已关'}
+                note={
+                  !autoVerdictEnabled
+                    ? '已关闭：详情页打开或批量智析仍可手动生成。'
+                    : (live?.verdictQueue?.last
+                      ? `${live.verdictQueue.note || ''}${live.verdictQueue.last.reason ? ` · 上次：${live.verdictQueue.last.name} ${live.verdictQueue.last.period} ${live.verdictQueue.last.ok ? '成功' : live.verdictQueue.last.reason}` : ''}`
+                      : (live?.verdictQueue?.note || '空闲时单线程补齐，单份限 90 秒。'))
+                }
+                onClose={() => setQueuePopover(null)}
+                anchorRef={verdictBtnRef}
+              />
+            </span>
           </div>
           <button
             type="button"

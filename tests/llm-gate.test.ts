@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fetchChatCompletions, llmRetryDelayMs, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
+import { fetchChatCompletions, isLlmSlotBusyError, llmRetryDelayMs, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
 
 test('retries only HTTP 429', () => {
   assert.equal(shouldRetryLlmStatus(429), true);
@@ -54,6 +54,17 @@ test('withLlmSlot reclaims a stale lock from a dead pid', async () => {
   writeFileSync(file, `${JSON.stringify({ pid: 999999, at: Date.now() - 4 * 60 * 1000 })}\n`);
   const seen = await withLlmSlot(async () => 'ok');
   assert.equal(seen, 'ok');
+});
+
+test('withLlmSlot times out acquire quickly when asked not to wait', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'llm-gate-busy-'));
+  const file = join(dir, 'gate.lock');
+  process.env.LLM_GATE_FILE = file;
+  writeFileSync(file, `${JSON.stringify({ pid: process.pid, at: Date.now() })}\n`);
+  await assert.rejects(
+    () => withLlmSlot(async () => 'no', undefined, 200),
+    (error: unknown) => isLlmSlotBusyError(error),
+  );
 });
 
 function withLlmEnv(env: Record<string, string | undefined>, fn: () => Promise<void>) {

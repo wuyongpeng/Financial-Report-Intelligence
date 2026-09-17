@@ -1,6 +1,6 @@
 import { loadRagContext } from './rag';
 import { parseReportVerdictJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
-import { fetchChatCompletions, withLlmSlot } from './llm-gate';
+import { fetchChatCompletions, isLlmSlotBusyError, withLlmSlot } from './llm-gate';
 import { llmConfigured } from './llm-providers';
 import { formatLlmCallError, formatLlmHttpError } from './llm-error';
 
@@ -50,12 +50,22 @@ function timeoutMs() {
 }
 
 type JsonOk = { ok: true; content: string };
-type JsonFail = { ok: false; error: string };
+type JsonFail = { ok: false; error: string; retryLater?: boolean };
 
-async function completeJson(messages: Array<{ role: string; content: string }>): Promise<JsonOk | JsonFail> {
+export type VerdictGenerateOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  acquireTimeoutMs?: number;
+};
+
+async function completeJson(
+  messages: Array<{ role: string; content: string }>,
+  options: VerdictGenerateOptions = {},
+): Promise<JsonOk | JsonFail> {
   if (!llmConfigured()) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   const tokens = Number(process.env.LLM_MAX_TOKENS ?? 6000);
   const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 6000), 8192) : 6000;
+  const callTimeoutMs = options.timeoutMs ?? timeoutMs();
   const body = {
     temperature: 0,
     max_tokens: maxTokens,
@@ -65,13 +75,15 @@ async function completeJson(messages: Array<{ role: string; content: string }>):
   };
   try {
     return await withLlmSlot(async () => {
-      let upstream = await fetchChatCompletions(body, { timeoutMs: timeoutMs() });
+      const started = Date.now();
+      const remaining = () => Math.max(1000, callTimeoutMs - (Date.now() - started));
+      let upstream = await fetchChatCompletions(body, { signal: options.signal, timeoutMs: remaining() });
       if (!upstream.ok) {
         const failed = await upstream.text().catch(() => '');
         console.warn('[verdict] json_object request failed', { status: upstream.status, body: failed.slice(0, 400) });
         if (upstream.status >= 400 && upstream.status < 500 && upstream.status !== 429) {
           const fallback = { temperature: body.temperature, max_tokens: body.max_tokens, messages: body.messages };
-          upstream = await fetchChatCompletions(fallback, { timeoutMs: timeoutMs() });
+          upstream = await fetchChatCompletions(fallback, { signal: options.signal, timeoutMs: remaining() });
         } else {
           return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
         }
@@ -85,14 +97,17 @@ async function completeJson(messages: Array<{ role: string; content: string }>):
         choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
       };
       const message = payload.choices?.[0]?.message;
+      const finish = payload.choices?.[0]?.finish_reason;
       const content = (message?.content ?? message?.reasoning_content ?? '').trim();
       if (!content) {
-        console.warn('[verdict] empty model content', { finish: payload.choices?.[0]?.finish_reason, keys: message ? Object.keys(message) : [] });
+        console.warn('[verdict] empty model content', { finish, keys: message ? Object.keys(message) : [] });
+        if (finish === 'length') return { ok: false, error: '模型输出被截断，已跳过本份。' };
         return { ok: false, error: 'AI 返回空内容，请稍后再试。' };
       }
       return { ok: true, content };
-    });
+    }, options.signal, options.acquireTimeoutMs);
   } catch (error) {
+    if (isLlmSlotBusyError(error)) return { ok: false, error: 'LLM 正被占用，稍后重试。', retryLater: true };
     console.warn('[verdict] model call failed', { message: String(error) });
     return { ok: false, error: formatLlmCallError(error) };
   }
@@ -100,9 +115,12 @@ async function completeJson(messages: Array<{ role: string; content: string }>):
 
 export type VerdictGenerateResult =
   | { ok: true; value: ReportVerdict }
-  | { ok: false; error: string };
+  | { ok: false; error: string; retryLater?: boolean };
 
-export async function generateReportVerdict(reportId: string): Promise<VerdictGenerateResult> {
+export async function generateReportVerdict(
+  reportId: string,
+  options: VerdictGenerateOptions = {},
+): Promise<VerdictGenerateResult> {
   if (!llmConfigured()) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   const context = await loadRagContext(reportId, VERDICT_QUESTION, []);
   if (!context.metrics.length && !context.passages.length) {
@@ -111,7 +129,7 @@ export async function generateReportVerdict(reportId: string): Promise<VerdictGe
   const content = await completeJson([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: verdictUserPrompt(context.structuredContext, context.passages, context.evidence.map((item) => item.id)) },
-  ]);
+  ], options);
   if (!content.ok) return content;
   const parsed = parseReportVerdictJson(content.content, context.evidence);
   if (!parsed) {

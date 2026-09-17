@@ -6,6 +6,7 @@ import { sendAlert } from '../lib/alerts';
 import { getIngestControl } from '../lib/ingest-control';
 import { getGapScanState, setDownloadGate } from '../lib/ingest-progress';
 import { getIngestSettings, ingestPollIntervalMs } from '../lib/ingest-settings';
+import { tickVerdictQueue } from '../lib/verdict-queue';
 
 const DISCOVER_WATCH_MS = 15_000;
 const bootstrapGapMs = Number(process.env.INGEST_BOOTSTRAP_GAP_MS ?? 90_000);
@@ -18,7 +19,9 @@ let discoverTimer: NodeJS.Timeout | undefined;
 let bootstrapTimer: NodeJS.Timeout | undefined;
 let backlogTimer: NodeJS.Timeout | undefined;
 let universeTimer: NodeJS.Timeout | undefined;
+let verdictTimer: NodeJS.Timeout | undefined;
 let lastUniverseDay = '';
+let verdictBusy = false;
 
 async function withLock(
   label: string,
@@ -99,12 +102,36 @@ async function ashareUniverseTick() {
   });
 }
 
+function scheduleVerdict(delayMs: number) {
+  if (verdictTimer) clearTimeout(verdictTimer);
+  verdictTimer = setTimeout(() => void verdictTick(), Math.max(1_000, delayMs));
+}
+
+async function verdictTick() {
+  if (verdictBusy) {
+    scheduleVerdict(5_000);
+    return;
+  }
+  verdictBusy = true;
+  try {
+    const delay = await tickVerdictQueue();
+    scheduleVerdict(delay);
+  } catch (error) {
+    console.error('[worker] verdict-queue failed', error);
+    await sendAlert('自动智析队列失败', { error: String(error) });
+    scheduleVerdict(30_000);
+  } finally {
+    verdictBusy = false;
+  }
+}
+
 async function shutdown(signal: string) {
   console.info(`[worker] received ${signal}, shutting down`);
   if (discoverTimer) clearInterval(discoverTimer);
   if (bootstrapTimer) clearInterval(bootstrapTimer);
   if (backlogTimer) clearInterval(backlogTimer);
   if (universeTimer) clearInterval(universeTimer);
+  if (verdictTimer) clearTimeout(verdictTimer);
   await closeDb();
   process.exit(0);
 }
@@ -121,11 +148,12 @@ async function main() {
   discoverTimer = setInterval(() => maybeDiscover(), DISCOVER_WATCH_MS);
   bootstrapTimer = setInterval(() => void coverageBootstrapTick(), bootstrapGapMs);
   universeTimer = setInterval(() => { void ashareUniverseTick(); }, 30 * 60 * 1000);
+  scheduleVerdict(5_000);
   const coverage = getGapScanState();
   const settings = getIngestSettings();
   const intervalMs = ingestPollIntervalMs(settings);
   console.info(
-    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms, coverage-bootstrap every ${bootstrapGapMs}ms (until steady); days=${settings.lookbackDays} downloadLimit=${settings.downloadLimit} parseLimit=${settings.parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${settings.downloadPauseSec * 1000} pollIntervalMin=${settings.pollIntervalMin} maxPages=${maxPages}; coverageMode=${coverage.mode}; ashare-universe daily after 01:00`,
+    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms, coverage-bootstrap every ${bootstrapGapMs}ms (until steady); days=${settings.lookbackDays} downloadLimit=${settings.downloadLimit} parseLimit=${settings.parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${settings.downloadPauseSec * 1000} pollIntervalMin=${settings.pollIntervalMin} maxPages=${maxPages}; coverageMode=${coverage.mode}; ashare-universe daily after 01:00; auto-verdict queue on`,
   );
 }
 
