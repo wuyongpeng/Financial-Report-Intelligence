@@ -17,12 +17,13 @@ export function AnswerFeedback({
   onSubmit: () => void;
 }) {
   const [tags, setTags] = useState<string[]>([]);
+  const [tagKind, setTagKind] = useState(kind);
   const rootRef = useRef<HTMLDivElement>(null);
   const open = Boolean(kind) && !submitted;
-
-  useEffect(() => {
+  if (kind !== tagKind) {
+    setTagKind(kind);
     setTags([]);
-  }, [kind]);
+  }
 
   useEffect(() => {
     if (!open) return;

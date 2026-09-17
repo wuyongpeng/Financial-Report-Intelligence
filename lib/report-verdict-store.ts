@@ -2,6 +2,8 @@ import { getDb } from './db';
 import { ensureBackendSchema } from './backend-schema';
 import { acceptVerdictPayload, type ReportVerdict } from './report-verdict';
 import { generateReportVerdict } from './report-verdict-llm';
+import { llmModelName } from './llm-providers';
+import { publicVerdictError } from './llm-error';
 
 type VerdictStatus = 'pending' | 'ready' | 'failed';
 type VerdictRow = {
@@ -44,7 +46,7 @@ async function markReady(reportId: string, payload: ReportVerdict) {
   const db = getDb();
   await db`
     INSERT INTO report_verdicts (announcement_id, payload, model, status, error, generated_at, updated_at)
-    VALUES (${reportId}, ${db.json(payload)}, ${process.env.LLM_MODEL ?? null}, 'ready', NULL, NOW(), NOW())
+    VALUES (${reportId}, ${db.json(payload)}, ${llmModelName()}, 'ready', NULL, NOW(), NOW())
     ON CONFLICT (announcement_id) DO UPDATE SET
       payload=EXCLUDED.payload, model=EXCLUDED.model, status='ready', error=NULL,
       generated_at=EXCLUDED.generated_at, updated_at=EXCLUDED.updated_at
@@ -55,7 +57,7 @@ async function markFailed(reportId: string, error: string) {
   const db = getDb();
   await db`
     INSERT INTO report_verdicts (announcement_id, payload, model, status, error, generated_at, updated_at)
-    VALUES (${reportId}, NULL, ${process.env.LLM_MODEL ?? null}, 'failed', ${error.slice(0, 300)}, NOW(), NOW())
+    VALUES (${reportId}, NULL, ${llmModelName()}, 'failed', ${error.slice(0, 300)}, NOW(), NOW())
     ON CONFLICT (announcement_id) DO UPDATE SET
       status='failed', error=EXCLUDED.error, model=EXCLUDED.model, updated_at=EXCLUDED.updated_at
   `;
@@ -96,6 +98,7 @@ async function waitForReady(reportId: string): Promise<ReportVerdict | null> {
     if (!row || (row.status === 'pending' && isStale(row))) return runGenerate(reportId, true);
     await sleep(400);
   }
+  await markFailed(reportId, 'AI 生成排队超时，请稍后再试。');
   return null;
 }
 
@@ -114,15 +117,15 @@ async function runGenerate(reportId: string, claimed: boolean): Promise<ReportVe
       WHERE announcement_id=${reportId}
     `;
     try {
-      const value = await generateReportVerdict(reportId);
-      if (value) {
-        await markReady(reportId, value);
-        return value;
+      const generated = await generateReportVerdict(reportId);
+      if (generated.ok) {
+        await markReady(reportId, generated.value);
+        return generated.value;
       }
-      await markFailed(reportId, 'unavailable');
+      await markFailed(reportId, publicVerdictError(generated.error));
       return null;
     } catch (error) {
-      await markFailed(reportId, String(error));
+      await markFailed(reportId, publicVerdictError(error instanceof Error ? error.message : String(error)));
       return null;
     }
   })().finally(() => { inflight.delete(reportId); });
@@ -130,7 +133,12 @@ async function runGenerate(reportId: string, claimed: boolean): Promise<ReportVe
   return pending;
 }
 
-/** Read a stored verdict. Missing/invalid/failed returns null without calling the model. */
+/** Read the last failed generation message. Ready rows have no error. */
+export async function loadVerdictError(reportId: string): Promise<string | null> {
+  const row = await loadRow(reportId);
+  if (row?.status !== 'failed' || !row.error?.trim()) return null;
+  return publicVerdictError(row.error);
+}
 export async function loadStoredVerdict(reportId: string): Promise<ReportVerdict | null> {
   const row = await loadRow(reportId);
   if (row?.status !== 'ready') return null;
@@ -170,7 +178,7 @@ export async function listReportsNeedingVerdict(limit = 5000) {
 }
 
 /** Force a new LLM call and overwrite the stored row on success. Keep the old ready payload if refresh fails. */
-export async function refreshReportVerdict(reportId: string): Promise<ReportVerdict | null> {
+export async function refreshReportVerdict(reportId: string): Promise<{ value: ReportVerdict | null; error: string | null }> {
   const previous = await loadStoredVerdict(reportId);
   const db = getDb();
   if (await reportExists(reportId)) {
@@ -181,10 +189,8 @@ export async function refreshReportVerdict(reportId: string): Promise<ReportVerd
     `;
   }
   const value = await runGenerate(reportId, true);
-  if (value) return value;
-  if (previous) {
-    await markReady(reportId, previous);
-    return null;
-  }
-  return null;
+  if (value) return { value, error: null };
+  const error = (await loadVerdictError(reportId)) ?? 'AI 概览暂时无法生成，请稍后再试。';
+  if (previous) await markReady(reportId, previous);
+  return { value: null, error };
 }

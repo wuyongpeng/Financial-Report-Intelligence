@@ -281,9 +281,9 @@ export function followupFromModule(id: ModuleId) {
 export function targetedFollowups(changes: Array<{ title: string }>, modules: Array<{ id: ModuleId }> = []) {
   const out = followupQuestions(changes);
   const seen = new Set(out);
-  for (const module of modules) {
+  for (const item of modules) {
     if (out.length >= 3) break;
-    const question = followupFromModule(module.id);
+    const question = followupFromModule(item.id);
     if (!question || seen.has(question)) continue;
     seen.add(question);
     out.push(question);

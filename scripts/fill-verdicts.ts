@@ -1,4 +1,5 @@
 import { closeDb } from '../lib/db';
+import { llmConfigured } from '../lib/llm-providers';
 import { fillReportVerdict, listReportsNeedingVerdict } from '../lib/report-verdict-store';
 
 function arg(name: string, fallback: number) {
@@ -21,8 +22,8 @@ async function pool<T>(items: T[], size: number, worker: (item: T, index: number
 }
 
 async function main() {
-  if (!process.env.LLM_BASE_URL || !process.env.LLM_MODEL) {
-    throw new Error('未配置 LLM_BASE_URL / LLM_MODEL，无法生成财报速览');
+  if (!llmConfigured()) {
+    throw new Error('未配置 LLM_BASE_URL / LLM_MODEL 或 LLM_PROVIDERS，无法生成财报速览');
   }
   const limit = arg('--limit', 5000);
   const concurrency = Math.min(arg('--concurrency', 2), 4);

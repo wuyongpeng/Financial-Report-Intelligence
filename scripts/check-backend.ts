@@ -13,7 +13,7 @@ import { GET as status } from '../app/api/status/route';
 import { GET as health } from '../app/api/health/route';
 import { GET as reportStatus } from '../app/api/reports/[id]/status/route';
 
-process.env.LLM_BASE_URL = ''; process.env.LLM_MODEL = ''; process.env.LLM_API_KEY = '';
+process.env.LLM_BASE_URL = ''; process.env.LLM_MODEL = ''; process.env.LLM_API_KEY = ''; process.env.LLM_MODELS = ''; process.env.LLM_PROVIDERS = '';
 process.env.APP_USERNAME = 'backend-smoke';
 process.env.APP_SESSION_SECRET = 'backend-smoke-local-only-session-secret';
 

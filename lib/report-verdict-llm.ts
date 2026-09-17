@@ -1,6 +1,8 @@
 import { loadRagContext } from './rag';
 import { parseReportVerdictJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
 import { fetchChatCompletions, withLlmSlot } from './llm-gate';
+import { llmConfigured } from './llm-providers';
+import { formatLlmCallError, formatLlmHttpError } from './llm-error';
 
 export const VERDICT_QUESTION = '本期财报整体怎么看？营业收入、净利润、每股收益、净资产收益率、营业成本、毛利率、经营现金流、资产负债有哪些真正值得关注的同比变化？主营业务在产品、地区或分部上的收入结构有哪些原文明确写出的变化？管理层讨论与分析是否写了净利润变动原因？请结合原文中的具体数字。';
 
@@ -47,13 +49,14 @@ function timeoutMs() {
   return Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 120_000) : 60_000;
 }
 
-async function completeJson(messages: Array<{ role: string; content: string }>) {
-  const model = process.env.LLM_MODEL;
-  if (!process.env.LLM_BASE_URL || !model) return null;
+type JsonOk = { ok: true; content: string };
+type JsonFail = { ok: false; error: string };
+
+async function completeJson(messages: Array<{ role: string; content: string }>): Promise<JsonOk | JsonFail> {
+  if (!llmConfigured()) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   const tokens = Number(process.env.LLM_MAX_TOKENS ?? 6000);
   const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 6000), 8192) : 6000;
   const body = {
-    model,
     temperature: 0,
     max_tokens: maxTokens,
     response_format: { type: 'json_object' },
@@ -67,39 +70,53 @@ async function completeJson(messages: Array<{ role: string; content: string }>) 
         const failed = await upstream.text().catch(() => '');
         console.warn('[verdict] json_object request failed', { status: upstream.status, body: failed.slice(0, 400) });
         if (upstream.status >= 400 && upstream.status < 500 && upstream.status !== 429) {
-          const fallback = { model: body.model, temperature: body.temperature, max_tokens: body.max_tokens, messages: body.messages };
+          const fallback = { temperature: body.temperature, max_tokens: body.max_tokens, messages: body.messages };
           upstream = await fetchChatCompletions(fallback, { timeoutMs: timeoutMs() });
         } else {
-          return null;
+          return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
         }
       }
       if (!upstream.ok) {
+        const failed = await upstream.text().catch(() => '');
         console.warn('[verdict] model http', upstream.status);
-        return null;
+        return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
       }
       const payload = await upstream.json() as {
         choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
       };
       const message = payload.choices?.[0]?.message;
       const content = (message?.content ?? message?.reasoning_content ?? '').trim();
-      if (!content) console.warn('[verdict] empty model content', { finish: payload.choices?.[0]?.finish_reason, keys: message ? Object.keys(message) : [] });
-      return content || null;
+      if (!content) {
+        console.warn('[verdict] empty model content', { finish: payload.choices?.[0]?.finish_reason, keys: message ? Object.keys(message) : [] });
+        return { ok: false, error: 'AI 返回空内容，请稍后再试。' };
+      }
+      return { ok: true, content };
     });
   } catch (error) {
     console.warn('[verdict] model call failed', { message: String(error) });
-    return null;
+    return { ok: false, error: formatLlmCallError(error) };
   }
 }
 
-export async function generateReportVerdict(reportId: string): Promise<ReportVerdict | null> {
+export type VerdictGenerateResult =
+  | { ok: true; value: ReportVerdict }
+  | { ok: false; error: string };
+
+export async function generateReportVerdict(reportId: string): Promise<VerdictGenerateResult> {
+  if (!llmConfigured()) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   const context = await loadRagContext(reportId, VERDICT_QUESTION, []);
-  if (!context.metrics.length && !context.passages.length) return null;
+  if (!context.metrics.length && !context.passages.length) {
+    return { ok: false, error: '本期缺少可分析的指标和原文，未调用 AI。' };
+  }
   const content = await completeJson([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: verdictUserPrompt(context.structuredContext, context.passages, context.evidence.map((item) => item.id)) },
   ]);
-  if (!content) return null;
-  const parsed = parseReportVerdictJson(content, context.evidence);
-  if (!parsed) console.warn('[verdict] schema rejected', { preview: content.slice(0, 240) });
-  return parsed;
+  if (!content.ok) return content;
+  const parsed = parseReportVerdictJson(content.content, context.evidence);
+  if (!parsed) {
+    console.warn('[verdict] schema rejected', { preview: content.content.slice(0, 240) });
+    return { ok: false, error: 'AI 返回格式无法解析，请稍后再试。' };
+  }
+  return { ok: true, value: parsed };
 }

@@ -14,8 +14,8 @@ export type IngestSettings = {
 
 export const INGEST_SETTING_BOUNDS = {
   downloadPauseSec: { min: 1, max: 9999, fallback: 20 },
-  downloadLimit: { min: 1, max: 99, fallback: 5 },
-  parseLimit: { min: 1, max: 9, fallback: 2 },
+  downloadLimit: { min: 1, max: 99, fallback: 2 },
+  parseLimit: { min: 1, max: 9, fallback: 1 },
   lookbackDays: { min: 1, max: 99, fallback: 2 },
   pollIntervalMin: { min: 1, max: 60, fallback: 2 },
 } as const;
@@ -46,7 +46,7 @@ export function normalizeIngestSettings(raw: Partial<IngestSettings> | null | un
 }
 
 function settingsPath() {
-  return resolve(/* turbopackIgnore: true */ process.cwd(), 'data', 'ingest-settings.json');
+  return resolve(process.env.RUNTIME_DIR ?? resolve(/* turbopackIgnore: true */ process.cwd(), '.data'), 'ingest-settings.json');
 }
 
 function envSeed(): Partial<IngestSettings> {

@@ -12,6 +12,8 @@ import { AnswerFeedback } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
+import { isCanonicalPeriod } from '@/lib/ingest-period';
+import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import './company-detail.css';
 
 type Outline = { pageLabels?: PdfPageLabel[]; indexedPages: number; pages: { page: number; content: string }[]; outline: { id: string; title: string; page: number; highlight: string }[] };
@@ -162,12 +164,41 @@ function Trend({ reports, metric, compare, onSelect }: { reports: Report[]; metr
   );
 }
 
-export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null }) {
+function jumpTargetLabel(label: string) {
+  return <span className="cd-jump-target">{label}</span>;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function loadCompanyReports(code: string): Promise<Report[]> {
+  const response = await fetch(`/api/reports?code=${encodeURIComponent(code)}&limit=100`, { cache: 'no-store' });
+  if (!response.ok) throw new Error('财报列表加载失败');
+  const data = await response.json() as { reports: Report[] };
+  const usable = (data.reports ?? []).filter((item) => item.id && !item.id.startsWith('pending:'));
+  return pickCanonicalReports(usable);
+}
+
+async function waitForParsedReport(code: string, id: string, signal: AbortSignal, timeoutMs = 120_000): Promise<Report | null> {
+  const started = Date.now();
+  while (!signal.aborted && Date.now() - started < timeoutMs) {
+    const reports = await loadCompanyReports(code).catch(() => [] as Report[]);
+    const hit = reports.find((item) => item.id === id);
+    if (hit && reportIsParsed(hit)) return hit;
+    await sleep(2000);
+  }
+  if (signal.aborted) return null;
+  const reports = await loadCompanyReports(code).catch(() => [] as Report[]);
+  return reports.find((item) => item.id === id && reportIsParsed(item)) ?? null;
+}
+
+export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null, preferredCite = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null; preferredCite?: { page: number; quote: string } | null }) {
   const [reports, setReports] = useState<Report[]>([initialReport]);
   const [selected, setSelected] = useState(initialReport);
   const [outline, setOutline] = useState<Outline>(emptyOutline);
   const [analysis, setAnalysis] = useState<Analysis>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !initialReport.id.startsWith('pending:') && Boolean(initialReport.parsed_at || initialReport.metrics.length));
   const [error, setError] = useState('');
   const [sourcePage, setSourcePage] = useState(1);
   const [pdfJumpNonce, setPdfJumpNonce] = useState(0);
@@ -208,7 +239,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const pageEnter = useRef<'start' | 'next' | 'prev'>('start');
   const [asking, setAsking] = useState(false);
   const [regenMenu, setRegenMenu] = useState<number | null>(null);
-  const [jumpAsk, setJumpAsk] = useState<null | { href: string; title: string; detail: string }>(null);
+  const [jumpAsk, setJumpAsk] = useState<null | { href: string; title: string; detail: ReactNode }>(null);
   const [jumpBlocked, setJumpBlocked] = useState(false);
   // A reasoning model thinks before it speaks; say so instead of showing dead air.
   const [thinking, setThinking] = useState(false);
@@ -227,12 +258,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const overviewRef = useRef<HTMLDivElement>(null);
   const autoAskedRef = useRef(false);
+  const deepCitedRef = useRef(false);
   const askRef = useRef<(text: string) => Promise<void>>(async () => undefined);
   const [periodBootstrapDone, setPeriodBootstrapDone] = useState(!preferredPeriod);
   const [overviewPick, setOverviewPick] = useState<null | { quote: string; x: number; y: number; kind: FocusKind; page?: number; title?: string; cardId?: string }>(null);
   const [verdict, setVerdict] = useState<ReportVerdict | null>(null);
   const [verdictStatus, setVerdictStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [verdictRefreshing, setVerdictRefreshing] = useState(false);
+  const [verdictError, setVerdictError] = useState('');
+  const [quietToast, setQuietToast] = useState<{ text: string; at: number } | null>(null);
+  const autoParsePosted = useRef(new Set<string>());
 
   function selectReport(report: Report) {
     setReportListOpen(false);
@@ -243,16 +278,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     activeId.current = report.id;
     setSelected(report); onSelect(report.id); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
     setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setFocused(null);
-    setVerdict(null); setVerdictStatus('loading'); setVerdictRefreshing(false);
+    setVerdict(null); setVerdictStatus('loading'); setVerdictRefreshing(false); setVerdictError('');
   }
   useEffect(() => {
     const abort = new AbortController();
-    void fetch(`/api/reports?code=${initialReport.code}&limit=100`, { signal: abort.signal, cache: 'no-store' }).then(async r => {
-      if (!r.ok) throw new Error('财报列表加载失败');
-      const data = await r.json() as { reports: Report[] };
+    void loadCompanyReports(initialReport.code).then((all) => {
       if (abort.signal.aborted) return;
-      const parsed = data.reports.filter(r => r.parsed_at || r.metrics.length).sort((a,b) => periodKey(b)-periodKey(a) || b.published_at.localeCompare(a.published_at));
-      const all = pickCanonicalReports(parsed.length ? parsed : data.reports);
+      if (!all.length) {
+        setPeriodBootstrapDone(true);
+        return;
+      }
       setReports(all);
       const hint = preferredPeriod ? parsePeriodHints(preferredPeriod) : parsePeriodHints('');
       if (preferredPeriod && !hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(preferredPeriod)) {
@@ -274,36 +309,134 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // One company owns this workspace; changing a period must not reload or reset the list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialReport.code]);
+  const canLoadReportData = !selected.id.startsWith('pending:') && reportIsParsed(selected);
+  const reportDataKey = `${selected.id}:${selected.parsed_at ?? ''}`;
+  const [loadedDataKey, setLoadedDataKey] = useState(reportDataKey);
+  if (loadedDataKey !== reportDataKey) {
+    setLoadedDataKey(reportDataKey);
+    setOutline(emptyOutline);
+    setAnalysis({});
+    setLoading(canLoadReportData);
+    setVerdict(null);
+    setVerdictError('');
+    setVerdictStatus('loading');
+  }
   useEffect(() => {
-    // Reset the view when the external report resource changes.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    const abort = new AbortController(); setLoading(true); setOutline(emptyOutline); setAnalysis({});
+    if (!canLoadReportData) return;
+    const abort = new AbortController();
     void Promise.all([
       fetch(`/api/reports/${encodeURIComponent(selected.id)}/outline`, { signal: abort.signal }).then(async r => { if (!r.ok) throw new Error(); return r.json() as Promise<Outline>; }),
       fetch(`/api/reports/${encodeURIComponent(selected.id)}/analysis`, { signal: abort.signal }).then(async r => { if (!r.ok) throw new Error(); return r.json() as Promise<Analysis>; }),
     ]).then(([o,a]) => { if (!abort.signal.aborted) { setOutline(o); setAnalysis(a);  setError(''); } }).catch(() => { if (!abort.signal.aborted) setError('部分报告数据加载失败，请切换报告重试。'); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
-  }, [selected.id]);
+  }, [selected.id, selected.parsed_at, canLoadReportData]);
   useEffect(() => {
+    if (!quietToast) return;
+    const timer = window.setTimeout(() => setQuietToast(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [quietToast]);
+  useEffect(() => {
+    if (!periodBootstrapDone) return;
+    if (!reportNeedsParse(selected)) return;
+    const id = selected.id;
+    const code = selected.code;
     const abort = new AbortController();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setVerdict(null);
-    setVerdictStatus('loading');
+    const token = period(selected);
+    const periods = isCanonicalPeriod(token) ? [token] : [];
+    const downloading = reportNeedsDownload(selected);
+    const inFlight = reportParseInFlight(selected);
+    const first = !autoParsePosted.current.has(id);
+    if (first) {
+      autoParsePosted.current.add(id);
+    }
+    const toastTimer = first ? window.setTimeout(() => {
+      if (!abort.signal.aborted) {
+        setQuietToast({ text: downloading ? '正在抓取并解析本期财报' : '正在解析本期财报', at: Date.now() });
+      }
+    }, 0) : 0;
+    void (async () => {
+      try {
+        if (first && !inFlight) {
+          const body = downloading
+            ? {
+                mode: 'manual',
+                codes: [code],
+                fullHistory: false,
+                ...(periods.length ? { periods } : {}),
+                announcementIds: [id],
+              }
+            : {
+                mode: 'parse',
+                codes: [code],
+                parseOnly: true,
+                ...(periods.length ? { periods } : {}),
+                announcementIds: [id],
+              };
+          await fetch('/api/crawl/trigger', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+        }
+        const updated = await waitForParsedReport(code, id, abort.signal);
+        if (abort.signal.aborted) return;
+        if (updated) {
+          setReports((prev) => {
+            const next = prev.map((item) => item.id === updated.id ? updated : item);
+            return next.some((item) => item.id === updated.id) ? pickCanonicalReports(next) : pickCanonicalReports([...next, updated]);
+          });
+          setSelected((prev) => prev.id === updated.id ? updated : prev);
+        } else if (first) {
+          setQuietToast({ text: '本期解析未完成，可稍后刷新', at: Date.now() });
+        }
+      } catch {
+        if (abort.signal.aborted) return;
+        autoParsePosted.current.delete(id);
+        setQuietToast({ text: '本期解析未完成，可稍后刷新', at: Date.now() });
+      }
+    })();
+    return () => {
+      if (toastTimer) window.clearTimeout(toastTimer);
+      abort.abort();
+    };
+  }, [periodBootstrapDone, selected]);
+  useEffect(() => {
+    if (!canLoadReportData) return;
+    const abort = new AbortController();
+    const toastTimer = window.setTimeout(() => {
+      if (!abort.signal.aborted) setQuietToast({ text: '正在生成本期智析', at: Date.now() });
+    }, 400);
     void fetch(`/api/reports/${encodeURIComponent(selected.id)}/verdict`, { signal: abort.signal, cache: 'no-store' })
       .then(async (r) => {
-        if (!r.ok) throw new Error();
-        const parsed = acceptVerdictPayload(await r.json());
-        if (!parsed) throw new Error();
+        if (!r.ok) {
+          const payload = await r.json().catch(() => ({})) as { error?: string };
+          throw new Error(typeof payload.error === 'string' ? payload.error : '');
+        }
+        const parsedVerdict = acceptVerdictPayload(await r.json());
+        if (!parsedVerdict) throw new Error('AI 返回格式无法解析，请稍后再试。');
         if (abort.signal.aborted) return;
-        setVerdict(parsed);
+        window.clearTimeout(toastTimer);
+        setVerdict(parsedVerdict);
         setVerdictStatus('ready');
+        setVerdictError('');
       })
-      .catch(() => { if (!abort.signal.aborted) { setVerdict(null); setVerdictStatus('unavailable'); } });
-    return () => abort.abort();
-  }, [selected.id]);
+      .catch((error) => {
+        window.clearTimeout(toastTimer);
+        if (abort.signal.aborted) return;
+        setVerdict(null);
+        setVerdictStatus('unavailable');
+        setVerdictError(error instanceof Error ? error.message : '');
+      });
+    return () => {
+      window.clearTimeout(toastTimer);
+      abort.abort();
+    };
+  }, [selected.id, selected.parsed_at, selected.metrics.length, canLoadReportData]);
   async function refreshVerdict() {
     if (verdictRefreshing || verdictStatus === 'loading') return;
     setVerdictRefreshing(true);
+    setVerdictError('');
     try {
       const response = await fetch(`/api/reports/${encodeURIComponent(selected.id)}/verdict`, {
         method: 'POST',
@@ -311,13 +444,17 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ refresh: true }),
       });
-      if (!response.ok) throw new Error();
-      const parsed = acceptVerdictPayload(await response.json());
-      if (!parsed) throw new Error();
+      const payload = await response.json().catch(() => ({})) as { error?: string } & Record<string, unknown>;
+      if (!response.ok) throw new Error(typeof payload.error === 'string' ? payload.error : '');
+      const parsed = acceptVerdictPayload(payload);
+      if (!parsed) throw new Error('AI 返回格式无法解析，请稍后再试。');
       setVerdict(parsed);
       setVerdictStatus('ready');
-    } catch {
-      if (!verdict) setVerdictStatus('unavailable');
+      setVerdictError('');
+    } catch (error) {
+      setVerdict(null);
+      setVerdictStatus('unavailable');
+      setVerdictError(error instanceof Error ? error.message : '');
     } finally {
       setVerdictRefreshing(false);
     }
@@ -534,6 +671,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const growthStanding = standing(growthRanks, selfGrowth);
   const findings = keyFindings(reports, selected);
   const verdictChanges = verdict?.changes ?? [];
+  const verdictGenerating = verdictStatus === 'loading' || verdictRefreshing;
   const flaggedMoves = changes.filter(d => Math.abs(d.amount!) >= 30);
   function aiModule(id: string) {
     const ai = verdict?.modules.find(m => m.id === id);
@@ -660,7 +798,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       page: printedPage(c),
     };
   }
-  function askOpenFiling(href: string, detail: string) {
+  function askOpenFiling(href: string, detail: ReactNode) {
     setJumpBlocked(false);
     setJumpAsk({ href, title: '在新标签页打开这份财报？', detail });
   }
@@ -672,13 +810,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       || local?.code
       || peer?.code
       || ((!c.companyName || c.companyName === selected.company_name) ? selected.code : '');
-    const href = filingPageHref(code, local ? period(local) : c.period);
+    const token = local ? period(local) : c.period;
+    const href = filingPageHref(code, token, { page: c.page, quote: c.quote });
     if (!href) return null;
     const name = local?.company_name ?? c.companyName ?? (code === selected.code ? selected.company_name : code);
-    const token = local ? period(local) : c.period;
-    const detail = code === selected.code
-      ? `将打开本公司${token ? ` ${token}` : ''} 财报。当前页面保持不变。`
-      : `将打开 ${name}${token ? ` ${token}` : ''} 财报。当前页面保持不变。`;
+    const who = code === selected.code ? '本公司' : name;
+    const target = [who, token].filter(Boolean).join(' ');
+    const detail = <>将打开{code === selected.code ? null : ' '}{jumpTargetLabel(target)} 财报。当前页面保持不变。</>;
     return { href, detail };
   }
   function jumpCitation(c: Citation, expand = false) {
@@ -695,7 +833,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setJumpAsk({
       href: '',
       title: '暂时无法打开这份财报',
-      detail: `还找不到 ${c.companyName ?? '该公司'}${c.period ? ` ${c.period}` : ''} 的页面链接。当前页面保持不变。`,
+      detail: <>还找不到 {jumpTargetLabel([c.companyName ?? '该公司', c.period].filter(Boolean).join(' '))} 的页面链接。当前页面保持不变。</>,
     });
   }
   function citationLink(c: Citation, key: string | number) {
@@ -1056,7 +1194,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
   }
-  askRef.current = ask;
+  useEffect(() => {
+    askRef.current = ask;
+  });
 
   // Home deep-link: fill + send once preferred period is resolved and chat memory is ready.
   useEffect(() => {
@@ -1072,12 +1212,40 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       // If no report matched the hint, still ask against the best available period.
       if (!ok && selected.metrics.length === 0 && !selected.parsed_at) return;
     }
-    autoAskedRef.current = true;
-    setChatCollapsed(false);
-    setMobilePane('chat');
-    setQuestion(autoAskQuestion);
-    void askRef.current(autoAskQuestion);
+    const questionText = autoAskQuestion;
+    const timer = window.setTimeout(() => {
+      if (autoAskedRef.current) return;
+      autoAskedRef.current = true;
+      setChatCollapsed(false);
+      setMobilePane('chat');
+      setQuestion(questionText);
+      void askRef.current(questionText);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [autoAskQuestion, preferredPeriod, periodBootstrapDone, memoryLoading, loading, asking, selected]);
+
+  useEffect(() => {
+    if (!preferredCite || deepCitedRef.current) return;
+    if (!periodBootstrapDone) return;
+    if (preferredPeriod) {
+      const hint = parsePeriodHints(preferredPeriod);
+      if (!hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(preferredPeriod)) hint.token = preferredPeriod.toUpperCase();
+      const ok = reportMatchesPeriod(selected, hint)
+        || selected.metrics.some(m => m.period === preferredPeriod)
+        || selected.title.includes(preferredPeriod);
+      if (!ok) return;
+    }
+    const target = preferredCite;
+    const timer = window.setTimeout(() => {
+      if (deepCitedRef.current) return;
+      deepCitedRef.current = true;
+      setSourceMode('pdf');
+      cite({ page: target.page, quote: target.quote });
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // Deep-link cite is one-shot after the target period is selected.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferredCite, preferredPeriod, periodBootstrapDone, selected]);
 
   async function newConversation() {
     if (busyRef.current || !memoryReady.current) return;
@@ -1211,9 +1379,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 </button>
               </div>
             </div>
-            {verdictStatus === 'loading' && <p className="cd-verdict-fallback">正在生成本期概览…</p>}
-            {verdictStatus === 'unavailable' && !verdictRefreshing && <p className="cd-verdict-fallback">AI 概览暂时无法生成，可直接查看下方财务指标或使用右侧问答。</p>}
-            {verdictStatus === 'ready' && verdict && <>
+            {verdictGenerating && <p className="cd-verdict-fallback">{reportIsParsed(selected) ? '正在生成本期概览…' : '正在解析本期财报…'}</p>}
+            {!verdictGenerating && verdictStatus === 'unavailable' && (
+              <p className="cd-verdict-fallback">
+                {verdictError.trim() || 'AI 概览暂时无法生成，请稍后再试。'}
+                <small className="cd-verdict-fallback-hint">可直接查看下方财务指标或使用右侧问答。</small>
+              </p>
+            )}
+            {!verdictGenerating && verdictStatus === 'ready' && verdict && <>
               <h2 className="cd-brief-title"><i className="cd-verdict-dot" aria-hidden="true" />{verdict.verdict.label}</h2>
               <p className="cd-verdict-summary">{verdict.verdict.summary}</p>
             </>}
@@ -1248,7 +1421,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </article>;
           })}</div>
           {baselineOptions.length>0 && <div className="cd-baseline-row"><label>对比基准 <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`${period(defaultPrevious)}（上年同期）`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}</select></label>{!baselineIsDefault && previous && <span className="cd-note">当前以 {period(previous)} 为基准，非上年同期。</span>}</div>}
-          {verdictStatus === 'ready' && verdictChanges.length > 0 && <section className="cd-key-changes" aria-label="关键变化">
+          {!verdictGenerating && verdictStatus === 'ready' && verdictChanges.length > 0 && <section className="cd-key-changes" aria-label="关键变化">
             <h3>关键变化</h3>
             <ul>
               {verdictChanges.map((item, index) => {
@@ -1424,8 +1597,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                         renderCites={renderCiteChunk(m)}
                         onFilingJump={(target) => {
                           const parsed = parseFilingHref(target.href);
-                          const href = parsed ? filingPageHref(parsed.code, parsed.period) : target.href;
-                          askOpenFiling(href, `将打开 ${target.label}。当前页面保持不变。`);
+                          const href = parsed
+                            ? filingPageHref(parsed.code, parsed.period, { page: parsed.page, quote: parsed.quote })
+                            : target.href;
+                          askOpenFiling(href, <>将打开 {jumpTargetLabel(target.label)}。当前页面保持不变。</>);
                         }}
                       />
                       {sources.length > 0 && (
@@ -1518,6 +1693,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {jumpAsk.href ? <button type="button" className="cd-jump-ok" onClick={confirmJumpAsk}>新标签页打开</button> : null}
           </div>
         </div>
+      </div>
+    )}
+    {quietToast && (
+      <div className="cd-quiet-toast" role="status" aria-live="polite">
+        {quietToast.text}
       </div>
     )}
   </section>;

@@ -43,9 +43,12 @@ export default function CrawlLivePanel({ compact = false }: { compact?: boolean 
   }, []);
 
   useEffect(() => {
-    void refresh();
+    const kick = window.setTimeout(() => { void refresh(); }, 0);
     const timer = window.setInterval(() => void refresh(), 15_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(kick);
+      window.clearInterval(timer);
+    };
   }, [refresh]);
 
   async function triggerGentle() {

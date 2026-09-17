@@ -14,7 +14,7 @@
 - 下载策略：低频小批量、明确 `User-Agent` 和来源页 `Referer`；默认每次最多下载 2 份、解析 1 份，源页/PDF 之间有可配置暂停（`PAGE_PAUSE_MS` / `DOWNLOAD_PAUSE_MS`），三源顺序拉取；不绕过验证码或访问控制。遇到失败会记录，下一轮再试。
 - 短链详情：`/[六位代码]`（如 `/300750`），仍兼容 `/?code=`。
 - 解析：PDF 文本/表格解析后以规则提取营收、归母净利润、EPS、ROE，数值、字段名和页码存库。
-- 存储：`db` 服务的数据在 `data/postgres`，PDF 在 `data/reports`。后续把这两个适配层换为公司 PostgreSQL/S3 即可，不影响页面和采集流程。
+- 存储：`db` 服务的数据在 `data/postgres`，PDF 在 `data/reports`，app/worker 共享运行时状态在 `data/runtime`（挂到容器 `/app/.data`）。后续把这两个适配层换为公司 PostgreSQL/S3 即可，不影响页面和采集流程。
 
 评委操作路径见 [使用说明](docs/user-guide.md)，实现、数据流与边界见 [技术架构说明](docs/technical-architecture.md)。
 
@@ -31,7 +31,7 @@ cp .env.example .env
 编辑 `.env`，至少替换 `POSTGRES_PASSWORD`、`INTERNAL_INGEST_TOKEN`、`APP_USERNAME`、`APP_PASSWORD`、`APP_SESSION_SECRET`、`ADMIN_PASSWORD` 和 `ADMIN_SESSION_SECRET` 为长随机值；随后启动：
 
 ```bash
-mkdir -p data/postgres data/reports
+mkdir -p data/postgres data/reports data/runtime
 docker compose up -d --build
 docker compose ps
 docker compose logs -f worker

@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   freshnessAt,
   freshnessLabel,
@@ -28,6 +29,7 @@ import {
   type ParsedPeriod,
 } from '@/lib/home-search';
 import type { Report } from '@/lib/detail-model';
+import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
@@ -41,14 +43,6 @@ type DialogState =
   | { kind: 'missing-company'; listed: { code: string; name: string }; query?: string }
   | { kind: 'missing-report'; company: CrawlCompanyCoverage; period: ParsedPeriod }
 ;
-
-const SEARCH_PLACEHOLDERS = [
-  '贵州茅台2026半年报增长是否缓慢？',
-  '招商银行净利润同比怎么样？',
-  '宁德时代毛利率最近怎么变？',
-  '工业富联营收和净利谁更快？',
-  '对比茅台和五粮液的ROE',
-] as const;
 
 const VIEW_STORAGE_KEY = 'home_view_mode';
 const STAR_STORAGE_KEY = 'home_starred_codes';
@@ -74,6 +68,19 @@ function statusMeta(item: CrawlCompanyCoverage) {
   if (item.parseStatus === 'failed') return '抓取失败';
   if (item.covered) return '已发现·待下载';
   return '等待抓取';
+}
+
+function coverageToPlaceholderSeeds(coverage: CrawlCompanyCoverage[]): PlaceholderSeed[] {
+  return coverage
+    .filter((item) => item.code && item.name)
+    .map((item) => ({
+      code: item.code,
+      name: item.name,
+      industryGroup: item.industryGroup,
+      reportPeriod: item.reportPeriod,
+      recentPeriods: item.recentPeriods,
+      hasReadableMetrics: hasReadableMetrics(item),
+    }));
 }
 
 function recentPeriodTokens(item: CrawlCompanyCoverage) {
@@ -168,9 +175,10 @@ function StarButton({
 }
 
 export default function ReportHome() {
+  const router = useRouter();
   const [coverage, setCoverage] = useState<CrawlCompanyCoverage[]>([]);
   const [stats, setStats] = useState<CrawlStats | null>(null);
-  const [, setSource] = useState<'postgresql' | 'crawl-mock' | ''>('');
+  const [source, setSource] = useState<'postgresql' | 'crawl-mock' | ''>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -179,7 +187,7 @@ export default function ReportHome() {
   const [viewMode, setViewMode] = useState<ViewMode>(() => readStoredView());
   const [listSort, setListSort] = useState<{ key: ListSortKey; dir: ListSortDir } | null>(null);
   const [waitToast, setWaitToast] = useState<string | null>(null);
-  const [starred, setStarred] = useState<string[]>([]);
+  const [starred, setStarred] = useState<string[]>(() => readStarredCodes());
   const [submitting, setSubmitting] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
@@ -189,20 +197,30 @@ export default function ReportHome() {
   /** Card grid: show 3 rows first, then reveal one-by-one as user scrolls. */
   const [visibleCardCount, setVisibleCardCount] = useState(9);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const [placeholders, setPlaceholders] = useState<string[]>(DEFAULT_HOME_PLACEHOLDERS);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
+  const coveragePlaceholderKey = useMemo(
+    () => coverage.map((item) => `${item.code}:${item.reportPeriod ?? ''}`).sort().join('|'),
+    [coverage],
+  );
+  const [placeholderKey, setPlaceholderKey] = useState(coveragePlaceholderKey);
+  if (coveragePlaceholderKey !== placeholderKey) {
+    setPlaceholderKey(coveragePlaceholderKey);
+    setPlaceholders(buildHomePlaceholders(coverageToPlaceholderSeeds(coverage)));
+    setPlaceholderIndex(0);
+  }
 
-  useEffect(() => {
-    setStarred(readStarredCodes());
-  }, []);
+  const activePlaceholder = placeholders[placeholderIndex] ?? placeholders[0] ?? DEFAULT_HOME_PLACEHOLDERS[0];
 
   useEffect(() => {
     if (search.trim()) return;
+    if (placeholders.length < 2) return;
     const timer = window.setInterval(() => {
-      setPlaceholderIndex((i) => (i + 1) % SEARCH_PLACEHOLDERS.length);
+      setPlaceholderIndex((i) => (i + 1) % placeholders.length);
     }, 4800);
     return () => window.clearInterval(timer);
-  }, [search]);
+  }, [search, placeholders]);
 
   const refreshCoverage = useCallback(async () => {
     try {
@@ -219,6 +237,7 @@ export default function ReportHome() {
       setSource(payload.source ?? '');
       setError(payload.warning ?? (payload.source === 'crawl-mock' ? '当前展示为演示兜底数据（库为空或暂不可用）。' : ''));
     } catch (err) {
+      setSource('');
       setError(`真实数据暂时无法读取：${String(err)}`);
     } finally {
       setLoading(false);
@@ -226,9 +245,12 @@ export default function ReportHome() {
   }, []);
 
   useEffect(() => {
-    void refreshCoverage();
+    const kick = window.setTimeout(() => { void refreshCoverage(); }, 0);
     const timer = window.setInterval(() => { void refreshCoverage(); }, 5 * 60 * 1000);
-    return () => { window.clearInterval(timer); };
+    return () => {
+      window.clearTimeout(kick);
+      window.clearInterval(timer);
+    };
   }, [refreshCoverage]);
 
   useEffect(() => {
@@ -237,14 +259,13 @@ export default function ReportHome() {
     return () => window.clearTimeout(timer);
   }, [waitToast]);
 
-  useEffect(() => {
-    if (!dialog || dialog.kind !== 'unrecognized') return;
-    const fromQuery = dialog.suggestedCode
-      ?? dialog.query.match(/(?<!\d)(\d{6})(?!\d)/)?.[1]
-      ?? '';
-    setJoinCode(fromQuery);
+  const joinDialogKey = dialog?.kind === 'unrecognized' ? `${dialog.suggestedCode ?? ''}|${dialog.query}` : '';
+  const [joinSyncedKey, setJoinSyncedKey] = useState(joinDialogKey);
+  if (dialog?.kind === 'unrecognized' && joinDialogKey !== joinSyncedKey) {
+    setJoinSyncedKey(joinDialogKey);
+    setJoinCode(dialog.suggestedCode ?? dialog.query.match(/(?<!\d)(\d{6})(?!\d)/)?.[1] ?? '');
     setJoinName('');
-  }, [dialog]);
+  }
 
   const setView = useCallback((mode: ViewMode) => {
     setViewMode(mode);
@@ -331,10 +352,12 @@ export default function ReportHome() {
   const gridCols = viewMode === 'list' ? 1 : 3;
   const initialRows = 3;
   const initialCards = gridCols * initialRows;
-
-  useEffect(() => {
+  const cardResetKey = `${initialCards}|${keyword}|${industry}|${sortMode}|${viewMode}|${listSort?.key ?? ''}|${listSort?.dir ?? ''}`;
+  const [visibleForKey, setVisibleForKey] = useState(cardResetKey);
+  if (cardResetKey !== visibleForKey) {
+    setVisibleForKey(cardResetKey);
     setVisibleCardCount(initialCards);
-  }, [initialCards, keyword, industry, sortMode, viewMode, listSort]);
+  }
 
   const visibleCards = useMemo(
     () => (viewMode === 'list' ? filtered : filtered.slice(0, visibleCardCount)),
@@ -399,7 +422,7 @@ export default function ReportHome() {
     }
 
     const url = buildCompanyAskUrl(company.code, question, periodToken);
-    window.location.href = url;
+    router.push(url);
   }
 
   async function onSearchSubmit(override?: string) {
@@ -411,7 +434,7 @@ export default function ReportHome() {
     if (/^\d{6}$/.test(raw) && !parsed.hasQuestionIntent) {
       const hit = matchCompany(raw, coverage);
       if (hit) {
-        window.location.href = `/${hit.code}`;
+        router.push(`/${hit.code}`);
         return;
       }
       const listed = resolveListedCompany(raw);
@@ -428,7 +451,7 @@ export default function ReportHome() {
       const hit = matchCompany(parsed.companyQuery || raw, coverage)
         ?? matchCompany(raw, coverage);
       if (hit) {
-        window.location.href = `/${hit.code}`;
+        router.push(`/${hit.code}`);
         return;
       }
       const listed = resolveListedCompany(raw) ?? resolveListedCompany(parsed.companyQuery || raw);
@@ -530,7 +553,7 @@ export default function ReportHome() {
     e?.preventDefault();
     e?.stopPropagation();
     if (crawlingCodes.includes(item.code)) {
-      window.location.href = `/sources?focus=${encodeURIComponent(item.code)}`;
+      router.push(`/sources?focus=${encodeURIComponent(item.code)}`);
       return;
     }
     setCrawlingCodes((prev) => (prev.includes(item.code) ? prev : [...prev, item.code]));
@@ -553,7 +576,7 @@ export default function ReportHome() {
       setWaitToast(`网络异常：${String(err)}`);
       return;
     }
-    window.location.href = `/sources?focus=${encodeURIComponent(item.code)}`;
+    router.push(`/sources?focus=${encodeURIComponent(item.code)}`);
   }
 
   async function joinByCodeFromDialog() {
@@ -644,7 +667,7 @@ export default function ReportHome() {
         </svg>
         <input
           aria-label="搜索或提问：公司名称、股票代码，或自然语言问题"
-          placeholder={SEARCH_PLACEHOLDERS[placeholderIndex]}
+          placeholder={activePlaceholder}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           disabled={submitting}
@@ -661,7 +684,7 @@ export default function ReportHome() {
           aria-label={search.trim() ? '搜索' : '用当前示例提问'}
           title={search.trim() ? '搜索' : '发送示例问题'}
           onClick={() => {
-            const q = search.trim() || SEARCH_PLACEHOLDERS[placeholderIndex];
+            const q = search.trim() || activePlaceholder;
             if (!search.trim()) setSearch(q);
             void onSearchSubmit(q);
           }}
@@ -676,7 +699,13 @@ export default function ReportHome() {
         </button>
       </form>
 
-      {error && (
+      {source === 'crawl-mock' && (
+        <div className="rh-mock-banner" role="status">
+          ⚠️ 实时数据暂时不可用，当前为示例数据
+          {error ? <span>{error}</span> : null}
+        </div>
+      )}
+      {error && source !== 'crawl-mock' && (
         <div className="rh-error" role="alert">
           {error}
         </div>

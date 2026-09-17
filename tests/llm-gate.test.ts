@@ -3,13 +3,21 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { llmRetryDelayMs, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
+import { fetchChatCompletions, llmRetryDelayMs, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
 
 test('retries only HTTP 429', () => {
   assert.equal(shouldRetryLlmStatus(429), true);
   assert.equal(shouldRetryLlmStatus(503), false);
   assert.equal(shouldRetryLlmStatus(200), false);
   assert.equal(shouldRetryLlmStatus(400), false);
+});
+
+test('failovers on auth, timeout and 5xx, not on 400', () => {
+  assert.equal(shouldFailoverLlmStatus(429), true);
+  assert.equal(shouldFailoverLlmStatus(503), true);
+  assert.equal(shouldFailoverLlmStatus(401), true);
+  assert.equal(shouldFailoverLlmStatus(400), false);
+  assert.equal(shouldFailoverLlmStatus(200), false);
 });
 
 test('backoff honors Retry-After seconds and exponential fallback', () => {
@@ -46,4 +54,69 @@ test('withLlmSlot reclaims a stale lock from a dead pid', async () => {
   writeFileSync(file, `${JSON.stringify({ pid: 999999, at: Date.now() - 4 * 60 * 1000 })}\n`);
   const seen = await withLlmSlot(async () => 'ok');
   assert.equal(seen, 'ok');
+});
+
+function withLlmEnv(env: Record<string, string | undefined>, fn: () => Promise<void>) {
+  const keys = ['LLM_BASE_URL', 'LLM_API_KEY', 'LLM_MODEL', 'LLM_MODELS', 'LLM_PROVIDERS', 'LLM_FAILOVER_TIMEOUT_MS'];
+  const prev = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) {
+    if (env[key] === undefined) delete process.env[key];
+    else process.env[key] = env[key];
+  }
+  resetLlmProviderState();
+  return fn().finally(() => {
+    resetLlmProviderState();
+    for (const key of keys) {
+      if (prev[key] === undefined) delete process.env[key];
+      else process.env[key] = prev[key];
+    }
+  });
+}
+
+test('fetchChatCompletions failovers from 502 to the next provider', async () => {
+  await withLlmEnv({
+    LLM_BASE_URL: 'http://a.invalid/v1',
+    LLM_MODEL: 'model-a',
+    LLM_PROVIDERS: JSON.stringify([{ name: 'b', baseUrl: 'http://b.invalid/v1', model: 'model-b' }]),
+  }, async () => {
+    const orig = globalThis.fetch;
+    const hits: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      hits.push(url);
+      const body = JSON.parse(String(init?.body ?? '{}')) as { model?: string };
+      if (url.includes('a.invalid')) return new Response('down', { status: 502 });
+      assert.equal(body.model, 'model-b');
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const res = await fetchChatCompletions({ messages: [] });
+      assert.equal(res.status, 200);
+      assert.deepEqual(hits, ['http://a.invalid/v1/chat/completions', 'http://b.invalid/v1/chat/completions']);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+});
+
+test('fetchChatCompletions does not failover on HTTP 400', async () => {
+  await withLlmEnv({
+    LLM_BASE_URL: 'http://a.invalid/v1',
+    LLM_MODEL: 'model-a',
+    LLM_PROVIDERS: JSON.stringify([{ name: 'b', baseUrl: 'http://b.invalid/v1', model: 'model-b' }]),
+  }, async () => {
+    const orig = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response('bad', { status: 400 });
+    }) as typeof fetch;
+    try {
+      const res = await fetchChatCompletions({ messages: [] });
+      assert.equal(res.status, 400);
+      assert.equal(calls, 1);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
 });

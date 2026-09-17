@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { parseLlmProviders, type LlmProvider } from './llm-providers';
 
 type LockPayload = { pid: number; at: number };
 
@@ -109,6 +110,80 @@ export function shouldRetryLlmStatus(status: number) {
   return status === 429;
 }
 
+/** After same-provider 429 retries, switch vendor on these statuses. */
+export function shouldFailoverLlmStatus(status: number) {
+  return status === 401 || status === 403 || status === 408 || status === 429 || status >= 500;
+}
+
+const STICKY_MS = 3 * 60 * 1000;
+let stickyId: string | null = null;
+let stickyUntil = 0;
+
+export function resetLlmProviderState() {
+  stickyId = null;
+  stickyUntil = 0;
+}
+
+function rememberSuccess(provider: LlmProvider) {
+  stickyId = provider.id;
+  stickyUntil = Date.now() + STICKY_MS;
+}
+
+function orderedProviders() {
+  const all = parseLlmProviders();
+  if (!stickyId || Date.now() > stickyUntil) return all;
+  const index = all.findIndex((item) => item.id === stickyId);
+  if (index <= 0) return all;
+  return [...all.slice(index), ...all.slice(0, index)];
+}
+
+function payloadFor(provider: LlmProvider, body: unknown) {
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    return { ...(body as Record<string, unknown>), model: provider.model };
+  }
+  return { model: provider.model };
+}
+
+function providerTimeoutMs(timeoutMs: number, isLast: boolean) {
+  if (isLast) return timeoutMs;
+  const raw = Number(process.env.LLM_FAILOVER_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) return timeoutMs;
+  return Math.min(timeoutMs, Math.max(raw, 1000));
+}
+
+async function fetchFromProvider(
+  provider: LlmProvider,
+  body: unknown,
+  options: { signal?: AbortSignal; timeoutMs: number },
+): Promise<Response> {
+  const url = `${provider.baseUrl}/chat/completions`;
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;
+  const payload = JSON.stringify(payloadFor(provider, body));
+  const maxAttempts = 5;
+  let last: Response | undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (options.signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+    try {
+      last = await fetch(url, { method: 'POST', signal: controller.signal, headers, body: payload });
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', onAbort);
+    }
+    if (!shouldRetryLlmStatus(last.status)) return last;
+    if (attempt === maxAttempts - 1) return last;
+    const wait = llmRetryDelayMs(attempt, last.headers.get('retry-after')) + Math.floor(Math.random() * 400);
+    console.warn('[llm] rate limited, backing off', { provider: provider.id, status: last.status, wait, attempt: attempt + 1 });
+    await last.text().catch(() => '');
+    await sleep(wait, options.signal);
+  }
+  return last!;
+}
+
 /** One in-flight LLM call across this process and other local processes sharing the lock file. */
 export async function withLlmSlot<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
@@ -129,33 +204,35 @@ export async function fetchChatCompletions(
   body: unknown,
   options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<Response> {
-  const baseUrl = process.env.LLM_BASE_URL;
-  if (!baseUrl) throw new Error('LLM_BASE_URL is not configured');
-  const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
-  if (process.env.LLM_API_KEY) headers.authorization = `Bearer ${process.env.LLM_API_KEY}`;
-  const payload = JSON.stringify(body);
+  const providers = orderedProviders();
+  if (!providers.length) throw new Error('LLM_BASE_URL is not configured');
   const timeoutMs = options.timeoutMs ?? 60_000;
-  const maxAttempts = 5;
   let last: Response | undefined;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (options.signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
-    const controller = new AbortController();
-    const onAbort = () => controller.abort();
-    options.signal?.addEventListener('abort', onAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let lastError: unknown;
+  for (let index = 0; index < providers.length; index++) {
+    const provider = providers[index];
+    const isLast = index === providers.length - 1;
     try {
-      last = await fetch(url, { method: 'POST', signal: controller.signal, headers, body: payload });
-    } finally {
-      clearTimeout(timer);
-      options.signal?.removeEventListener('abort', onAbort);
+      last = await fetchFromProvider(provider, body, {
+        signal: options.signal,
+        timeoutMs: providerTimeoutMs(timeoutMs, isLast),
+      });
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      lastError = error;
+      console.warn('[llm] provider failed', { provider: provider.id, message: String(error) });
+      if (isLast) throw error;
+      continue;
     }
-    if (!shouldRetryLlmStatus(last.status)) return last;
-    if (attempt === maxAttempts - 1) return last;
-    const wait = llmRetryDelayMs(attempt, last.headers.get('retry-after')) + Math.floor(Math.random() * 400);
-    console.warn('[llm] rate limited, backing off', { status: last.status, wait, attempt: attempt + 1 });
+    if (last.ok) {
+      rememberSuccess(provider);
+      if (index > 0) console.warn('[llm] using fallback provider', { provider: provider.id, model: provider.model });
+      return last;
+    }
+    if (!shouldFailoverLlmStatus(last.status) || isLast) return last;
+    console.warn('[llm] failover', { from: provider.id, status: last.status, next: providers[index + 1]?.id });
     await last.text().catch(() => '');
-    await sleep(wait, options.signal);
   }
-  return last!;
+  if (last) return last;
+  throw lastError ?? new Error('LLM_BASE_URL is not configured');
 }

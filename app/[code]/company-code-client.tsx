@@ -40,6 +40,13 @@ export default function CompanyCodeClient({ code }: { code: string }) {
     const p = searchParams.get('period');
     return p && p.trim() ? p.trim() : null;
   }, [searchParams]);
+  const preferredCite = useMemo(() => {
+    const pageRaw = searchParams.get('page');
+    const page = pageRaw && /^\d+$/.test(pageRaw) ? Number(pageRaw) : 0;
+    const quote = (searchParams.get('quote') ?? '').replace(/\s+/g, ' ').trim();
+    if (page < 1 && !quote) return null;
+    return { page: page >= 1 ? page : 1, quote };
+  }, [searchParams]);
   const meta = (companiesJson as CompanyMeta[]).find((item) => item.code === code) ?? null;
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
@@ -157,6 +164,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
         onApprove={adminMode ? approveReport : undefined}
         autoAskQuestion={autoAskQuestion}
         preferredPeriod={preferredPeriod}
+        preferredCite={preferredCite}
       />
       {adminDialogOpen && (
         <div className="drawer-backdrop" onClick={() => !adminSubmitting && setAdminDialogOpen(false)}>

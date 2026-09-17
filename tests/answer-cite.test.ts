@@ -24,6 +24,18 @@ test('filing page href encodes code and period', () => {
   assert.equal(parseFilingHref('https://example.com/about'), null);
 });
 
+test('filing page href carries cite page and quote for PDF landing', () => {
+  const href = filingPageHref('600519', '2025H1', { page: 5, quote: '上年同期的 36.18 元/股' });
+  assert.equal(href, '/600519?period=2025H1&page=5&quote=%E4%B8%8A%E5%B9%B4%E5%90%8C%E6%9C%9F%E7%9A%84+36.18+%E5%85%83%2F%E8%82%A1');
+  assert.deepEqual(parseFilingHref(href), {
+    code: '600519',
+    period: '2025H1',
+    page: 5,
+    quote: '上年同期的 36.18 元/股',
+  });
+  assert.equal(filingPageHref('600519', '2025H1', { page: 0, quote: '  ' }), '/600519?period=2025H1');
+});
+
 test('source labels stay short in hover and expanded in references', () => {
   const source = { companyName: '韦尔股份', period: '2025Q3', page: 1 };
   assert.equal(citeHoverText(source), '韦尔股份 2025Q3 财报 (第 1 页)');

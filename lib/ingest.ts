@@ -590,6 +590,7 @@ export async function processBacklog(options: {
           continue;
         }
         const createdAt = new Date().toISOString();
+        const coreOk = hasCoreMetrics(extracted.metrics);
         await ensureBackendSchema();
         await db.begin(async (tx) => {
           for (const metric of extracted.metrics) {
@@ -612,30 +613,19 @@ export async function processBacklog(options: {
               ON CONFLICT (announcement_id, page) DO UPDATE SET content=EXCLUDED.content, created_at=EXCLUDED.created_at
             `;
           }
-          // 仍停在 parsing：指标先入库供速览生成，整份概览落库后再改 review / parse_partial
           await tx`
-            UPDATE announcements SET updated_at=${createdAt}, parse_error=NULL
+            UPDATE announcements SET status=${coreOk ? 'review' : 'parse_partial'}, online_at=NULL,
+              parsed_at=${createdAt},
+              parse_error=${coreOk ? null : '指标不完整（已解析，仅标注，不自动重试）'},
+              updated_at=${createdAt}
             WHERE id=${record.id}
           `;
         });
-        const coreOk = hasCoreMetrics(extracted.metrics);
-        patchIngestProgress(record.id, { detail: '生成财报速览…' });
-        try {
-          // 解析后排队写入速览：LLM 全局闸门同时只跑 1 路，避免 429。
-          // 手动重新解析同样走这里，成功则覆盖旧速览，失败则保留上一份。
-          await refreshReportVerdict(record.id);
-        } catch (error) {
-          console.warn('[verdict] persist after parse failed', { id: record.id, error: String(error) });
-        }
-        await db`
-          UPDATE announcements SET status=${coreOk ? 'review' : 'parse_partial'}, online_at=NULL,
-            parsed_at=${createdAt},
-            parse_error=${coreOk ? null : '指标不完整（已解析，仅标注，不自动重试）'},
-            updated_at=NOW()
-          WHERE id=${record.id}
-        `;
         clearIngestProgress(record.id);
         parsed += 1;
+        // 概览是增强项：失败不回滚解析结果，也不占用 parsing 状态
+        void refreshReportVerdict(record.id).catch((error) =>
+          console.warn('[verdict] background generate failed', { id: record.id, error: String(error) }));
       }
     } catch (error) {
       failed += 1;

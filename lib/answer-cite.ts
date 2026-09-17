@@ -21,10 +21,23 @@ export function tokenizeAnswerCites(text: string): AnswerCiteToken[] {
   });
 }
 
-export function filingPageHref(code: string, period?: string) {
+export const FILING_CITE_QUOTE_MAX = 180;
+
+export type FilingCite = { page?: number; quote?: string };
+
+export function filingPageHref(code: string, period?: string, cite?: FilingCite) {
   if (!/^\d{6}$/.test(code)) return '';
+  const params = new URLSearchParams();
   const token = period?.trim();
-  return token ? `/${code}?period=${encodeURIComponent(token)}` : `/${code}`;
+  if (token) params.set('period', token);
+  const page = cite?.page;
+  if (typeof page === 'number' && Number.isFinite(page) && page >= 1) {
+    params.set('page', String(Math.floor(page)));
+  }
+  const quote = cite?.quote?.replace(/\s+/g, ' ').trim();
+  if (quote) params.set('quote', quote.slice(0, FILING_CITE_QUOTE_MAX));
+  const qs = params.toString();
+  return qs ? `/${code}?${qs}` : `/${code}`;
 }
 
 export function parseFilingHref(href: string) {
@@ -34,7 +47,16 @@ export function parseFilingHref(href: string) {
       : new URL(href, 'https://local.invalid');
     const match = url.pathname.match(/^\/(\d{6})\/?$/);
     if (!match) return null;
-    return { code: match[1], period: url.searchParams.get('period') || undefined };
+    const period = url.searchParams.get('period') || undefined;
+    const pageRaw = url.searchParams.get('page');
+    const page = pageRaw && /^\d+$/.test(pageRaw) ? Number(pageRaw) : undefined;
+    const quote = url.searchParams.get('quote')?.replace(/\s+/g, ' ').trim() || undefined;
+    return {
+      code: match[1],
+      period,
+      ...(page && page >= 1 ? { page } : {}),
+      ...(quote ? { quote } : {}),
+    };
   } catch {
     return null;
   }

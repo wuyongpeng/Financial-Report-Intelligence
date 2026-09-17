@@ -1,5 +1,6 @@
 import { getDb } from '@/lib/db';
 import { apiError } from '@/lib/api';
+import { llmConfigured } from '@/lib/llm-providers';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
     ]);
     return Response.json({ mode: 'live', coverage: counts.readable_companies, targetCoverage: counts.target_companies,
       health, latestRun: latestRun[0] ?? null, counts, bootstrapped: false,
-      modelConfigured: Boolean(process.env.LLM_BASE_URL && process.env.LLM_MODEL),
+      modelConfigured: llmConfigured(),
       vocabulary: {
         target: '监控池启用公司数',
         readable: '核心四项完整且原文可检索',

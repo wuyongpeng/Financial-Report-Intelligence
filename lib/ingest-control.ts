@@ -11,7 +11,7 @@ export type IngestControl = {
 const DEFAULT_CONTROL: IngestControl = { autoCrawlEnabled: true, downloadPaused: false };
 
 function controlPath() {
-  return resolve(/* turbopackIgnore: true */ process.cwd(), 'data', 'ingest-control.json');
+  return resolve(process.env.RUNTIME_DIR ?? resolve(/* turbopackIgnore: true */ process.cwd(), '.data'), 'ingest-control.json');
 }
 
 function normalize(autoCrawlEnabled: boolean, downloadPaused: boolean): IngestControl {

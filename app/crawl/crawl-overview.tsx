@@ -359,10 +359,7 @@ function QueuePopover({
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
+    if (!open) return;
     function place() {
       const el = anchorRef.current;
       if (!el) return;
@@ -372,10 +369,11 @@ function QueuePopover({
       if (left + width > window.innerWidth - 12) left = Math.max(12, window.innerWidth - width - 12);
       setPos({ top: r.bottom + 8, left });
     }
-    place();
+    const raf = window.requestAnimationFrame(place);
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
     return () => {
+      window.cancelAnimationFrame(raf);
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
@@ -400,7 +398,8 @@ function QueuePopover({
     };
   }, [open, onClose, anchorRef]);
 
-  if (!open || !pos) return null;
+  if (!open) return null;
+  if (!pos) return null;
   const style: CSSProperties = {
     position: 'fixed',
     top: pos.top,
@@ -536,7 +535,7 @@ export default function CrawlOverview() {
   const [live, setLive] = useState<LivePayload | null>(null);
   const [sourceProbes, setSourceProbes] = useState<SourceProbe[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(focusCode);
   const [source, setSource] = useState<SourceFilter>('all');
   const [onlyFailed, setOnlyFailed] = useState(false);
   const [onlyParsing, setOnlyParsing] = useState(false);
@@ -630,12 +629,15 @@ export default function CrawlOverview() {
 
 
   useEffect(() => {
-    void refreshCoverage();
-    void refreshLive();
-    void probeSources();
+    const kick = window.setTimeout(() => {
+      void refreshCoverage();
+      void refreshLive();
+      void probeSources();
+    }, 0);
     const coverageTimer = window.setInterval(() => void refreshCoverage(), 5 * 60 * 1000);
     const liveTimer = window.setInterval(() => void refreshLive(), 15_000);
     return () => {
+      window.clearTimeout(kick);
       window.clearInterval(coverageTimer);
       window.clearInterval(liveTimer);
     };
@@ -656,16 +658,23 @@ export default function CrawlOverview() {
         if (!cancelled) void refreshLive();
       } catch { /* ignore */ }
     };
-    void tick();
+    const kick = window.setTimeout(() => { void tick(); }, 0);
     const id = window.setInterval(() => void tick(), 20_000);
-    return () => { cancelled = true; window.clearInterval(id); };
+    return () => { cancelled = true; window.clearTimeout(kick); window.clearInterval(id); };
   }, [refreshLive]);
 
 
   // Popover open on 排队下载 → tick countdown every 1s from live.waitSec baseline.
+  const downloadGateAt = live?.downloadGate?.nextAt ?? '';
+  const [waitTickFor, setWaitTickFor] = useState(downloadGateAt);
+  if (queuePopover !== 'download') {
+    if (queueWaitTick !== 0) setQueueWaitTick(0);
+  } else if (waitTickFor !== downloadGateAt) {
+    setWaitTickFor(downloadGateAt);
+    setQueueWaitTick(0);
+  }
   useEffect(() => {
     if (queuePopover !== 'download') return;
-    setQueueWaitTick(0);
     const id = window.setInterval(() => setQueueWaitTick((n) => n + 1), 1000);
     return () => window.clearInterval(id);
   }, [queuePopover, live?.downloadGate?.nextAt]);
@@ -694,10 +703,11 @@ export default function CrawlOverview() {
     return () => window.clearInterval(timer);
   }, [queueBusy, refreshLive, refreshCoverage, live?.counts.pending_download, live?.downloadSlots.used, optimisticJobs.length]);
 
-  useEffect(() => {
-    if (!focusCode) return;
-    setSearch((prev) => prev || focusCode);
-  }, [focusCode]);
+  const [appliedFocus, setAppliedFocus] = useState(focusCode);
+  if (focusCode && focusCode !== appliedFocus && !search) {
+    setAppliedFocus(focusCode);
+    setSearch(focusCode);
+  }
 
   useEffect(() => {
     if (!settingsClosing) return;

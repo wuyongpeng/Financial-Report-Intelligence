@@ -1,6 +1,7 @@
 import type { RagContext } from './rag';
 import type { AnswerResult, MemoryMessage } from './conversations';
 import { fetchChatCompletions, withLlmSlot } from './llm-gate';
+import { llmConfigured } from './llm-providers';
 
 export type AnswerRewrite = 'detailed' | 'brief' | 'retry';
 
@@ -46,8 +47,7 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
   });
   if (signal.aborted) return result('', 'cancelled', 'interrupted');
   if (context.directAnswer) return result(context.directAnswer, context.mode);
-  const model = process.env.LLM_MODEL;
-  if (!process.env.LLM_BASE_URL || !model) return result(context.fallback, context.mode, 'complete', ['model-not-configured']);
+  if (!llmConfigured()) return result(context.fallback, context.mode, 'complete', ['model-not-configured']);
   const setting = Number(process.env.LLM_TIMEOUT_MS ?? 60_000);
   const timeoutMs = Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 120_000) : 60_000;
   let answer = '', truncated = false;
@@ -57,7 +57,7 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
       const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 128), 8192) : 1600;
       const sized = rewrite === 'detailed' ? Math.min(Math.round(maxTokens * 1.4), 8192) : maxTokens;
       const upstream = await fetchChatCompletions(
-        { model, temperature: 0, max_tokens: sized, stream: Boolean(emit), messages: modelMessages(context, history, rewrite) },
+        { temperature: 0, max_tokens: sized, stream: Boolean(emit), messages: modelMessages(context, history, rewrite) },
         { signal, timeoutMs },
       );
       if (!upstream.ok || !upstream.body) throw new Error(`Model HTTP ${upstream.status}`);

@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_INGEST_SETTINGS, ingestPollIntervalMs, normalizeIngestSettings } from '../lib/ingest-settings';
 
+test('product defaults match the documented gentle ingest limits', () => {
+  assert.equal(DEFAULT_INGEST_SETTINGS.downloadLimit, 2);
+  assert.equal(DEFAULT_INGEST_SETTINGS.parseLimit, 1);
+  assert.equal(DEFAULT_INGEST_SETTINGS.downloadPauseSec, 20);
+});
+
 test('normalizeIngestSettings treats missing or blank fields as product defaults', () => {
   assert.deepEqual(normalizeIngestSettings({ downloadPauseSec: undefined as unknown as number }), DEFAULT_INGEST_SETTINGS);
   assert.deepEqual(normalizeIngestSettings({ downloadPauseSec: '' as unknown as number }), DEFAULT_INGEST_SETTINGS);

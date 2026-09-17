@@ -691,5 +691,16 @@
     "theme": "交通运输",
     "heat": "B",
     "weight": 60
+  },
+  {
+    "rank": 64,
+    "code": "688802",
+    "name": "沐曦股份-U",
+    "exchange": "SSE",
+    "industry": "AI芯片",
+    "sector": "科技",
+    "theme": "AI芯片",
+    "heat": "B",
+    "weight": 60
   }
 ]

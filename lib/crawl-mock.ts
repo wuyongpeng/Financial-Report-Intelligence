@@ -111,7 +111,7 @@ function buildCoverage(): CrawlCompanyCoverage[] {
     const { reportType, reportPeriod } = periodFor(rand);
     const source: CrawlSourceKind = rand() < 0.62 ? "exchange" : "cninfo";
     const statusRoll = rand();
-    let parseStatus: ParseStatus = covered ? (statusRoll > 0.9 ? "failed" : statusRoll > 0.8 ? "parsing" : "completed") : "pending";
+    const parseStatus: ParseStatus = covered ? (statusRoll > 0.9 ? "failed" : statusRoll > 0.8 ? "parsing" : "completed") : "pending";
     const missingPool: HeadlineMetricName[] = ["roe", "eps", "net_profit", "revenue"];
     const missingCount = parseStatus !== "completed" ? 2 : rand() > 0.85 ? 1 : 0;
     const missingMetrics = missingPool.slice(0, missingCount);

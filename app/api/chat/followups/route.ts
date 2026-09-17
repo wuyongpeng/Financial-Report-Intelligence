@@ -1,4 +1,6 @@
 import { getDb } from '@/lib/db';
+import { fetchChatCompletions } from '@/lib/llm-gate';
+import { llmConfigured } from '@/lib/llm-providers';
 
 // Follow-up questions are a navigation aid, never an answer: they must stay short,
 // answerable from this single report, and must degrade to a static list when the
@@ -34,21 +36,22 @@ function parseQuestions(raw: string, asked: string[]) {
 }
 
 async function generate(prompt: string) {
-  const baseUrl = process.env.LLM_BASE_URL;
-  const model = process.env.LLM_MODEL;
-  if (!baseUrl || !model) return null;
+  if (!llmConfigured()) return null;
   const controller = new AbortController();
   // Follow-ups are secondary content; a short budget keeps them from blocking the reader.
   const timer = setTimeout(() => controller.abort(), Number(process.env.LLM_FOLLOWUP_TIMEOUT_MS ?? 15_000));
   try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST', signal: controller.signal,
-      headers: { 'content-type': 'application/json', ...(process.env.LLM_API_KEY ? { authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}) },
-      body: JSON.stringify({ model, temperature: 0.3, max_tokens: 200, messages: [
-        { role: 'system', content: '你为财报阅读者生成追问建议。只输出3行，每行一个不超过24个汉字的中文问题，必须以问号结尾，不要编号、不要解释、不要投资建议。问题必须能依据同一份财报（已入库指标或原文）继续回答，且不得重复用户已问过的问题。' },
-        { role: 'user', content: prompt },
-      ] }),
-    });
+    const response = await fetchChatCompletions(
+      {
+        temperature: 0.3,
+        max_tokens: 200,
+        messages: [
+          { role: 'system', content: '你为财报阅读者生成追问建议。只输出3行，每行一个不超过24个汉字的中文问题，必须以问号结尾，不要编号、不要解释、不要投资建议。问题必须能依据同一份财报（已入库指标或原文）继续回答，且不得重复用户已问过的问题。' },
+          { role: 'user', content: prompt },
+        ],
+      },
+      { signal: controller.signal, timeoutMs: Number(process.env.LLM_FOLLOWUP_TIMEOUT_MS ?? 15_000) },
+    );
     if (!response.ok) return null;
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     return payload.choices?.[0]?.message?.content?.trim() ?? null;

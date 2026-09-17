@@ -111,8 +111,8 @@ function PageCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdf, slot.page, highlightQuote, highlightPage]);
 
-  const w = slot.width || canvasRef.current?.width || 1;
-  const h = slot.height || canvasRef.current?.height || 1;
+  const w = slot.width > 0 ? slot.width : 1;
+  const h = slot.height > 0 ? slot.height : 1;
 
   return (
     <div className="cd-pdf-page cd-pdf-page-continuous" data-pdf-page={slot.page} aria-busy={busy}>
@@ -128,7 +128,7 @@ function PageCanvas({
           ref={layerRef}
           className="cd-pdf-textlayer"
           data-pdf-page={slot.page}
-          style={w && h ? { aspectRatio: `${w} / ${h}` } : undefined}
+          style={{ aspectRatio: `${w} / ${h}` }}
         >
           {boxes.map((box, i) => (
             <span
@@ -172,6 +172,17 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
   const citeKey = useRef('');
   const suppressVisibleUntil = useRef(0);
   const lastReportedPage = useRef<number | null>(null);
+  const [docKey, setDocKey] = useState(reportId);
+  if (reportId !== docKey) {
+    setDocKey(reportId);
+    setBusy(true);
+    setError('');
+    setShifted(null);
+    setPdf(null);
+    setSlots([]);
+    setNumPages(0);
+    setVisible(new Set([page]));
+  }
   useEffect(() => { resolveRef.current = onResolvePage; }, [onResolvePage]);
   useEffect(() => { pickRef.current = onTextPick; }, [onTextPick]);
   useEffect(() => { visiblePageRef.current = onVisiblePage; }, [onVisiblePage]);
@@ -185,12 +196,6 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
     let active = true;
     let dispose: (() => void) | undefined;
     const abort = new AbortController();
-    setBusy(true);
-    setError('');
-    setShifted(null);
-    setPdf(null);
-    setSlots([]);
-    setNumPages(0);
     highlightY.current = null;
     void (async () => {
       try {
@@ -239,12 +244,16 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
     let active = true;
     const key = `${page}::${quote}`;
     if (citeKey.current === key && shifted !== null) {
-      setVisible((prev) => {
-        const next = new Set(prev);
-        for (let p = Math.max(1, (shifted ?? page) - BUFFER); p <= Math.min(numPages, (shifted ?? page) + BUFFER); p++) next.add(p);
-        return next;
-      });
-      return;
+      const around = shifted ?? page;
+      const id = window.setTimeout(() => {
+        if (!active) return;
+        setVisible((prev) => {
+          const next = new Set(prev);
+          for (let p = Math.max(1, around - BUFFER); p <= Math.min(numPages, around + BUFFER); p++) next.add(p);
+          return next;
+        });
+      }, 0);
+      return () => { active = false; window.clearTimeout(id); };
     }
     citeKey.current = key;
     void (async () => {
@@ -392,7 +401,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
       scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }, 60);
     return () => window.clearTimeout(timer);
-  }, [busy, error, shifted, jumpNonce, quote, slots.length]);
+  }, [busy, error, shifted, jumpNonce, quote, slots.length, page]);
 
   // Text-layer划词 → parent pick bar (delegation on stack).
   useEffect(() => {

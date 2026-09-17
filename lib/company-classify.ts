@@ -4,6 +4,8 @@
  */
 import type { IndustryGroup } from '@/lib/crawl-display';
 import { INDUSTRY_CHIPS, mapIndustryGroup } from '@/lib/crawl-display';
+import { fetchChatCompletions } from './llm-gate';
+import { llmConfigured } from './llm-providers';
 
 export type ClassifiedTags = {
   sector: IndustryGroup;
@@ -190,21 +192,12 @@ export async function lookupMarketIndustry(
 }
 
 async function classifyWithLlm(code: string, name: string): Promise<Mapped | null> {
-  const baseUrl = process.env.LLM_BASE_URL;
-  const model = process.env.LLM_MODEL;
-  if (!baseUrl || !model) return null;
+  if (!llmConfigured()) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Number(process.env.LLM_CLASSIFY_TIMEOUT_MS ?? 8_000));
   try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        ...(process.env.LLM_API_KEY ? { authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}),
-      },
-      body: JSON.stringify({
-        model,
+    const response = await fetchChatCompletions(
+      {
         temperature: 0,
         max_tokens: 80,
         messages: [
@@ -214,8 +207,9 @@ async function classifyWithLlm(code: string, name: string): Promise<Mapped | nul
           },
           { role: 'user', content: `${name}（${code}）` },
         ],
-      }),
-    });
+      },
+      { signal: controller.signal, timeoutMs: Number(process.env.LLM_CLASSIFY_TIMEOUT_MS ?? 8_000) },
+    );
     if (!response.ok) return null;
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const raw = payload.choices?.[0]?.message?.content?.trim() ?? '';
