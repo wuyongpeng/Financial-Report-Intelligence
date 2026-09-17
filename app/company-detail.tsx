@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { amount, anomaliesConclusion, attributionConclusion, cashConversion, change, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { acceptVerdictPayload, changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
@@ -798,7 +798,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       y: Math.max(8, e.clientY - 12),
     });
   }
-  function onOverviewDblClick(e: MouseEvent<HTMLElement>) {
+  function onOverviewDblClick(e: ReactMouseEvent<HTMLElement>) {
     const t = e.target;
     if (!(t instanceof Element)) return;
     if (t.closest('a,select,input,textarea,button,.cd-pick-bar,.cd-cite')) return;
