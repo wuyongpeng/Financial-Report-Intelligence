@@ -1,5 +1,5 @@
 import { apiError, ApiError } from '@/lib/api';
-import { getOrCreateReportVerdict, refreshReportVerdict, fillReportVerdict } from '@/lib/report-verdict-store';
+import { loadStoredVerdict, refreshReportVerdict, fillReportVerdict } from '@/lib/report-verdict-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,9 @@ function json(body: unknown, status = 200) {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
-    const result = await getOrCreateReportVerdict(id);
+    const stored = await loadStoredVerdict(id);
+    if (stored) return json(stored);
+    const result = await fillReportVerdict(id);
     if (!result) return json({ error: 'unavailable' }, 503);
     return json(result);
   } catch (error) {

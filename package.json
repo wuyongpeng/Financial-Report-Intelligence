@@ -21,7 +21,8 @@
     "test:integration": "node --env-file=.env.development.local scripts/check-local.mjs",
     "refresh:ashare": "tsx scripts/refresh-ashare-universe.ts",
     "dev:turbo": "next dev --turbopack",
-    "eval:questions": "node --import tsx scripts/eval-questions.ts"
+    "eval:questions": "node --import tsx scripts/eval-questions.ts",
+    "fill:verdicts": "node --env-file=.env.development.local --import tsx scripts/fill-verdicts.ts"
   },
   "dependencies": {
     "drizzle-kit": "^0.31.10",

@@ -7,6 +7,7 @@ import { fetchAllSources, fetchCninfoReportsForCode, fetchReportsForCode } from 
 import { putReport, readReport, reportByteLength, reportPath } from './storage';
 import { sendAlert } from './alerts';
 import { hasCoreMetrics } from './metric-quality';
+import { refreshReportVerdict } from './report-verdict-store';
 import type { Announcement, Company } from './types';
 import { asIsoDate, buildCoveredPeriodKeys, isFullFinancialReport, pendingDownloadSkipMessage, pendingDownloadSkipReason, periodCoverageKey, periodFromTitle } from './ingest-period';
 import { DUPLICATE_PERIOD_KEEP_MESSAGE, duplicateIdsToSkip } from './period-dedupe';
@@ -611,19 +612,28 @@ export async function processBacklog(options: {
               ON CONFLICT (announcement_id, page) DO UPDATE SET content=EXCLUDED.content, created_at=EXCLUDED.created_at
             `;
           }
-          const coreOk = hasCoreMetrics(extracted.metrics);
+          // 仍停在 parsing：指标先入库供速览生成，整份概览落库后再改 review / parse_partial
           await tx`
-            UPDATE announcements SET status=${coreOk ? 'review' : 'parse_partial'}, online_at=NULL,
-              parsed_at=${createdAt},
-              parse_error=${coreOk ? null : '指标不完整（已解析，仅标注，不自动重试）'},
-              updated_at=${createdAt}
+            UPDATE announcements SET updated_at=${createdAt}, parse_error=NULL
             WHERE id=${record.id}
           `;
-          await tx`DELETE FROM report_verdicts WHERE announcement_id=${record.id}`;
         });
-        void import('./report-verdict-store').then(({ getOrCreateReportVerdict }) => getOrCreateReportVerdict(record.id)).catch((error) => {
+        const coreOk = hasCoreMetrics(extracted.metrics);
+        patchIngestProgress(record.id, { detail: '生成财报速览…' });
+        try {
+          // 解析后必须把速览全文（结论、关键变化、归因模块）写进 report_verdicts；
+          // 手动重新解析同样走这里，成功则覆盖旧速览，失败则保留上一份。
+          await refreshReportVerdict(record.id);
+        } catch (error) {
           console.warn('[verdict] persist after parse failed', { id: record.id, error: String(error) });
-        });
+        }
+        await db`
+          UPDATE announcements SET status=${coreOk ? 'review' : 'parse_partial'}, online_at=NULL,
+            parsed_at=${createdAt},
+            parse_error=${coreOk ? null : '指标不完整（已解析，仅标注，不自动重试）'},
+            updated_at=NOW()
+          WHERE id=${record.id}
+        `;
         clearIngestProgress(record.id);
         parsed += 1;
       }

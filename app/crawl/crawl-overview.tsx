@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type AnimationEvent, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
   canBatchParseFiling,
+  canFillVerdict,
   flattenCrawlFilings,
   filingToPeriodStatus,
   formatQueueLastError,
@@ -549,9 +550,9 @@ export default function CrawlOverview() {
   const [autoCrawlSaving, setAutoCrawlSaving] = useState(false);
   const [triggerMsg, setTriggerMsg] = useState('');
   const [optimisticJobs, setOptimisticJobs] = useState<OptimisticJob[]>([]);
-  const [rowTriggering, setRowTriggering] = useState<string | null>(null);
+  const [rowBusy, setRowBusy] = useState<Record<string, Partial<Record<'crawl' | 'parse' | 'verdict', true>>>>({});
   const [actionConfirm, setActionConfirm] = useState<null | {
-    mode: 'crawl' | 'parse';
+    mode: 'crawl' | 'parse' | 'verdict';
     code: string;
     name: string;
     period?: string;
@@ -564,13 +565,12 @@ export default function CrawlOverview() {
   const [onlyMissingAi, setOnlyMissingAi] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [batchBusy, setBatchBusy] = useState(false);
-  const [batchProgress, setBatchProgress] = useState('');
+  const [tableRefreshing, setTableRefreshing] = useState(false);
   const [settingsMounted, setSettingsMounted] = useState(false);
   const [settingsClosing, setSettingsClosing] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(() => settingsDraftFromLive(null));
   const settingsOpenGen = useRef(0);
-  const batchAbort = useRef(false);
 
   const refreshCoverage = useCallback(async () => {
     try {
@@ -678,7 +678,7 @@ export default function CrawlOverview() {
     || (live?.downloadSlots.used ?? 0) > 0
     || (live?.parseSlots.used ?? 0) > 0
     || optimisticJobs.length > 0
-    || Boolean(rowTriggering),
+    || Object.keys(rowBusy).length > 0,
   );
   useEffect(() => {
     if (!queueBusy) return;
@@ -800,54 +800,63 @@ export default function CrawlOverview() {
 
   async function runBatchJobs(
     jobs: CrawlFilingRow[],
-    mode: 'crawl' | 'parse',
+    mode: 'crawl' | 'parse' | 'verdict',
     confirmText: string,
   ) {
     if (!jobs.length) {
-      setBatchProgress(mode === 'parse' ? '所选财报尚未下载，请先批量抓取。' : '请先勾选要处理的财报。');
+      setTriggerMsg(mode === 'parse' ? '所选财报尚未下载，请先批量抓取。' : mode === 'verdict' ? '所选财报尚未解析，或智析已生成。' : '请先勾选要处理的财报。');
+      window.setTimeout(() => setTriggerMsg(''), 6000);
       return;
     }
     if (!window.confirm(confirmText)) return;
-    batchAbort.current = false;
     setBatchBusy(true);
+    for (const item of jobs) patchRowBusy(item.key, mode, true);
     let done = 0;
     let failed = 0;
-    for (let i = 0; i < jobs.length; i++) {
-      if (batchAbort.current) break;
-      const item = jobs[i];
-      const label = `${item.name} ${item.period}`;
-      setBatchProgress(`正在${mode === 'crawl' ? '抓取' : '解析'} ${i + 1}/${jobs.length} · ${label}`);
-      try {
-        const response = await fetch('/api/crawl/trigger', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(mode === 'crawl'
-            ? {
-                mode: 'manual',
-                codes: [item.code],
-                fullHistory: false,
-                periods: [item.period],
-                ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
-              }
-            : {
-                mode: 'parse',
-                codes: [item.code],
-                parseOnly: true,
-                periods: [item.period],
-                ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
-              }),
-        });
-        const payload = await response.json() as { ok?: boolean; error?: string };
-        if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
-        done += 1;
-      } catch {
-        failed += 1;
+    try {
+      for (const item of jobs) {
+        try {
+          const response = mode === 'verdict'
+            ? await fetch(`/api/reports/${encodeURIComponent(item.announcementId!)}/verdict`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ fill: true }),
+            })
+            : await fetch('/api/crawl/trigger', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(mode === 'crawl'
+                ? {
+                    mode: 'manual',
+                    codes: [item.code],
+                    fullHistory: false,
+                    periods: [item.period],
+                    ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
+                  }
+                : {
+                    mode: 'parse',
+                    codes: [item.code],
+                    parseOnly: true,
+                    periods: [item.period],
+                    ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
+                  }),
+            });
+          const payload = await response.json() as { ok?: boolean; error?: string };
+          if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
+          done += 1;
+        } catch {
+          failed += 1;
+        } finally {
+          patchRowBusy(item.key, mode, false);
+        }
+        void refreshLive();
       }
-      void refreshLive();
+    } finally {
+      for (const item of jobs) patchRowBusy(item.key, mode, false);
+      setBatchBusy(false);
     }
-    const stopped = batchAbort.current;
-    setBatchBusy(false);
-    setBatchProgress(`${stopped ? '已中止' : '完成'}。成功 ${done}，失败 ${failed}`);
+    setTriggerMsg(`完成。成功 ${done}，失败 ${failed}`);
+    window.setTimeout(() => setTriggerMsg(''), 6000);
     void refreshCoverage();
     void refreshLive();
   }
@@ -866,6 +875,18 @@ export default function CrawlOverview() {
       skipped
         ? `将解析 ${jobs.length} 份已下载财报（跳过 ${skipped} 份未下载），已解析的会重新抽取。继续？`
         : `将批量解析 ${jobs.length} 份财报，已解析的会重新抽取指标。继续？`,
+    );
+  }
+
+  function runBatchVerdict() {
+    const jobs = selectedFilings.filter((row) => canFillVerdict(row) && row.verdictStatus !== 'ready');
+    const skipped = selectedFilings.length - jobs.length;
+    void runBatchJobs(
+      jobs,
+      'verdict',
+      skipped
+        ? `将为 ${jobs.length} 份尚未智析的财报调用 AI（跳过 ${skipped} 份）。继续？`
+        : `将为 ${jobs.length} 份财报生成智析。已有结果的不会重算。继续？`,
     );
   }
 
@@ -981,13 +1002,40 @@ export default function CrawlOverview() {
     }
   }
 
-  function triggerKey(mode: 'crawl' | 'parse', code: string, period?: string, announcementId?: string | null) {
+  function triggerKey(mode: 'crawl' | 'parse' | 'verdict', code: string, period?: string, announcementId?: string | null) {
     if (mode === 'parse') return `parse:${code}:${announcementId || period || 'all'}`;
+    if (mode === 'verdict') return `verdict:${code}:${announcementId || period || 'all'}`;
     return `crawl:${code}:${period || 'all'}`;
   }
 
-  function isTriggering(mode: 'crawl' | 'parse', code: string, period?: string, announcementId?: string | null) {
-    return rowTriggering === triggerKey(mode, code, period, announcementId);
+  function rowBusyId(code: string, period?: string, announcementId?: string | null) {
+    return announcementId || `${code}:${period || 'all'}`;
+  }
+
+  function patchRowBusy(id: string, mode: 'crawl' | 'parse' | 'verdict', on: boolean) {
+    setRowBusy((prev) => {
+      const cur = { ...prev[id] };
+      if (on) cur[mode] = true;
+      else delete cur[mode];
+      const next = { ...prev };
+      if (Object.keys(cur).length) next[id] = cur;
+      else delete next[id];
+      return next;
+    });
+  }
+
+  function isRowBusy(id: string, mode: 'crawl' | 'parse' | 'verdict') {
+    return Boolean(rowBusy[id]?.[mode]);
+  }
+
+  async function refreshTable() {
+    if (tableRefreshing) return;
+    setTableRefreshing(true);
+    try {
+      await Promise.all([refreshCoverage(), refreshLive()]);
+    } finally {
+      setTableRefreshing(false);
+    }
   }
 
   function askCrawl(code: string, name: string, p: CrawlPeriodStatus) {
@@ -1033,11 +1081,39 @@ export default function CrawlOverview() {
         <>
           <p><b>{name}</b>（{code}）· <b>{p.period}</b></p>
           {already ? (
-            <p>该期次已解析过。重新解析会再次抽取指标，可能覆盖已有结果。</p>
+            <p>该期次已解析过。重新解析会再次抽取指标，并重新生成概览（结论、关键变化、归因）后覆盖已入库结果。</p>
           ) : p.state === 'downloaded' || p.downloadedAt ? (
-            <p>将解析已下载的 PDF 并入库指标。</p>
+            <p>将解析已下载的 PDF，生成概览全文后一并入库。</p>
           ) : (
-            <p>将解析该期财报 PDF 并入库指标。</p>
+            <p>将解析该期财报 PDF，生成概览全文后一并入库。</p>
+          )}
+          {p.title ? <p className="co-confirm-muted">{p.title.replace(/\s+/g, ' ').slice(0, 80)}</p> : null}
+        </>
+      ),
+    });
+  }
+
+  function askVerdict(code: string, name: string, p: CrawlPeriodStatus) {
+    if (!canFillVerdict(p)) {
+      window.alert(`${name} ${p.period} 尚未解析，请先解析`);
+      return;
+    }
+    const already = p.verdictStatus === 'ready';
+    setActionConfirm({
+      mode: 'verdict',
+      code,
+      name,
+      period: p.period,
+      periodStatus: p,
+      title: already ? '确认重新智析？' : '确认智析？',
+      okLabel: already ? '重新智析' : '开始智析',
+      body: (
+        <>
+          <p><b>{name}</b>（{code}）· <b>{p.period}</b></p>
+          {already ? (
+            <p>该期次已有智析结果。重新智析会覆盖已入库的结论、关键变化和归因。</p>
+          ) : (
+            <p>将根据已解析指标和原文生成智析（结论、关键变化、归因）并落库。</p>
           )}
           {p.title ? <p className="co-confirm-muted">{p.title.replace(/\s+/g, ' ').slice(0, 80)}</p> : null}
         </>
@@ -1050,12 +1126,14 @@ export default function CrawlOverview() {
     const { mode, code, name, period, periodStatus } = actionConfirm;
     setActionConfirm(null);
     if (mode === 'crawl') await runCrawlCompany(code, name, period, periodStatus?.announcementId);
-    else await runParseCompany(code, name, periodStatus);
+    else if (mode === 'parse') await runParseCompany(code, name, periodStatus);
+    else await runVerdictCompany(code, name, periodStatus);
   }
 
   async function runCrawlCompany(code: string, name: string, period?: string, announcementId?: string | null) {
     const key = triggerKey('crawl', code, period);
-    if (rowTriggering === key) return;
+    const busyId = rowBusyId(code, period, announcementId);
+    if (isRowBusy(busyId, 'crawl')) return;
     const label = period ? `${name} ${period}` : `${name}（${code}）`;
     const job: OptimisticJob = {
       key,
@@ -1066,7 +1144,7 @@ export default function CrawlOverview() {
       stage: 'download',
       bucket: 'active',
     };
-    setRowTriggering(key);
+    patchRowBusy(busyId, 'crawl', true);
     setOptimisticJobs((prev) => [job, ...prev.filter((item) => item.key !== key)].slice(0, 12));
     setTriggerMsg(`正在抓取 ${label}…`);
     void refreshLive();
@@ -1102,10 +1180,9 @@ export default function CrawlOverview() {
     } catch (error) {
       setTriggerMsg(String(error));
     } finally {
-      // Keep the breathing dot visible briefly after a fast trigger returns.
       await holdOptimistic(Date.now(), 1400);
       setOptimisticJobs((prev) => prev.filter((item) => item.key !== key));
-      setRowTriggering(null);
+      patchRowBusy(busyId, 'crawl', false);
       window.setTimeout(() => setTriggerMsg(''), 6000);
     }
   }
@@ -1116,7 +1193,8 @@ export default function CrawlOverview() {
     chosen?: import('@/lib/crawl-display').CrawlPeriodStatus,
   ) {
     const key = triggerKey('parse', code, chosen?.period, chosen?.announcementId);
-    if (rowTriggering === key) return;
+    const busyId = rowBusyId(code, chosen?.period, chosen?.announcementId);
+    if (isRowBusy(busyId, 'parse')) return;
     const label = chosen?.period ? `${name} ${chosen.period}` : `${name}（${code}）`;
     const job: OptimisticJob = {
       key,
@@ -1127,7 +1205,7 @@ export default function CrawlOverview() {
       stage: 'parse',
       bucket: 'active',
     };
-    setRowTriggering(key);
+    patchRowBusy(busyId, 'parse', true);
     setOptimisticJobs((prev) => [job, ...prev.filter((item) => item.key !== key)].slice(0, 12));
     setTriggerMsg(`正在解析 ${label}…`);
     void refreshLive();
@@ -1161,7 +1239,42 @@ export default function CrawlOverview() {
     } finally {
       await holdOptimistic(Date.now(), 1400);
       setOptimisticJobs((prev) => prev.filter((item) => item.key !== key));
-      setRowTriggering(null);
+      patchRowBusy(busyId, 'parse', false);
+      window.setTimeout(() => setTriggerMsg(''), 6000);
+    }
+  }
+
+  async function runVerdictCompany(
+    code: string,
+    name: string,
+    chosen?: import('@/lib/crawl-display').CrawlPeriodStatus,
+  ) {
+    if (!chosen?.announcementId) {
+      window.alert(`${name} ${chosen?.period ?? ''} 尚未解析，请先解析`);
+      return;
+    }
+    const busyId = rowBusyId(code, chosen.period, chosen.announcementId);
+    if (isRowBusy(busyId, 'verdict')) return;
+    const label = `${name} ${chosen.period}`;
+    const refresh = chosen.verdictStatus === 'ready';
+    patchRowBusy(busyId, 'verdict', true);
+    setTriggerMsg(`正在智析 ${label}…`);
+    try {
+      const response = await fetch(`/api/reports/${encodeURIComponent(chosen.announcementId)}/verdict`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(refresh ? { refresh: true } : { fill: true }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? '智析失败');
+      setTriggerMsg(`已完成智析 ${label}`);
+      await refreshCoverage();
+      await refreshLive();
+    } catch (error) {
+      setTriggerMsg(String(error));
+    } finally {
+      patchRowBusy(busyId, 'verdict', false);
       window.setTimeout(() => setTriggerMsg(''), 6000);
     }
   }
@@ -1528,7 +1641,7 @@ export default function CrawlOverview() {
               aria-pressed={onlyMissingAi}
               onClick={() => setOnlyMissingAi((v) => !v)}
             >
-              未解析
+              未智析
             </button>
           </div>
           <div className="co-batch-acts" role="group" aria-label="批量操作">
@@ -1538,7 +1651,7 @@ export default function CrawlOverview() {
               disabled={batchBusy || !selectedFilings.length}
               onClick={() => runBatchCrawl()}
             >
-              {batchBusy ? '处理中…' : '批量抓取'}
+              批量抓取
             </button>
             <button
               type="button"
@@ -1548,15 +1661,27 @@ export default function CrawlOverview() {
             >
               批量解析
             </button>
+            <button
+              type="button"
+              className="co-batch-run"
+              disabled={batchBusy || !selectedFilings.length}
+              onClick={() => runBatchVerdict()}
+            >
+              批量智析
+            </button>
             {selectedFilings.length ? <span className="co-batch-count">已选 {selectedFilings.length}</span> : null}
-            {batchBusy ? (
-              <button type="button" className="co-toggle" onClick={() => { batchAbort.current = true; }}>中止</button>
-            ) : selectedFilings.length ? (
-              <button type="button" className="co-toggle" onClick={() => setSelectedIds(new Set())}>取消选择</button>
-            ) : null}
-            {batchProgress ? <span className="co-batch-progress" role="status">{batchProgress}</span> : null}
           </div>
           <div className="co-toolbar-right">
+            <button
+              type="button"
+              className="co-table-refresh"
+              aria-label="刷新列表"
+              title="刷新"
+              disabled={tableRefreshing}
+              onClick={() => void refreshTable()}
+            >
+              <Icon name="refresh" size={14} className={tableRefreshing ? 'co-spin' : undefined} />
+            </button>
             <span className="co-sort-hint" aria-live="polite">
               {loading ? '…' : `${filings.length} 份`}
             </span>
@@ -1571,7 +1696,7 @@ export default function CrawlOverview() {
                   <input
                     type="checkbox"
                     checked={allVisibleSelected}
-                    disabled={!filings.length || batchBusy}
+                    disabled={!filings.length}
                     onChange={toggleSelectVisible}
                     aria-label="全选当前列表中的财报"
                   />
@@ -1595,13 +1720,15 @@ export default function CrawlOverview() {
               {filings.map((item) => {
                 const checked = selectedIds.has(item.key);
                 const period = filingToPeriodStatus(item);
+                const crawlBusy = isRowBusy(item.key, 'crawl');
+                const parseBusy = isRowBusy(item.key, 'parse');
+                const verdictBusy = isRowBusy(item.key, 'verdict');
                 return (
                   <tr key={item.key} className={item.state === 'failed' ? 'is-fail' : ''}>
                     <td className="co-check-col">
                       <input
                         type="checkbox"
                         checked={checked}
-                        disabled={batchBusy}
                         onChange={(e) => toggleFiling(item.key, e.target.checked)}
                         aria-label={`${item.name} ${item.period}`}
                       />
@@ -1639,15 +1766,21 @@ export default function CrawlOverview() {
                         <button
                           type="button"
                           className="co-text-act"
-                          disabled={batchBusy || isTriggering('crawl', item.code, item.period)}
+                          disabled={crawlBusy}
                           onClick={() => askCrawl(item.code, item.name, period)}
-                        >{isTriggering('crawl', item.code, item.period) ? '抓取中…' : '抓取'}</button>
+                        >{crawlBusy ? '抓取中' : '抓取'}</button>
                         <button
                           type="button"
                           className="co-text-act"
-                          disabled={batchBusy || isTriggering('parse', item.code, item.period, item.announcementId) || (item.state === 'expected' && !item.announcementId)}
+                          disabled={parseBusy || (item.state === 'expected' && !item.announcementId)}
                           onClick={() => askParse(item.code, item.name, period)}
-                        >{isTriggering('parse', item.code, item.period, item.announcementId) ? '解析中…' : '解析'}</button>
+                        >{parseBusy ? '解析中' : '解析'}</button>
+                        <button
+                          type="button"
+                          className="co-text-act"
+                          disabled={verdictBusy || (!canFillVerdict(item) && !parseBusy)}
+                          onClick={() => askVerdict(item.code, item.name, period)}
+                        >{verdictBusy ? '智析中' : '智析'}</button>
                       </div>
                     </td>
                   </tr>

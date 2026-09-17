@@ -154,6 +154,21 @@ export async function fillReportVerdict(reportId: string): Promise<ReportVerdict
   return runGenerate(reportId, false);
 }
 
+export async function listReportsNeedingVerdict(limit = 5000) {
+  await ensureBackendSchema();
+  const cap = Math.min(Math.max(1, Math.floor(limit)), 5000);
+  return getDb()<Array<{ id: string; code: string; company_name: string; title: string }>>`
+    SELECT a.id, a.code, a.company_name, a.title
+    FROM announcements a
+    JOIN companies c ON c.code=a.code AND c.enabled=true
+    LEFT JOIN report_verdicts v ON v.announcement_id=a.id
+    WHERE a.status IN ('review', 'online', 'parse_partial')
+      AND (v.announcement_id IS NULL OR v.status <> 'ready')
+    ORDER BY a.published_at DESC
+    LIMIT ${cap}
+  `;
+}
+
 /** Force a new LLM call and overwrite the stored row on success. Keep the old ready payload if refresh fails. */
 export async function refreshReportVerdict(reportId: string): Promise<ReportVerdict | null> {
   const previous = await loadStoredVerdict(reportId);
