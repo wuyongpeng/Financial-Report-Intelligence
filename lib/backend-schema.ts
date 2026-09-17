@@ -28,5 +28,14 @@ async function migrate() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(conversation_id, request_id, role)
     )`;
     await tx`CREATE INDEX IF NOT EXISTS chat_messages_conversation_idx ON chat_messages(conversation_id, id)`;
+    await tx`CREATE TABLE IF NOT EXISTS report_verdicts (
+      announcement_id TEXT PRIMARY KEY REFERENCES announcements(id) ON DELETE CASCADE,
+      payload JSONB,
+      model TEXT,
+      status TEXT NOT NULL CHECK (status IN ('pending','ready','failed')),
+      error TEXT,
+      generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
   });
 }

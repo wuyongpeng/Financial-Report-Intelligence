@@ -1,6 +1,7 @@
 import { fillCoverageGaps, processBacklog, prioritizeCompanyCrawl, runIngestion } from '@/lib/ingest';
 import { demoAccessEnabled, isAppUser } from '@/lib/auth';
 import { getIngestControl } from '@/lib/ingest-control';
+import { getIngestSettings } from '@/lib/ingest-settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,16 +42,15 @@ export async function POST(request: Request) {
     ? body.announcementIds.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(0, 10)
     : [];
   const control = await getIngestControl();
+  const settings = getIngestSettings();
   const autoOn = control.autoCrawlEnabled;
-  const envDownload = Math.min(Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2), 2);
-  const envParse = Math.min(Number(process.env.INGEST_PARSE_LIMIT ?? 1), 1);
 
   try {
     if (discover) {
       const result = await runIngestion({
-        days: Number(process.env.INGEST_DAYS ?? 2),
-        downloadLimit: autoOn ? envDownload : 0,
-        parseLimit: envParse,
+        days: settings.lookbackDays,
+        downloadLimit: autoOn ? settings.downloadLimit : 0,
+        parseLimit: settings.parseLimit,
         fullHistory,
       });
       return Response.json({ mode: 'discover', auth, fullHistory, autoCrawlEnabled: autoOn, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
       downloadPaused: !autoOn,
       note: autoOn
         ? (gaps.bootstrapComplete
-          ? '已完成全量补齐，之后只扫最近 2 天公告。'
+          ? `已完成全量补齐，之后只扫最近 ${settings.lookbackDays} 天公告。`
           : `全量补齐中：本轮检索 ${gaps.filled} 家缺口公司（仍缺 ${gaps.missingPeriods ?? 0} 个 2025Q1+ 期次）。`)
         : '自动抓取已关：仍扫描新公告与缺口期次；下载中的任务会完成，排队任务不再自动开始下载。',
       ...result,

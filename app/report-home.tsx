@@ -9,6 +9,8 @@ import {
   hasDownloadedPdf,
   hasReadableMetrics,
   INDUSTRY_CHIPS,
+  periodDisplay,
+  pickRecentPeriods,
   yoyChange,
   type CrawlCompanyCoverage,
   type CrawlStats,
@@ -26,6 +28,7 @@ import {
   type ParsedPeriod,
 } from '@/lib/home-search';
 import type { Report } from '@/lib/detail-model';
+import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
 type SortMode = 'default' | 'popular';
@@ -51,7 +54,7 @@ const VIEW_STORAGE_KEY = 'home_view_mode';
 const STAR_STORAGE_KEY = 'home_starred_codes';
 
 function deltaLabel(n: number | undefined) {
-  return n === undefined ? '暂无同比' : `同比 ${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+  return n === undefined ? '暂无同比' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 }
 
 function matchKeyword(item: CrawlCompanyCoverage, keyword: string) {
@@ -74,10 +77,8 @@ function statusMeta(item: CrawlCompanyCoverage) {
 }
 
 function recentPeriodTokens(item: CrawlCompanyCoverage) {
-  const periods = item.recentPeriods?.filter(Boolean).slice(0, 6) ?? [];
-  if (periods.length) return periods;
-  if (item.reportPeriod) return [item.reportPeriod];
-  return [] as string[];
+  const tokens = [...(item.recentPeriods ?? []), item.reportPeriod].filter(Boolean) as string[];
+  return pickRecentPeriods(tokens, 3);
 }
 
 function recentPeriodsLabel(item: CrawlCompanyCoverage) {
@@ -650,7 +651,7 @@ export default function ReportHome() {
         />
         {search && (
           <button className="rh-clear" type="button" aria-label="清空搜索" onClick={() => setSearch('')}>
-            ×
+            <Icon name="x" size={16} />
           </button>
         )}
         <button
@@ -787,7 +788,7 @@ export default function ReportHome() {
                     ] as Array<[ListSortKey, string]>
                   ).map(([key, label]) => {
                     const active = listSort?.key === key;
-                    const arrow = !active ? '↕' : listSort?.dir === 'asc' ? '↑' : '↓';
+                    const arrow: IconName = !active ? 'sort' : listSort?.dir === 'asc' ? 'arrowUp' : 'arrowDown';
                     return (
                       <th key={key} scope="col">
                         <button
@@ -797,7 +798,7 @@ export default function ReportHome() {
                           aria-label={`${label}排序`}
                         >
                           {label}
-                          <span aria-hidden="true">{arrow}</span>
+                          <Icon name={arrow} size={12} />
                         </button>
                       </th>
                     );
@@ -898,6 +899,7 @@ export default function ReportHome() {
 
               const previewMetrics = item.metrics.slice(0, 3);
               const periodTokens = recentPeriodTokens(item);
+              const displayPeriod = item.reportPeriod || periodTokens[0] || null;
               const freshIso = freshnessAt(item);
               const parseFailed = !readable && (item.parseStatus === 'failed' || Boolean(item.parseError));
               const cardState = readable ? '' : parseFailed ? ' rh-company-card-failed' : ' rh-company-card-parsing';
@@ -963,8 +965,12 @@ export default function ReportHome() {
                             {delta === undefined ? (
                               <small>暂无同比</small>
                             ) : (
-                              <small className={delta >= 0 ? 'rh-ashare-up' : 'rh-ashare-down'}>
-                                <span aria-hidden="true">{delta >= 0 ? '↑' : '↓'}</span> {deltaLabel(delta)}
+                              <small
+                                className={delta >= 0 ? 'rh-ashare-up' : 'rh-ashare-down'}
+                                title={`同比 ${deltaLabel(delta)}`}
+                              >
+                                <Icon name={delta >= 0 ? 'arrowUp' : 'arrowDown'} size={10} />
+                                {deltaLabel(delta)}
                               </small>
                             )}
                           </div>
@@ -979,8 +985,8 @@ export default function ReportHome() {
                           <Link
                             key={token}
                             href={`/${item.code}?period=${encodeURIComponent(token)}`}
-                            className="rh-period-btn"
-                            title={`打开 ${token} 报告`}
+                            className={`rh-period-btn${token === displayPeriod ? ' current' : ''}`}
+                            title={token === displayPeriod ? `当前展示 ${periodDisplay(token)}` : `打开 ${periodDisplay(token)}`}
                           >
                             {token}
                           </Link>

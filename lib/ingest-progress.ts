@@ -2,6 +2,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { getIngestSettings } from './ingest-settings';
 
 export type IngestProgressPhase = 'download' | 'parse';
 
@@ -80,7 +81,7 @@ export function getDownloadGate(): DownloadGate {
   try {
     return JSON.parse(readFileSync(GATE_FILE, 'utf8')) as DownloadGate;
   } catch {
-    return { nextAt: null, pauseMs: 1200, mode: 'idle' };
+    return { nextAt: null, pauseMs: downloadPauseDefault(), mode: 'idle' };
   }
 }
 
@@ -94,8 +95,7 @@ export function clearDownloadGate() {
 }
 
 function downloadPauseDefault() {
-  const base = Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
-  return Number.isFinite(base) ? Math.max(400, base) : 1200;
+  return Math.max(1000, getIngestSettings().downloadPauseSec * 1000);
 }
 
 const GAP_CURSOR_FILE = join(process.cwd(), '.data', 'ingest-gap-cursor.json');

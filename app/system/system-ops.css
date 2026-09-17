@@ -45,15 +45,16 @@
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   text-decoration: none;
   border: 1px solid #d7e3f8;
   background: linear-gradient(90deg, #f4f8ff, #eef5ff);
   color: #3064db;
   font-size: 13px;
   font-weight: 500;
-  border-radius: 10px;
-  padding: 10px 14px;
+  border-radius: 8px;
+  padding: 0 16px;
+  height: 40px;
 }
 
 .sys-ops-crawl-link:hover {

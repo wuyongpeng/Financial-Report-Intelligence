@@ -1,14 +1,17 @@
 'use client';
 
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { amount, cashConversion, change, comparableHistory, debtRatio, filingType, format, grossMargin, keyFindings, labels, metricNames, moduleForQuestion, period, periodConclusion, periodKey, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { amount, anomaliesConclusion, attributionConclusion, cashConversion, change, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { acceptVerdictPayload, changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
-import { citeHoverText, citeReferenceText, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '@/lib/answer-cite';
+import { citeFilingLabel, citeHoverText, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '@/lib/answer-cite';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
 import AnswerMarkdown from './answer-markdown';
 import { AnswerFeedback } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
+import { Icon } from './ui-icons';
+import { clientUuid } from '@/lib/client-uuid';
 import './company-detail.css';
 
 type Outline = { pageLabels?: PdfPageLabel[]; indexedPages: number; pages: { page: number; content: string }[]; outline: { id: string; title: string; page: number; highlight: string }[] };
@@ -28,8 +31,13 @@ type Message = {
 };
 type Clip = { id: string; kind: FocusKind; quote: string; page?: number; title?: string };
 const emptyOutline: Outline = { indexedPages: 0, pages: [], outline: [] };
-const moduleLabels = { business: '主营业务构成', attribution: '净利润变动分解', anomalies: '异常指标提示', history: '历史趋势详情', peers: '同业对比表格' };
-const suggestions = ['本期最值得关注的变化是什么？请给出原文页码。', '和上年同期比，营收与净利怎么变？', '管理层如何解释本期业绩？请引用原文。', '和已覆盖同行比，我们处在什么位置？'];
+const moduleLabels = { business: '主营业务', attribution: '净利润变动', anomalies: '异常指标提示', history: '历史趋势详情', peers: '同业对比' };
+const compactModuleIds = new Set(['business', 'attribution', 'anomalies']);
+const starterAsks = [
+  { label: '营收增长主因', question: '营业收入变动的主要原因是什么？请引用原文。' },
+  { label: '净利润增长主因', question: '归母净利润变动的主要原因是什么？请引用原文。' },
+  { label: '现金流变动', question: '经营现金流变动的主要原因是什么？请引用原文。' },
+];
 // Material Symbols "dock to left" / "dock to right", inlined to avoid a font request.
 const dockPaths = {
   left: 'M120-120q-33 0-56.5-23.5T40-200v-560q0-33 23.5-56.5T120-840h720q33 0 56.5 23.5T920-760v560q0 33-23.5 56.5T840-120H120Zm200-80h520v-560H320v560Zm-80 0v-560H120v560h120Z',
@@ -61,57 +69,97 @@ function EvaAnalyzing({ phase }: { phase: 'retrieving' | 'reasoning' }) {
   );
 }
 const pct = (n: number | undefined) => n === undefined ? '暂无同期数据' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+function changeDirectionIcon(direction: ChangeDirection): { name: 'arrowUp' | 'arrowDown' | 'warn' | 'minus'; label: string } | null {
+  if (direction === '利好') return { name: 'arrowUp', label: '利好' };
+  if (direction === '利空') return { name: 'arrowDown', label: '利空' };
+  if (direction === '风险') return { name: 'warn', label: '风险' };
+  return { name: 'minus', label: '中性' };
+}
 function reportTypeLabel(r: Report) {
   const kind = filingType(r);
   return kind === 'annual' ? '年报' : kind === 'semiannual' ? '中报' : '季报';
 }
 
-function Trend({ reports, metric, compare, onSelect }: { reports: Report[]; metric: HeadlineMetric; compare: HeadlineMetric | null; onSelect: (r: Report) => void }) {
-  const rows = reports.slice(-5);
-  const values = rows.map(r => value(r, metric)).filter((v): v is number => v !== undefined);
-  if (values.length < 2) return <div className="cd-empty">至少需要两期同口径数据才能绘制趋势。已覆盖 {values.length} 期。</div>;
-  const max = Math.max(...values, 0), min = Math.min(...values, 0), span = max - min || 1;
-  const y = (v: number) => 145 - (v - min) / span * 110;
-  const x = (i: number) => 52 + i * (480 / Math.max(rows.length - 1, 1));
-  // A second metric is indexed to its own first period (=100) and mapped onto the
-  // same axis, so no misleading dual scale is introduced.
-  const compareSeries = compare ? rows.map(r => value(r, compare)) : [];
-  const base = compareSeries.find((v): v is number => v !== undefined && v !== 0);
-  const indexed = base ? compareSeries.map(v => v === undefined ? undefined : v / base * (values[0] ?? 0)) : [];
-  return <svg className="cd-trend" viewBox="0 0 590 190" role="img" aria-label={`${labels[metric]}近${rows.length}期趋势${compare?`，并叠加指数化后的${labels[compare]}`:''}，柱线共用同一刻度`}>
-    {[0, .5, 1].map(t => <g key={t}><line x1="30" x2="560" y1={35 + 110 * t} y2={35 + 110 * t} stroke="#e9eef4" strokeDasharray="3 4" /></g>)}
-    <line x1="30" x2="560" y1={y(0)} y2={y(0)} stroke="#ccd8e5" />
-    {rows.map((r,i) => { const n = value(r,metric); const next = rows[i+1] && value(rows[i+1], metric); return <g key={r.id}>
-      {n !== undefined && <><rect x={x(i)-15} y={Math.min(y(n), y(0))} width="30" height={Math.max(Math.abs(y(n)-y(0)), 1)} rx="4" fill="#e0eafc" />{next !== undefined && <line x1={x(i)} y1={y(n)} x2={x(i+1)} y2={y(next)} stroke="#3064db" strokeWidth="2.5" />}<circle cx={x(i)} cy={y(n)} r="4" fill="#3064db" /><text x={x(i)} y={y(n)-12} textAnchor="middle">{format(n,metric)}</text></>}
-      <text x={x(i)} y="176" textAnchor="middle" onClick={() => onSelect(r)} style={{ cursor: 'pointer' }}>{period(r)}</text><title>{r.title}：{format(n,metric)}</title>
-    </g>; })}
-    {indexed.map((v,i) => { const next = indexed[i+1]; return v === undefined ? null : <g key={`c-${i}`}>
-      {next !== undefined && <line x1={x(i)} y1={y(v)} x2={x(i+1)} y2={y(next)} stroke="#c58b3d" strokeWidth="2" strokeDasharray="5 4" />}
-      <circle cx={x(i)} cy={y(v)} r="3.5" fill="#c58b3d"><title>{labels[compare!]}（指数化）：{format(value(rows[i],compare!),compare!)}</title></circle>
-    </g>; })}
-  </svg>;
+function polylinePath(xs: number[], ys: Array<number | undefined>) {
+  const parts: string[] = [];
+  let drawing = false;
+  for (let i = 0; i < xs.length; i++) {
+    const yv = ys[i];
+    if (yv === undefined) {
+      drawing = false;
+      continue;
+    }
+    parts.push(`${drawing ? 'L' : 'M'}${xs[i]} ${yv}`);
+    drawing = true;
+  }
+  return parts.join(' ');
 }
 
-function Radar({ peers, code }: { peers: Peer[]; code: string }) {
-  const axes = ['营收规模', '利润规模', '每股收益', 'ROE', '归母净利率', '营收成长'];
-  const codes = [...new Set(peers.map(p => p.code))];
-  const get = (c: string, i: number) => {
-    if (i === 5) return peers.find(p => p.code === c && p.metric === 'revenue_growth')?.value;
-    if (i === 4) { const r = peers.find(p => p.code === c && p.metric === 'revenue')?.value; const n = peers.find(p => p.code === c && p.metric === 'net_profit')?.value; return r && r > 0 && n !== undefined ? n / r * 100 : undefined; }
-    return peers.find(p => p.code === c && p.metric === metricNames[i])?.value;
-  };
-  // Each axis is filtered independently, so its sample size must travel with it.
-  const samples = axes.map((_, i) => codes.map(c => get(c, i)).filter((n): n is number => n !== undefined).length);
-  const scores = axes.map((_, i) => {
-    const self = get(code, i), all = codes.map(c => get(c, i)).filter((n): n is number => n !== undefined);
-    return self === undefined || all.length < 2 ? undefined : all.filter(n => n < self).length / (all.length - 1) * 100;
-  });
-  const point = (i: number, score: number) => [155 + Math.sin(i * Math.PI / 3) * 78 * score / 100, 112 - Math.cos(i * Math.PI / 3) * 78 * score / 100];
-  return <><svg className="cd-radar" viewBox="0 0 310 225" role="img" aria-label="固定六轴同业百分位，缺失维度不连线">
-    {[25,50,75,100].map(s => <polygon key={s} points={axes.map((_,i) => point(i,s).join(',')).join(' ')} fill={s===100?'#f7faff':'none'} stroke="#e1e8f2" />)}
-    {axes.map((axis,i) => { const p = point(i,100), l=point(i,132), score=scores[i]; return <g key={axis}><line x1="155" y1="112" x2={p[0]} y2={p[1]} stroke="#e1e8f2" /><text x={l[0]} y={l[1]} textAnchor="middle" dominantBaseline="middle">{axis}<tspan className="cd-axis-sample" x={l[0]} dy="13">{samples[i]} 家</tspan></text>{score !== undefined && <circle cx={point(i,score)[0]} cy={point(i,score)[1]} r="4" fill="#3064db"><title>{axis}：{samples[i]} 家样本内第 {(samples[i]-Math.round(score/100*(samples[i]-1))).toFixed(0)} 位</title></circle>}</g>; })}
-    {scores.every(s => s !== undefined) && <polygon points={scores.map((s,i)=>point(i,s!).join(',')).join(' ')} fill="#3064db25" stroke="#3064db" strokeWidth="2" />}
-  </svg><p className="cd-note"><i className="cd-dot" />同报告期 · 覆盖 {codes.length} 家 · 0–100 百分位</p><p className="cd-note">固定六轴；缺项不补零、不连线。每轴下方标注该轴实际样本量——不同轴的样本可能不同，跨轴比较需谨慎，且不代表完整行业排名。</p></>;
+function Trend({ reports, metric, compare, onSelect }: { reports: Report[]; metric: HeadlineMetric; compare: HeadlineMetric | null; onSelect: (r: Report) => void }) {
+  const rows = reports.slice(-8);
+  const primary = rows.map((r) => value(r, metric));
+  const values = primary.filter((v): v is number => v !== undefined);
+  if (values.length < 2) return <div className="cd-empty">至少需要两期同口径数据才能绘制趋势。已覆盖 {values.length} 期。</div>;
+  const compareSeries = compare ? rows.map((r) => value(r, compare)) : [];
+  const base = compareSeries.find((v): v is number => v !== undefined && v !== 0);
+  const indexed = base ? compareSeries.map((v) => v === undefined ? undefined : v / base * (values[0] ?? 0)) : [];
+  const overlayVals = indexed.filter((v): v is number => v !== undefined);
+  const dataMin = Math.min(...values, ...overlayVals);
+  const dataMax = Math.max(...values, ...overlayVals);
+  const range = dataMax - dataMin;
+  const pad = (range === 0 ? Math.abs(dataMax) || 1 : range) * 0.12;
+  let min = dataMin - pad;
+  let max = dataMax + pad;
+  if (dataMin < 0 && dataMax > 0) {
+    min = Math.min(min, 0);
+    max = Math.max(max, 0);
+  }
+  const span = max - min || 1;
+  const plot = { left: 36, right: 554, top: 28, bottom: 148 };
+  const xs = rows.map((_, i) => plot.left + i * ((plot.right - plot.left) / Math.max(rows.length - 1, 1)));
+  const yOf = (v: number) => plot.bottom - (v - min) / span * (plot.bottom - plot.top);
+  const primaryYs = primary.map((v) => v === undefined ? undefined : yOf(v));
+  const compareYs = indexed.map((v) => v === undefined ? undefined : yOf(v));
+  const primaryPath = polylinePath(xs, primaryYs);
+  const comparePath = polylinePath(xs, compareYs);
+  const showZero = min < 0 && max > 0;
+  return (
+    <svg className="cd-trend" viewBox="0 0 590 190" role="img" aria-label={`${labels[metric]}近${rows.length}期趋势${compare ? `，并叠加指数化后的${labels[compare]}` : ''}`}>
+      {[0, 0.5, 1].map((t) => (
+        <line key={t} className="cd-trend-grid" x1={plot.left - 6} x2={plot.right + 6} y1={plot.top + (plot.bottom - plot.top) * t} y2={plot.top + (plot.bottom - plot.top) * t} />
+      ))}
+      {showZero ? <line className="cd-trend-zero" x1={plot.left - 6} x2={plot.right + 6} y1={yOf(0)} y2={yOf(0)} /> : null}
+      {primaryPath ? <path className="cd-trend-line" d={primaryPath} /> : null}
+      {comparePath ? <path className="cd-trend-line compare" d={comparePath} /> : null}
+      {rows.map((r, i) => {
+        const n = primary[i];
+        const cy = primaryYs[i];
+        return (
+          <g key={r.id}>
+            {n !== undefined && cy !== undefined ? (
+              <text className="cd-trend-value" x={xs[i]} y={cy - 10} textAnchor="middle">{format(n, metric)}</text>
+            ) : null}
+            <text className="cd-trend-axis" x={xs[i]} y="176" textAnchor="middle" onClick={() => onSelect(r)}>{period(r)}</text>
+          </g>
+        );
+      })}
+      {compareYs.map((cy, i) => cy === undefined ? null : (
+        <circle key={`c-${i}`} className="cd-trend-dot compare" cx={xs[i]} cy={cy} r="3.5">
+          <title>{labels[compare!]}（指数化）：{format(value(rows[i], compare!), compare!)}</title>
+        </circle>
+      ))}
+      {rows.map((r, i) => {
+        const n = primary[i];
+        const cy = primaryYs[i];
+        if (n === undefined || cy === undefined) return null;
+        return (
+          <circle key={`p-${r.id}`} className="cd-trend-dot" cx={xs[i]} cy={cy} r="4">
+            <title>{r.title}：{format(n, metric)}</title>
+          </circle>
+        );
+      })}
+    </svg>
+  );
 }
 
 export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null }) {
@@ -181,7 +229,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const autoAskedRef = useRef(false);
   const askRef = useRef<(text: string) => Promise<void>>(async () => undefined);
   const [periodBootstrapDone, setPeriodBootstrapDone] = useState(!preferredPeriod);
-  const [overviewPick, setOverviewPick] = useState<null | { quote: string; x: number; y: number; kind: FocusKind; page?: number; title?: string }>(null);
+  const [overviewPick, setOverviewPick] = useState<null | { quote: string; x: number; y: number; kind: FocusKind; page?: number; title?: string; cardId?: string }>(null);
+  const [verdict, setVerdict] = useState<ReportVerdict | null>(null);
+  const [verdictStatus, setVerdictStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const [verdictRefreshing, setVerdictRefreshing] = useState(false);
 
   function selectReport(report: Report) {
     setReportListOpen(false);
@@ -192,6 +243,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     activeId.current = report.id;
     setSelected(report); onSelect(report.id); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
     setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setFocused(null);
+    setVerdict(null); setVerdictStatus('loading'); setVerdictRefreshing(false);
   }
   useEffect(() => {
     const abort = new AbortController();
@@ -232,6 +284,44 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     ]).then(([o,a]) => { if (!abort.signal.aborted) { setOutline(o); setAnalysis(a);  setError(''); } }).catch(() => { if (!abort.signal.aborted) setError('部分报告数据加载失败，请切换报告重试。'); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
   }, [selected.id]);
+  useEffect(() => {
+    const abort = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVerdict(null);
+    setVerdictStatus('loading');
+    void fetch(`/api/reports/${encodeURIComponent(selected.id)}/verdict`, { signal: abort.signal, cache: 'no-store' })
+      .then(async (r) => {
+        if (!r.ok) throw new Error();
+        const parsed = acceptVerdictPayload(await r.json());
+        if (!parsed) throw new Error();
+        if (abort.signal.aborted) return;
+        setVerdict(parsed);
+        setVerdictStatus('ready');
+      })
+      .catch(() => { if (!abort.signal.aborted) { setVerdict(null); setVerdictStatus('unavailable'); } });
+    return () => abort.abort();
+  }, [selected.id]);
+  async function refreshVerdict() {
+    if (verdictRefreshing || verdictStatus === 'loading') return;
+    setVerdictRefreshing(true);
+    try {
+      const response = await fetch(`/api/reports/${encodeURIComponent(selected.id)}/verdict`, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refresh: true }),
+      });
+      if (!response.ok) throw new Error();
+      const parsed = acceptVerdictPayload(await response.json());
+      if (!parsed) throw new Error();
+      setVerdict(parsed);
+      setVerdictStatus('ready');
+    } catch {
+      if (!verdict) setVerdictStatus('unavailable');
+    } finally {
+      setVerdictRefreshing(false);
+    }
+  }
   useEffect(() => {
     const abort = new AbortController();
     memoryReady.current = false;
@@ -413,6 +503,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
 
   const history = comparableHistory(reports, selected);
+  const trendHistory = sequentialHistory(reports, selected);
   const defaultPrevious = priorYear(reports, selected);
   const baselineOptions = reports.filter(r => r.id !== selected.id && filingType(r) === filingType(selected) && periodKey(r) < periodKey(selected) && r.metrics.length);
   const previous = (baselineId ? reports.find(r => r.id === baselineId) : undefined) ?? defaultPrevious;
@@ -432,29 +523,68 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const peerCodes = [...new Set(peers.map(p => p.code))];
   const profitRanks = peers.filter(p => p.metric === 'roe');
   const roe = value(selected,'roe');
-  const growthRanks = peers.filter(p => p.metric === 'revenue_growth');
-  const selfGrowth = growthRanks.find(p => p.code === selected.code)?.value;
   // Report the ordinal position inside the covered sample; a percentile reads as a grade.
   function standing(rows: Peer[], self: number | undefined) {
     if (self === undefined || rows.length < 2 || !rows.some(r => r.code === selected.code)) return undefined;
     return { rank: rows.filter(r => r.value > self).length + 1, total: rows.length };
   }
   const profitStanding = standing(profitRanks, roe);
+  const growthRanks = peers.filter(p => p.metric === 'revenue_growth');
+  const selfGrowth = growthRanks.find(p => p.code === selected.code)?.value;
   const growthStanding = standing(growthRanks, selfGrowth);
   const findings = keyFindings(reports, selected);
-  const mdaSection = outline.outline.find(o => o.id === 'mda') ?? outline.outline.find(o => /管理层讨论与分析|经营情况讨论与分析/.test(o.title));
-  const mdaExcerpt = mdaSection ? (outline.pages.find(p => p.page === mdaSection.page)?.content ?? '').slice(0, 420) : '';
-  const briefConclusion = periodConclusion(reports, selected);
+  const verdictChanges = verdict?.changes ?? [];
+  const flaggedMoves = changes.filter(d => Math.abs(d.amount!) >= 30);
+  function aiModule(id: string) {
+    const ai = verdict?.modules.find(m => m.id === id);
+    return ai?.conclusion ? { text: ai.conclusion, sourceRef: ai.sourceRef } : { text: '', sourceRef: [] as Citation[] };
+  }
+  function computedHeadline(id: string) {
+    if (id === 'attribution' && bridge) {
+      const cite = metricCitation('net_profit');
+      return { text: attributionConclusion(bridge), sourceRef: cite ? [cite] : [] };
+    }
+    if (id === 'anomalies') {
+      const text = anomaliesConclusion(flaggedMoves.map(d => ({ metric: d.metric, amount: d.amount! })), changes.length);
+      if (text) {
+        const cites = flaggedMoves.flatMap(d => { const c = metricCitation(d.metric); return c ? [c] : []; });
+        return { text, sourceRef: cites };
+      }
+    }
+    if (id === 'history') {
+      const text = historyConclusion(history);
+      if (text) return { text, sourceRef: [] as Citation[] };
+    }
+    if (id === 'peers') {
+      const text = peersConclusion([
+        ...(profitStanding ? [{ ...profitStanding, label: 'ROE' }] : []),
+        ...(growthStanding ? [{ ...growthStanding, label: '营收同比' }] : []),
+      ]);
+      if (text) return { text, sourceRef: [] as Citation[] };
+    }
+    return { text: '', sourceRef: [] as Citation[] };
+  }
+  function moduleHeadline(id: string) {
+    const ai = aiModule(id);
+    const computed = computedHeadline(id);
+    if (compactModuleIds.has(id)) return ai.text ? ai : computed;
+    return computed.text ? computed : ai;
+  }
+  function moduleHasBody(id: string) {
+    if (id === 'history') return history.length >= 2;
+    if (id === 'peers') return peerCodes.length > 0;
+    return false;
+  }
+  function pickedCard(id: string) {
+    return overviewPick?.cardId === id ? ' cd-focus-picked' : '';
+  }
   const leverage = debtRatio(selected), conversion = cashConversion(selected), margin = grossMargin(selected);
-  const absolutes = [
-    { label: '资产负债率', value: leverage, suffix: '%', detail: leverage === undefined ? '需要资产总计与负债合计两行' : '负债合计 ÷ 资产总计', metric: 'total_liabilities' as MetricName },
-    { label: '毛利率', value: margin, suffix: '%', detail: margin === undefined ? '需要营业收入与营业成本两行' : '(营业收入 − 营业成本) ÷ 营业收入', metric: 'operating_cost' as MetricName },
-    { label: '现金含利润比', value: conversion, suffix: '%', detail: conversion === undefined ? '需要经营现金流净额，且归母净利润为正' : '经营现金流净额 ÷ 归母净利润', metric: 'operating_cash_flow' as MetricName },
-  ];
-  const relatives = [
-    { label: '盈利能力（ROE）', standing: profitStanding, detail: profitStanding ? '同报告期可比公司内排序' : '待同报告期 ROE 样本' },
-    { label: '成长性（营收同比）', standing: growthStanding, detail: growthStanding ? '同报告期可比公司内排序' : '待上年同期与可比同业数据' },
-  ];
+  const ratioChips = [
+    { key: '资产负债率', label: '资产负债率', value: leverage, suffix: '%', metric: 'total_liabilities' as MetricName },
+    { key: '毛利率', label: '毛利率', value: margin, suffix: '%', metric: 'operating_cost' as MetricName },
+    { key: '现金含利润比', label: '现金含利润比', value: conversion, suffix: '%', metric: 'operating_cash_flow' as MetricName },
+  ].filter((chip): chip is typeof chip & { value: number } => chip.value !== undefined);
+
   // A single click only jumps inside the left column; enlarging stays explicit.
   /** Widen source pane for PDF reading (~40%). Gutters already allow manual tweak. */
   function widenSourceForPdf(targetPct = SOURCE_WIDE) {
@@ -591,11 +721,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       setJumpBlocked(false);
       return;
     }
-    const opened = window.open(jumpAsk.href, '_blank', 'noopener,noreferrer');
+    // Do not pass noopener/noreferrer as windowFeatures: browsers then return
+    // null even when the tab opened, which falsely keeps this dialog open.
+    const opened = window.open(jumpAsk.href, '_blank');
     if (!opened) {
       setJumpBlocked(true);
       return;
     }
+    opened.opener = null;
     setJumpAsk(null);
     setJumpBlocked(false);
   }
@@ -618,7 +751,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   function answerSources(message: Message) {
     return uniqueAnswerSources(message.text, message.citations, pageLabel);
   }
-  function focusModule(id: string) { if (sourceDrawerOpen) closeSource(); setExpanded(e => e.includes(id) ? e : [...e,id]); setFocused(id); setMobilePane('dashboard'); const more = document.getElementById('cd-more'); if (more instanceof HTMLDetailsElement) more.open = true; window.setTimeout(() => document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 80); }
+  function focusModule(id: string) { if (sourceDrawerOpen) closeSource(); setExpanded(e => e.includes(id) ? e : [...e,id]); setFocused(id); setMobilePane('dashboard'); window.setTimeout(() => document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 80); }
   function resizeComposer() {
     const el = questionRef.current;
     if (!el) return;
@@ -636,23 +769,49 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       resizeComposer();
     });
   }
-  function pinTrendFocus() {
-    const rows = history.slice(-5);
+  function trendFocusQuote() {
+    const rows = trendHistory.slice(-8);
     const n = rows.length;
     const primary = rows.map(r => `${period(r)} ${format(value(r, metric), metric)}`).join('、');
-    let quote = `比一比：${labels[metric]}近${n}期 ${primary}`;
+    let quote = `指标趋势：${labels[metric]}近${n}期 ${primary}`;
     if (overlay && overlay !== metric) {
       const over = rows.map(r => `${period(r)} ${format(value(r, overlay), overlay)}`).join('、');
       quote += `；叠加${labels[overlay]} ${over}（指数化相对走势）`;
     }
-    addFocus({ kind: 'metric', quote, title: '智析·趋势' });
+    return quote;
   }
-  function pinRatiosFocus() {
-    const bits = absolutes.filter(a => a.value !== undefined).map(a => `${a.label} ${a.value!.toFixed(1)}${a.suffix}`);
-    addFocus({ kind: 'metric', quote: bits.length ? `关键比率：${bits.join('、')}` : '关键比率：暂无可用比率', title: '智析·比率' });
+  function pinTrendFocus() {
+    addFocus({ kind: 'metric', quote: trendFocusQuote(), title: '智析·趋势' });
   }
-  function pinRadarFocus() {
-    addFocus({ kind: 'metric', quote: `同业对比雷达：覆盖 ${peerCodes.length} 家同报告期公司`, title: '智析·雷达' });
+  function placeCardPick(e: { clientX: number; clientY: number }, item: { quote: string; kind: FocusKind; page?: number; title?: string; cardId?: string }) {
+    const clean = item.quote.replace(/\s+/g, ' ').trim();
+    if (clean.length < 4) return;
+    window.getSelection()?.removeAllRanges();
+    setPick(null);
+    setOverviewPick({
+      quote: clean,
+      kind: item.kind,
+      page: item.page,
+      title: item.title,
+      cardId: item.cardId,
+      x: e.clientX,
+      y: Math.max(8, e.clientY - 12),
+    });
+  }
+  function onOverviewDblClick(e: MouseEvent<HTMLElement>) {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    if (t.closest('a,select,input,textarea,button,.cd-pick-bar,.cd-cite')) return;
+    const card = t.closest('[data-focus-card]');
+    if (!(card instanceof HTMLElement)) return;
+    e.preventDefault();
+    const quote = (card.getAttribute('data-focus-quote') || card.innerText || '').replace(/\s+/g, ' ').trim();
+    const kind = (card.getAttribute('data-focus-kind') || 'metric') as FocusKind;
+    const title = card.getAttribute('data-focus-title') || undefined;
+    const pageRaw = card.getAttribute('data-focus-page');
+    const page = pageRaw ? Number(pageRaw) : undefined;
+    const cardId = card.getAttribute('data-focus-id') || undefined;
+    placeCardPick(e, { quote, kind, title, page: Number.isFinite(page) ? page : undefined, cardId });
   }
   // Suggest the next question instead of making the reader compose one; the list is
   // advisory, so any failure simply leaves the answer without buttons.
@@ -669,28 +828,25 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (picked.length) return picked;
     return pool.slice(0, 3);
   }
-  async function loadFollowups(reportId: string, slot: number, question: string, answer: string, asked: string[], mode?: string) {
+  async function loadFollowups(reportId: string, slot: number, question: string, answer: string, asked: string[]) {
     const patch = (value: Partial<Message>) => setMessages(m => activeId.current === reportId && m[slot]?.role === 'assistant' ? m.map((item,i) => i === slot ? { ...item, ...value } : item) : m);
-    // Structured / metric answers: template only — no model call.
-    if (!mode || mode === 'structured' || mode === 'metrics' || mode === 'template' || mode.startsWith('struct')) {
-      patch({ followups: defaultFollowups(answer, asked), followupBusy: false });
-      return;
-    }
-    patch({ followupBusy: true });
+    const fallback = defaultFollowups(answer, asked);
+    patch({ followups: fallback, followupBusy: true });
     try {
       const response = await fetch('/api/chat/followups', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ reportId, question, answer, asked }) });
       if (!response.ok) throw new Error();
       const payload = await response.json() as { questions?: string[] };
-      patch({ followups: payload.questions?.slice(0,3) ?? defaultFollowups(answer, asked), followupBusy: false });
-    } catch { patch({ followups: defaultFollowups(answer, asked), followupBusy: false }); }
+      patch({ followups: payload.questions?.slice(0,3) ?? fallback, followupBusy: false });
+    } catch { patch({ followups: fallback, followupBusy: false }); }
   }
 
   useEffect(() => {
     const root = overviewRef.current;
     if (!root) return;
-    function onUp(e: MouseEvent) {
+    function onUp(e: globalThis.MouseEvent) {
       const t = e.target;
-      if (t instanceof Element && t.closest('button,a,select,input,textarea,.cd-pick-bar')) return;
+      if (e.detail >= 2) return;
+      if (t instanceof Element && t.closest('button,a,select,input,textarea,.cd-pick-bar,.cd-cite')) return;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.rangeCount) { setOverviewPick(null); return; }
       const anchor = sel.anchorNode;
@@ -730,10 +886,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     window.setTimeout(() => setClipToast(current => current === message ? null : current), 2200);
   }
   function makeClipId() {
-    try {
-      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-    } catch { /* insecure context */ }
-    return `clip-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    return clientUuid();
   }
   function addFocus(item: { kind: FocusKind; quote: string; page?: number; title?: string }) {
     const clean = item.quote.replace(/\s+/g, ' ').trim();
@@ -864,7 +1017,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     const targetModule = moduleForQuestion(assembled); if (targetModule) focusModule(targetModule);
     let answer = '';
-    let answerMode = '';
     function update(citations?: Citation[]) { if (activeId.current !== id || controller.signal.aborted) return; setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:answer, ...(citations ? { citations } : {}) } : item)); }
     try {
       let conversationId = conversationIds.current.get(id);
@@ -877,13 +1029,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           }
         } catch { /* ignore — anonymous users can ask without persisted memory */ }
       }
-      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:crypto.randomUUID(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), stream:true }) });
+      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), stream:true }) });
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
         const {done,value:chunk} = await reader.read(); buffer += decoder.decode(chunk ?? new Uint8Array(), {stream:!done});
         const events = buffer.split('\n\n'); buffer = events.pop() ?? '';
-        for (const event of events) { const raw = event.split('\n').find(l=>l.startsWith('data: '))?.slice(6); if (!raw || raw==='[DONE]') continue; const p = JSON.parse(raw) as {content?:string;evidence?:Citation[];status?:string;error?:string;mode?:string;result?:{answer:string;evidence:Citation[];mode?:string}}; if(p.status==='reasoning') setThinking(true); if(p.content||p.result) setThinking(false); answer = p.result ? p.result.answer : answer + (p.content ?? ''); if(p.result?.mode) answerMode=p.result.mode; else if(p.mode) answerMode=p.mode; if(p.error) answer=p.error; update(p.result?.evidence ?? p.evidence); }
+        for (const event of events) { const raw = event.split('\n').find(l=>l.startsWith('data: '))?.slice(6); if (!raw || raw==='[DONE]') continue; const p = JSON.parse(raw) as {content?:string;evidence?:Citation[];status?:string;error?:string;mode?:string;result?:{answer:string;evidence:Citation[];mode?:string}}; if(p.status==='reasoning') setThinking(true); if(p.content||p.result) setThinking(false); answer = p.result ? p.result.answer : answer + (p.content ?? ''); if(p.error) answer=p.error; update(p.result?.evidence ?? p.evidence); }
         if(done) break;
       }
       if (!answer && !controller.signal.aborted) { answer='暂无法回答：未返回足够证据。可尝试询问本期营业收入或净利润。'; update(); }
@@ -902,7 +1054,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     finally {
       if (activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
     }
-    if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked, answerMode);
+    if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
   }
   askRef.current = ask;
 
@@ -983,13 +1135,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const sourceText = outline.pages.find(p => p.page === sourcePage)?.content;
   const highlightRange = sourceText ? sourceRange(sourceText, highlight) : null;
   return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''}`} >
-    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表">←</button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true">{reportListOpen?'⌃':'⌄'}</span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions"><span className="cd-status"><i />{selected.metrics.length} 项指标已解析</span>{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}</div></header>
+    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div>{onApprove && selected.status !== 'online' && <div className="cd-head-actions"><button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button></div>}</header>
     {error && <div role="alert" className="cd-error">{error}</div>}
     <nav className="cd-mobile-tabs" aria-label="详情页分栏">{[['sources','来源'],['dashboard','数据概览'],['chat','对话']].map(([id,label]) => <button key={id} className={mobilePane===id?'active':''} onClick={()=>{setMobilePane(id);if(id==='chat')setChatCollapsed(false);if(id==='sources')setSourceCollapsed(false);}}>{label}</button>)}</nav>
     <div className="cd-columns" ref={columnsRef}>
       <div id="cd-source-panel" className={`cd-source-slot ${mobilePane==='sources'?'mobile-active':''}`} style={!sourceCollapsed ? { flex: `${colRatios.source} 1 0%`, minWidth: 200 } : undefined}>
       <aside className={`cd-sources cd-pane ${sourceDrawerOpen?'cd-source-drawer':''}`} role={sourceDrawerOpen?'dialog':undefined} aria-modal={sourceDrawerOpen?false:undefined} aria-label={sourceDrawerOpen?'财报原文阅读抽屉':'财报来源'} ref={sourcePaneRef}>
-        <div className="cd-pane-head cd-source-head"><h2><span>◇</span> 来源</h2><div className="cd-pane-tools"><button type="button" className="cd-dock cd-source-width" aria-label={colRatios.source > SOURCE_DEFAULT + 2 ? '恢复默认宽度' : '加宽来源栏'} title={colRatios.source > SOURCE_DEFAULT + 2 ? '快速回到默认宽度（约25%）' : '加宽到来源阅读宽度（约40%）'} onClick={toggleSourceWidth}>{colRatios.source > SOURCE_DEFAULT + 2 ? '«' : '»'}</button><button className="cd-dock" aria-label="收起来源栏" title="收起来源栏（可用中间分隔条再调宽）" aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="left" /></button></div></div>
+        <div className="cd-pane-head cd-source-head"><h2><span>◇</span> 来源</h2><div className="cd-pane-tools"><button type="button" className="cd-dock cd-source-width" aria-label={colRatios.source > SOURCE_DEFAULT + 2 ? '恢复默认宽度' : '加宽来源栏'} title={colRatios.source > SOURCE_DEFAULT + 2 ? '快速回到默认宽度（约25%）' : '加宽到来源阅读宽度（约40%）'} onClick={toggleSourceWidth}><Icon name={colRatios.source > SOURCE_DEFAULT + 2 ? 'chevronsLeft' : 'chevronsRight'} size={16} /></button><button className="cd-dock" aria-label="收起来源栏" title="收起来源栏（可用中间分隔条再调宽）" aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="left" /></button></div></div>
         <details className="cd-outline"><summary><svg className="cd-outline-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg><b>提纲导航</b><span>{outline.outline.length} 个章节</span></summary><nav>{outline.outline.map(o=><button key={o.id} onClick={()=>cite({page:o.page,quote:o.highlight})}><b>{o.title}</b><span className="cd-outline-page">{pageLabel(o.page)}</span></button>)}</nav></details>
         <div className="cd-source-toolbar">
           <label><select aria-label="原文模式" value={sourceMode} onChange={e=>{const m=e.target.value as 'pdf'|'text';setSourceMode(m);if(m==='pdf')pageEnter.current='start';}}><option value="pdf">原始PDF</option><option value="text">原文文本</option></select></label>
@@ -1004,35 +1156,67 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         {!printedKnown && pageLabels.length>0 && <p className="cd-page-notice">这份 PDF 没能识别出正文页码，下面统一按 PDF 实际页数显示。</p>}
         <div className="cd-source-scroll" ref={sourceRef} aria-live="polite">
           {pick && <div className="cd-pick-bar" style={{ top: pick.y, left: pick.x }}>
-            <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => addClip(pick.quote, pick.page)}>加入AI分析</button>
-            <button type="button" className="cd-pick-cancel" onMouseDown={e => e.preventDefault()} onClick={() => { setPick(null); window.getSelection()?.removeAllRanges(); }}>取消</button>
+            <div className="cd-pick-actions">
+              <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => addClip(pick.quote, pick.page)}>加入AI分析</button>
+              <button type="button" className="cd-pick-cancel" onMouseDown={e => e.preventDefault()} onClick={() => { setPick(null); window.getSelection()?.removeAllRanges(); }}>取消</button>
+            </div>
           </div>}
           {highlight && <div className="cd-source-hit">已定位 · {pageDescription(sourcePage)}{resolvedPage!==null&&resolvedPage!==sourcePage?` · 已按引用原文校正至 PDF 第 ${resolvedPage} 页`:''}<small>{highlight.slice(0,100)}</small></div>}
           {citedMetric && <div className="cd-verify">
             <div><b>正在核验：{labels[citedMetric]}</b><small>{format(value(selected,citedMetric),citedMetric)}{citedCaveat?` · ${citedCaveat}`:' · 已通过人工复核'}</small></div>
             <div className="cd-verify-actions">
-              <button className={feedback[citedMetric]==='correct'?'cd-verify-on':''} disabled={feedbackBusy} onClick={()=>void sendFeedback(citedMetric,'correct')}>✓ 与原文一致</button>
-              <button className={feedback[citedMetric]==='wrong'?'cd-verify-off':''} disabled={feedbackBusy} onClick={()=>void sendFeedback(citedMetric,'wrong')}>⚠ 标记有误</button>
+              <button className={feedback[citedMetric]==='correct'?'cd-verify-on':''} disabled={feedbackBusy} onClick={()=>void sendFeedback(citedMetric,'correct')}><Icon name="check" size={14} /> 与原文一致</button>
+              <button className={feedback[citedMetric]==='wrong'?'cd-verify-off':''} disabled={feedbackBusy} onClick={()=>void sendFeedback(citedMetric,'wrong')}><Icon name="warn" size={14} /> 标记有误</button>
             </div>
             {feedbackError && <small className="cd-verify-hint cd-verify-error">{feedbackError}</small>}
             {feedback[citedMetric] && <small className="cd-verify-hint">{feedback[citedMetric]==='correct'?'已记录你的确认，累计确认会进入复核队列。':'已记录异议，该指标会被优先人工复核。'}</small>}
           </div>}
           {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
-        </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF ↗</a><button onClick={()=>{draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
+        </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF <Icon name="external" size={12} /></a><button onClick={()=>{draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
       </aside>
       </div>
       {!sourceCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整来源栏宽度" onPointerDown={e=>onGutterDown('source', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
       <main className={`cd-dashboard cd-pane ${mobilePane==='dashboard'?'mobile-active':''}`} aria-label="概览" style={{ flex: `${colRatios.middle} 1 0%`, minWidth: 360 }}>
-        <div className="cd-pane-head"><h2><span>◫</span> 概览</h2><span>{period(selected)} · {selected.metrics.length && selected.metrics.every(m=>m.verified)?'已复核':'机器解析'}</span></div>
-        <div className="cd-dashboard-scroll">
-          <div className="cd-overview-top" ref={overviewRef}>
+        <div className="cd-pane-head"><h2><span>◫</span> 概览</h2><span>基于公开财报生成</span></div>
+        <div className="cd-dashboard-scroll" ref={overviewRef} onDoubleClick={onOverviewDblClick}>
+          <div className="cd-overview-top">
           {overviewPick && <div className="cd-pick-bar" style={{ top: overviewPick.y, left: overviewPick.x }}>
-            <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => addFocus({ kind: overviewPick.kind, quote: overviewPick.quote, page: overviewPick.page, title: overviewPick.title })}>加入AI分析</button>
-            <button type="button" className="cd-pick-cancel" onMouseDown={e => e.preventDefault()} onClick={() => { setOverviewPick(null); window.getSelection()?.removeAllRanges(); }}>取消</button>
+            {overviewPick.title && <span className="cd-pick-title">{overviewPick.title}</span>}
+            <div className="cd-pick-actions">
+              <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => addFocus({ kind: overviewPick.kind, quote: overviewPick.quote, page: overviewPick.page, title: overviewPick.title })}>加入AI分析</button>
+              <button type="button" className="cd-pick-cancel" onMouseDown={e => e.preventDefault()} onClick={() => { setOverviewPick(null); window.getSelection()?.removeAllRanges(); }}>取消</button>
+            </div>
           </div>}
-          <section className="cd-brief" aria-label="本期结论">
-            <p className="cd-brief-kicker">本期结论</p>
-            <h2 className="cd-brief-title">{briefConclusion}</h2>
+          <section
+            className={`cd-brief cd-verdict cd-focus-card${verdictStatus === 'ready' && verdict ? ` cd-verdict-${verdictTone(verdict.verdict.label)}` : ''}${pickedCard('verdict')}`}
+            aria-label="财报速览"
+            data-focus-card
+            data-focus-id="verdict"
+            data-focus-kind="finding"
+            data-focus-title="财报速览"
+            data-focus-quote={verdict ? `${verdict.verdict.label}。${verdict.verdict.summary}` : '财报速览暂未生成'}
+          >
+            <div className="cd-verdict-head">
+              <p className="cd-brief-kicker">财报速览</p>
+              <div className="cd-verdict-tools">
+                <button
+                  type="button"
+                  className="cd-verdict-refresh"
+                  aria-label="重新分析"
+                  title="重新分析"
+                  disabled={verdictStatus === 'loading' || verdictRefreshing}
+                  onClick={() => void refreshVerdict()}
+                >
+                  <Icon name="refresh" size={14} className={verdictRefreshing ? 'cd-spin' : undefined} />
+                </button>
+              </div>
+            </div>
+            {verdictStatus === 'loading' && <p className="cd-verdict-fallback">正在生成本期概览…</p>}
+            {verdictStatus === 'unavailable' && !verdictRefreshing && <p className="cd-verdict-fallback">AI 概览暂时无法生成，可直接查看下方财务指标或使用右侧问答。</p>}
+            {verdictStatus === 'ready' && verdict && <>
+              <h2 className="cd-brief-title"><i className="cd-verdict-dot" aria-hidden="true" />{verdict.verdict.label}</h2>
+              <p className="cd-verdict-summary">{verdict.verdict.summary}</p>
+            </>}
           </section>
 
           <div className="cd-metrics" aria-label="四项核心指标">{metricNames.map(m => {
@@ -1040,7 +1224,20 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             const pill = d === undefined ? 'cd-pill-idle' : d < 0 ? 'cd-pill-down' : 'cd-pill-up';
             const delta = d === undefined ? '暂无同期比较' : `${baselineIsDefault ? '同比' : '较基准'} ${pct(d)}`;
             const f = findings.find(x => x.metric === m);
-            return <article key={m} data-metric={m} className={`cd-focusable-card${f?.severity==='watch'?' cd-metric-watch':''}`} aria-label={labels[m]}>
+            const cite = metricCitation(m);
+            const quote = [labels[m], `${amount(value(selected, m), m)}${unitOf(m)}`, delta, f?.detail].filter(Boolean).join(' · ');
+            return <article
+              key={m}
+              data-metric={m}
+              data-focus-card
+              data-focus-id={m}
+              data-focus-kind="metric"
+              data-focus-title={labels[m]}
+              data-focus-quote={quote}
+              {...(cite?.page ? { 'data-focus-page': String(cite.page) } : {})}
+              className={`cd-focusable-card cd-focus-card${pickedCard(m)}`}
+              aria-label={labels[m]}
+            >
               <div className="cd-metric-label">
                 <span>{labels[m]}</span>
                 <span className="cd-metric-tools">{footnote(m)}</span>
@@ -1051,41 +1248,167 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </article>;
           })}</div>
           {baselineOptions.length>0 && <div className="cd-baseline-row"><label>对比基准 <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`${period(defaultPrevious)}（上年同期）`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}</select></label>{!baselineIsDefault && previous && <span className="cd-note">当前以 {period(previous)} 为基准，非上年同期。</span>}</div>}
+          {verdictStatus === 'ready' && verdictChanges.length > 0 && <section className="cd-key-changes" aria-label="关键变化">
+            <h3>关键变化</h3>
+            <ul>
+              {verdictChanges.map((item, index) => {
+                const icon = changeDirectionIcon(item.direction);
+                const primary = item.sourceRef[0];
+                return <li
+                  key={`${item.title}-${index}`}
+                  className={`cd-key-change cd-key-change-${changeTone(item.direction)} cd-focus-card${pickedCard(`change-${index}`)}`}
+                  data-focus-card
+                  data-focus-id={`change-${index}`}
+                  data-focus-kind="finding"
+                  data-focus-title={item.title}
+                  data-focus-quote={`${item.title}：${item.description}`}
+                  {...(primary?.page ? { 'data-focus-page': String(primary.page) } : {})}
+                >
+                  <div className="cd-key-change-main">
+                    {icon && <span className="cd-key-change-icon" aria-label={icon.label}><Icon name={icon.name} size={16} /></span>}
+                    <span>
+                      <b>{item.title}</b>
+                      <small>{item.description}</small>
+                    </span>
+                  </div>
+                  <span className="cd-key-change-cites">{item.sourceRef.map((c, i) => citationLink(c, `${index}-${i}`))}</span>
+                </li>;
+              })}
+            </ul>
+          </section>}
           </div>
 
-          <section className="cd-card cd-trend-card" id="cd-trend"><div className="cd-card-head"><h3>比一比：核心指标趋势</h3><span>近 {Math.min(history.length,5)} 期 · 同类型财报</span><button type="button" disabled={asking||memoryLoading} onClick={pinTrendFocus}>智析</button></div><div className="cd-chart-tabs">{metricNames.map(m=><button key={m} className={metric===m?'active':''} onClick={()=>setMetric(m)}>{labels[m].split(' ')[0]}</button>)}<label className="cd-overlay">叠加 <select aria-label="叠加第二个指标" value={overlay??''} onChange={e=>setOverlay((e.target.value||null) as HeadlineMetric|null)}><option value="">不叠加</option>{metricNames.filter(m=>m!==metric).map(m=><option key={m} value={m}>{labels[m].split(' ')[0]}</option>)}</select></label></div><Trend reports={history} metric={metric} compare={overlay===metric?null:overlay} onSelect={selectReport}/>{overlay&&overlay!==metric&&<p className="cd-note">虚线为{labels[overlay]}，已按首期指数化到与{labels[metric]}同一刻度，只反映相对变化速度，不能读绝对值。</p>}</section>
-
-          <details className="cd-more-analysis" id="cd-more">
-            <summary><span>更多分析</span><small>同业雷达、关键比率、归因与明细表（按需展开）</small></summary>
-            <div className="cd-overview-grid">
-              <section className="cd-card"><div className="cd-card-head"><h3>关键比率</h3><span>本期绝对值 · 无评分</span><button type="button" disabled={asking||memoryLoading} onClick={pinRatiosFocus}>智析</button></div><div className="cd-health-list">
-                {absolutes.map(h=><div className={`cd-health-row ${h.value===undefined?'cd-health-pending':''}`} key={h.label}><div><b>{h.label}{h.value!==undefined&&footnote(h.metric)}</b><small>{h.detail}</small></div><strong>{h.value===undefined?'—':h.value.toFixed(1)}<small>{h.value===undefined?'待解析':h.suffix}</small></strong></div>)}
-              </div><div className="cd-health-list cd-health-relative">
-                {relatives.map(h=><div className={`cd-health-row ${h.standing?'':'cd-health-pending'}`} key={h.label}><div><b>{h.label}</b><small>{h.detail}</small></div><strong>{h.standing?`第 ${h.standing.rank}`:'—'}<small>{h.standing?` / ${h.standing.total} 家`:'样本不足'}</small></strong></div>)}
-              </div><p className="cd-note">比率直接由已解析原文行计算，缺一行即不计算。排序仅覆盖同报告期已入库公司，不是完整行业排名，也不是信用评级。</p></section>
-              <section className="cd-card" id="cd-radar"><div className="cd-card-head"><h3>同业对比雷达</h3><div className="cd-card-tools"><button type="button" disabled={asking||memoryLoading} onClick={pinRadarFocus}>智析</button><button onClick={()=>focusModule('peers')}>查看明细</button></div></div><Radar peers={peers} code={selected.code}/></section>
+          <section
+            className={`cd-card cd-trend-card cd-focus-card${pickedCard('trend')}`}
+            id="cd-trend"
+            data-focus-card
+            data-focus-id="trend"
+            data-focus-kind="metric"
+            data-focus-title="指标趋势"
+            data-focus-quote={trendFocusQuote()}
+          >
+            <div className="cd-card-head">
+              <h3>指标趋势</h3>
+              <span>近 {Math.min(trendHistory.length,8)} 期 · 按报告时序</span>
+              <button type="button" className="cd-trend-spark" disabled={asking||memoryLoading} onClick={pinTrendFocus} aria-label="智析" title="智析">✧</button>
             </div>
-            <div className="cd-more-title"><h3>深入模块</h3><span>空模块不编造数字</span></div>
-            {Object.entries(moduleLabels).map(([id,label],index)=><section id={`cd-${id}`} className={`cd-module ${focused===id?'cd-focused':''}`} key={id}><button className="cd-module-toggle" aria-expanded={expanded.includes(id)} aria-controls={`cd-content-${id}`} onClick={()=>setExpanded(e=>e.includes(id)?e.filter(x=>x!==id):[...e,id])}><span className="cd-module-number">0{index+1}</span><div><h3>{label}</h3><p>{id==='business'?'按业务、产品与地区阅读收入构成':id==='attribution'?'恒等式分解 + 管理层原文自述':id==='anomalies'?`${changes.filter(d=>Math.abs(d.amount!)>=30).length} 项指标同比波动超过 30%`:id==='history'?`${history.length} 期同类型报告可供查看`:`${peerCodes.length} 家同报告期覆盖公司`}</p></div><span>{expanded.includes(id)?'−':'＋'}</span></button>
-            {expanded.includes(id) && <div className="cd-module-content" id={`cd-content-${id}`}>
-              {id==='business' && <><div className="cd-empty">还没有解析分部报表，所以暂时不画业务占比图——避免给出不可核验的比例。可以先从下面的原文章节直接读。</div>{outline.outline.filter(o=>/业务|经营|管理层/.test(o.title)).slice(0,4).map(o=><button className="cd-source-link" key={o.id} onClick={()=>cite({page:o.page,quote:o.highlight})}>{o.title} <span>原文 {pageLabel(o.page)}</span></button>)}</>}
-              {id==='attribution' && (bridge ? <><p className="cd-note">与 {previous && period(previous)} 同比。采用“收入 × 归母净利率”两因素恒等分解，非因果推断。</p><div className="cd-waterfall" role="img" aria-label={`净利润变化：收入贡献${format(bridge.revenueEffect,'net_profit')}，归母净利率贡献${format(bridge.marginEffect,'net_profit')}`}>
-                {(()=>{const bars=[{label:'上年同期',start:0,end:bridge.previousProfit,amount:bridge.previousProfit},{label:'收入贡献',start:bridge.previousProfit,end:bridge.previousProfit+bridge.revenueEffect,amount:bridge.revenueEffect},{label:'净利率贡献',start:bridge.previousProfit+bridge.revenueEffect,end:bridge.profit,amount:bridge.marginEffect},{label:'本期净利润',start:0,end:bridge.profit,amount:bridge.profit}];const low=Math.min(0,...bars.flatMap(b=>[b.start,b.end])),high=Math.max(0,...bars.flatMap(b=>[b.start,b.end])),span=high-low||1;return bars.map((b,i)=><div key={b.label}><span>{format(b.amount,'net_profit')}</span><div className="cd-waterfall-track"><i style={{bottom:`${(Math.min(b.start,b.end)-low)/span*100}%`,height:`${Math.max(Math.abs(b.end-b.start)/span*100,1)}%`,background:i===0||i===3?'#3064db':b.amount<0?'#da9561':'#239f8c'}}/></div><small>{b.label}{i===3&&footnote('net_profit')}</small></div>);})()}</div><p className="cd-note">归母净利率 = 归母净利润 ÷ 营业收入。成本、费用、税率与少数股东损益变动均包含于净利率贡献；缺少明细时不做额外分摊。</p>{mdaSection ? <div className="cd-mda"><div className="cd-mda-head"><b>公司自述（管理层讨论与分析）</b><button data-source-jump onClick={()=>cite({page:mdaSection.page,quote:mdaSection.highlight})}>读全文 {pageLabel(mdaSection.page)}</button></div><p>{mdaExcerpt}</p><small>以上为原文摘录，未经改写。数字分解与公司自述原因应分开看待。</small></div> : <p className="cd-note">该报告尚未识别到管理层讨论章节，暂无公司自述原因可对照。</p>}</> : <div className="cd-empty">缺少本期或上年同期的营收或归母净利润，没法做可核验的分解。可以直接读管理层讨论章节，或在右侧对话里追问。</div>)}
-              {id==='anomalies' && (changes.length ? changes.map(d=><div className="cd-change-row" key={d.metric}><span>{labels[d.metric]}{footnote(d.metric)}</span><b className={Math.abs(d.amount!)>=30?'cd-negative':''}>{pct(d.amount)} 同比{Math.abs(d.amount!)>=30?' · 需关注':''}</b></div>) : <div className="cd-empty">还没有上年同期数据，所以暂不判定异常。规则是同比变化超过 30% 才提示，且只和同类型财报比较。</div>)}
-              {id==='history' && <div className="cd-table-scroll"><table><thead><tr><th>报告期</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{history.map(r=><tr key={r.id}><th><button onClick={()=>selectReport(r)}>{period(r)}</button></th>{metricNames.map(m=><td key={m}>{format(value(r,m),m)}</td>)}</tr>)}</tbody></table></div>}
-              {id==='peers' && (peerCodes.length ? <><p className="cd-note">仅比较 {period(selected)} 同类型报告；绿色通道覆盖范围，非完整行业排名。</p><div className="cd-table-scroll"><table><thead><tr><th>公司</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{peerCodes.map(code=><tr key={code} className={code===selected.code?'cd-self':''}><th>{peers.find(p=>p.code===code)?.company_name}{code===selected.code?' · 本公司':''}</th>{metricNames.map(m=><td key={m}>{format(peers.find(p=>p.code===code&&p.metric===m)?.value,m)}</td>)}</tr>)}</tbody></table></div></> : <div className="cd-empty">同报告期还没有其他公司入库，暂时无法对比。</div>)}
-            </div>}</section>)}
-          </details>
+            <div className="cd-chart-tabs">{metricNames.map(m=><button key={m} className={metric===m?'active':''} onClick={()=>setMetric(m)}>{labels[m].split(' ')[0]}</button>)}<label className="cd-overlay">叠加 <select aria-label="叠加第二个指标" value={overlay??''} onChange={e=>setOverlay((e.target.value||null) as HeadlineMetric|null)}><option value="">不叠加</option>{metricNames.filter(m=>m!==metric).map(m=><option key={m} value={m}>{labels[m].split(' ')[0]}</option>)}</select></label></div>
+            <Trend reports={trendHistory} metric={metric} compare={overlay===metric?null:overlay} onSelect={selectReport}/>
+            {overlay&&overlay!==metric&&<p className="cd-note">虚线为{labels[overlay]}，已按首期指数化到与{labels[metric]}同一刻度，只反映相对变化速度，不能读绝对值。</p>}
+          </section>
+
+          <section
+            className={`cd-ratio-row cd-focus-card${pickedCard('ratio')}`}
+            aria-label="关键比率"
+            data-focus-card
+            data-focus-id="ratio"
+            data-focus-kind="metric"
+            data-focus-title="关键比率"
+            data-focus-quote={ratioChips.length
+              ? `关键比率：${ratioChips.map(chip => `${chip.label} ${chip.value.toFixed(1)}${chip.suffix}`).join('，')}`
+              : '关键比率缺必要科目，暂不计算'}
+          >
+            <b>关键比率</b>
+            {ratioChips.length ? ratioChips.map(chip => (
+              <span className="cd-ratio-chip" key={chip.key}>
+                {chip.label}
+                <strong>{chip.value.toFixed(1)}{chip.suffix}</strong>
+                {footnote(chip.metric)}
+              </span>
+            )) : <span className="cd-ratio-empty">缺必要科目，暂不计算</span>}
+          </section>
+
+          <section className="cd-more-analysis" id="cd-more">
+            <div className="cd-more-title">
+              <div>
+                <h3>深度归因</h3>
+                <p className="cd-more-lead">解释营收、利润与异常指标为何变动</p>
+              </div>
+            </div>
+            {Object.entries(moduleLabels).map(([id,label],index)=>{
+              const headline = moduleHeadline(id);
+              const hasBody = moduleHasBody(id);
+              const compact = compactModuleIds.has(id);
+              const open = !compact && expanded.includes(id);
+              const moduleQuote = [label, headline.text].filter(Boolean).join('：') || label;
+              return <section
+                id={`cd-${id}`}
+                className={`cd-module cd-focus-card ${focused===id?'cd-focused':''}${pickedCard(id)}${compact?' cd-module-compact':''}`}
+                key={id}
+                data-focus-card
+                data-focus-id={id}
+                data-focus-kind="finding"
+                data-focus-title={label}
+                data-focus-quote={moduleQuote}
+              >
+                {compact ? (
+                  <div className="cd-module-static">
+                    <span className="cd-module-number">0{index+1}</span>
+                    <div>
+                      <h3>{label}{headline.text ? <span className="cd-module-lead">{headline.text}</span> : null}</h3>
+                      {headline.sourceRef.length > 0 && <div className="cd-module-cites">{headline.sourceRef.map((c, i) => citationLink(c, `${id}-${i}`))}</div>}
+                      {!headline.text && <p className="cd-module-empty">暂无可靠结论</p>}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className="cd-module-toggle"
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={open}
+                      aria-controls={`cd-content-${id}`}
+                      onClick={(e) => {
+                        if (e.detail > 1) return;
+                        setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+                        }
+                      }}
+                    >
+                      <span className="cd-module-number">0{index+1}</span>
+                      <div>
+                        <h3>{label}</h3>
+                        {headline.text ? <p>{headline.text}</p> : null}
+                      </div>
+                    </div>
+                    {open && <div className="cd-module-content" id={`cd-content-${id}`}>
+                      {headline.sourceRef.length > 0 && <div className="cd-module-cites">{headline.sourceRef.map((c, i) => citationLink(c, `${id}-${i}`))}</div>}
+                      {!hasBody && !headline.text && <p className="cd-module-empty">暂无可靠结论</p>}
+                      {id==='history' && history.length >= 2 && <div className="cd-table-scroll"><table><thead><tr><th>报告期</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{history.map(r=><tr key={r.id}><th><button onClick={()=>selectReport(r)}>{period(r)}</button></th>{metricNames.map(m=><td key={m}>{format(value(r,m),m)}</td>)}</tr>)}</tbody></table></div>}
+                      {id==='peers' && peerCodes.length > 0 && <><p className="cd-note">仅比较 {period(selected)} 同类型已入库报告，不是完整行业排名。</p><div className="cd-table-scroll"><table><thead><tr><th>公司</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{peerCodes.map(code=><tr key={code} className={code===selected.code?'cd-self':''}><th>{peers.find(p=>p.code===code)?.company_name}{code===selected.code?' · 本公司':''}</th>{metricNames.map(m=><td key={m}>{format(peers.find(p=>p.code===code&&p.metric===m)?.value,m)}</td>)}</tr>)}</tbody></table></div></>}
+                    </div>}
+                  </>
+                )}
+              </section>;
+            })}
+          </section>
           <p className="cd-data-note">数据来自已解析财报 · 数字旁角标可定位原文 · 未复核指标请结合 PDF 核验</p>
         </div>
       </main>
       {!chatCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整对话栏宽度" onPointerDown={e=>onGutterDown('chat', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
       <aside id="cd-chat-panel" className={`cd-chat cd-pane ${mobilePane==='chat'?'mobile-active':''}`} aria-label="财报对话" style={!chatCollapsed ? { flex: `${colRatios.chat} 1 0%`, minWidth: 220 } : undefined}>
-        <div className="cd-pane-head"><h2><span>✧</span> 追问</h2><div className="cd-chat-actions"><button aria-label="新建对话" title="新建对话" disabled={asking||memoryLoading} onClick={()=>void newConversation()}>+</button><button className="cd-dock" aria-label="收起对话" title="收起对话" onClick={()=>{setChatCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="right" /></button></div></div>
-        <div className="cd-chat-scroll"><div className="cd-assistant-label"><span>✧</span><b>追问本期</b><small>答案需带出处</small></div>
-          <p className="cd-chat-lead">中间栏已经给出结论与发现。这里继续追问原因、对比或原文依据；没有证据时会明确说明。</p>
-          <div className="cd-suggest-label">推荐追问</div><div className="cd-suggestions">{suggestions.map(q=><button key={q} disabled={asking} onClick={()=>draftAsk(q)}>{q}<span>↗</span></button>)}</div>
-          {messages.length>0&&<div className="cd-conversation-label">围绕 {period(selected)} 的对话</div>}
+        <div className="cd-pane-head"><h2><span>✧</span> 追问</h2><div className="cd-chat-actions"><button aria-label="新建对话" title="新建对话" disabled={asking||memoryLoading} onClick={()=>void newConversation()}><Icon name="plus" size={16} /></button><button className="cd-dock" aria-label="收起对话" title="收起对话" onClick={()=>{setChatCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="right" /></button></div></div>
+        <div className="cd-chat-scroll">
+          {messages.length === 0 && <div className="cd-ask-empty">
+            <aside className="cd-ask-tips">
+              <div className="cd-ask-tips-head">
+                <strong>💡 高效追问技巧</strong>
+              </div>
+              <ul>
+                <li><b>PDF 划词</b>：在左侧原文选中文本，快速发起定点追问</li>
+                <li><b>卡片双击</b>：双击中间栏的指标卡片或结论，快捷带入上下文</li>
+              </ul>
+            </aside>
+            <div className="cd-ask-starters" aria-label="快捷追问">
+              {starterAsks.map(item => (
+                <button type="button" key={item.label} disabled={asking || memoryLoading} onClick={() => void ask(item.question)}>{item.label}</button>
+              ))}
+            </div>
+          </div>}
           {messages.map((m,i)=>{
             const waiting = m.role==='assistant' && asking && !m.text.trim() && i===messages.length-1;
             const streaming = m.role==='assistant' && asking && i===messages.length-1;
@@ -1107,13 +1430,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                       />
                       {sources.length > 0 && (
                           <details className="cd-answer-refs">
-                            <summary>参考来源 <small>References · {sources.length}</small></summary>
+                            <summary><Icon name="chevronRight" size={12} className="cd-answer-refs-chevron" />参考来源 <small>References · {sources.length}</small></summary>
                             <ol>
                               {sources.map((c, n) => (
                                 <li key={`${c.reportId ?? ''}:${c.page}:${n}`}>
                                   <button type="button" onClick={() => jumpCitation(c)}>
                                     <span className="cd-answer-refs-n">[{n + 1}]</span>
-                                    {citeReferenceText(citeSource(c))}
+                                    {citeFilingLabel(citeSource(c))}
                                   </button>
                                 </li>
                               ))}
@@ -1148,19 +1471,24 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 <AnswerFeedback
                   kind={m.feedback}
                   submitted={m.feedbackDone}
-                  elicitation={m.followups}
-                  asking={asking}
                   onSubmit={()=>submitAnswerFeedback(i)}
-                  onAsk={(q)=>void ask(q)}
                 />
+                {m.followups && m.followups.length > 0 && (
+                  <div className="cd-followups" aria-label="继续追问">
+                    <div className="cd-followup-list">
+                      {m.followups.slice(0, 3).map((q) => (
+                        <button type="button" key={q} disabled={asking} onClick={() => void ask(q)}>{q}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>}
-              {m.role==='assistant'&&!m.feedback&&(m.followupBusy||m.followups?.length)?<div className="cd-followups"><small>{m.followupBusy?'正在生成相关追问…':'继续追问'}</small>{m.followups?.length?<div className="cd-followup-list">{m.followups.map(q=><button key={q} disabled={asking} onClick={()=>draftAsk(q)}>{q}<span>↗</span></button>)}</div>:null}</div>:null}
             </div>;
           })}<div ref={chatEnd}/>
         </div><form className="cd-chat-input" onSubmit={e=>{e.preventDefault(); if (!asking) void ask(question);}}>
           {clipToast && <div className="cd-clip-toast" role="status">{clipToast}</div>}
           {clips.length>0 && <div className={`cd-clips ${clipsFlash?'cd-clips-flash':''}`} aria-label="AI分析关注">
-            <ul>{clips.map(c => <li key={c.id}><span>{clipChipLabel(c)}</span><button type="button" aria-label="移除" onClick={()=>removeClip(c.id)}>×</button></li>)}</ul>
+            <ul>{clips.map(c => <li key={c.id}><span>{clipChipLabel(c)}</span><button type="button" aria-label="移除" onClick={()=>removeClip(c.id)}><Icon name="x" size={14} /></button></li>)}</ul>
           </div>}
           <div className="cd-composer">
             <textarea ref={questionRef} aria-label="向 Eva 提问" placeholder="随意划词，灵活追问" rows={1} value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault(); if(!asking) void ask(question);}}}/>

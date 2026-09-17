@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import CompanyDetail from '../company-detail';
 import type { Report } from '@/lib/detail-model';
 import companiesJson from '@/data/companies.json';
+import { openingCompanyLabel } from '@/lib/crawl-display';
 
 type CompanyMeta = {
   code: string;
@@ -119,7 +120,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
         <section className="lane-page">
           <div className="honest-empty page-opening">
             <span className="page-opening-spin" aria-hidden="true" />
-            <b>正在打开 {code}</b>
+            <b>正在打开 {openingCompanyLabel(code, meta?.name)}</b>
             <p>读取该公司财报与指标…</p>
           </div>
         </section>

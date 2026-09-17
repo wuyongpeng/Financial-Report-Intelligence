@@ -8,7 +8,7 @@
 .clp-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .clp-pulse{font-size:12px;color:#6d7f99;background:#f3f6fb;border:1px solid #e4eaf3;border-radius:999px;padding:6px 10px}
 .clp-pulse.on{color:#1f8a6e;background:#eef8f4;border-color:#d5eee5;animation:clp-breathe 1.8s ease-in-out infinite}
-.clp-trigger{border:0;border-radius:8px;background:#3064db;color:#fff;font-size:13px;padding:8px 14px}
+.clp-trigger{border:0;border-radius:8px;background:#3064db;color:#fff;font-size:13px;padding:0 16px;height:32px}
 .clp-trigger:disabled{opacity:.65}
 .clp-trigger:hover:not(:disabled){background:#2556c4}
 .clp-stages{list-style:none;margin:16px 0 12px;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
@@ -32,7 +32,7 @@
 .clp-tick-status.running{background:#eef3ff;color:#3a5fb5}
 .clp-tick-status.failed,.clp-tick-status.interrupted{background:#fff1f2;color:#c44757}
 .clp-empty-tick{color:#91a0b4}
-.clp-msg{margin:10px 0 0;font-size:12px;color:#9a6a24;background:#fff9ef;border:1px solid #eddbc4;border-radius:8px;padding:8px 10px}
+.clp-msg{margin:10px 0 0;font-size:12px;color:#1d4ed8;background:#edf3ff;border:1px solid #c5d6f5;border-radius:8px;padding:8px}
 .clp-limits{margin:10px 0 0;font-size:11px;color:#95a1b3}
 @keyframes clp-breathe{0%,100%{box-shadow:0 0 0 0 #1f8a6e22}50%{box-shadow:0 0 0 6px #1f8a6e10}}
 @keyframes clp-glow{0%,100%{opacity:.35}50%{opacity:.9}}

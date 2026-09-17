@@ -3,6 +3,7 @@ import { apiError } from '@/lib/api';
 import { getIngestControl } from '@/lib/ingest-control';
 import { periodFromTitle } from '@/lib/ingest-period';
 import { getDownloadGate, getGapScanState, listIngestProgress } from '@/lib/ingest-progress';
+import { getIngestSettings, ingestPollIntervalMs } from '@/lib/ingest-settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,14 +63,15 @@ export async function GET() {
     const latestRun = recentRuns[0] ?? null;
     const running = latestRun?.status === 'running';
     const control = await getIngestControl();
+    const settings = getIngestSettings();
     const progress = listIngestProgress();
     const downloadSlots = {
       used: Math.max(counts.downloading, progress.filter((p) => p.phase === 'download').length),
-      max: Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2),
+      max: settings.downloadLimit,
     };
     const parseSlots = {
       used: Math.max(counts.parsing, progress.filter((p) => p.phase === 'parse').length),
-      max: Number(process.env.INGEST_PARSE_LIMIT ?? 1),
+      max: settings.parseLimit,
     };
 
     const stages = [
@@ -162,7 +164,7 @@ export async function GET() {
     const gateWaitSec = downloadGate.nextAt
       ? Math.max(0, Math.ceil((new Date(downloadGate.nextAt).getTime() - Date.now()) / 1000))
       : 0;
-    const pauseMs = downloadGate.pauseMs || Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
+    const pauseMs = downloadGate.pauseMs || settings.downloadPauseSec * 1000;
 
     const queueItems = [
       ...downloadQueue.map((row, i) => {
@@ -364,11 +366,13 @@ export async function GET() {
       }),
       ticks,
       limits: {
-        intervalMs: Number(process.env.INGEST_INTERVAL_MS ?? 600_000),
-        downloadLimit: Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2),
-        parseLimit: Number(process.env.INGEST_PARSE_LIMIT ?? 1),
+        intervalMs: ingestPollIntervalMs(settings),
+        downloadLimit: settings.downloadLimit,
+        parseLimit: settings.parseLimit,
         pagePauseMs: Number(process.env.PAGE_PAUSE_MS ?? 1000),
-        downloadPauseMs: Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200),
+        downloadPauseMs: settings.downloadPauseSec * 1000,
+        lookbackDays: settings.lookbackDays,
+        pollIntervalMin: settings.pollIntervalMin,
         maxPages: Number(process.env.INGEST_MAX_PAGES ?? 8),
         downloadTimeoutMs: 5 * 60 * 1000,
         parseTimeoutMs: 5 * 60 * 1000,

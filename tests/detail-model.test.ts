@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { change, comparableHistory, keyFindings, moduleForQuestion, period, periodConclusion, priorYear, profitBridge, sourceRange, type Report } from '../lib/detail-model';
+import { anomaliesConclusion, attributionConclusion, change, comparableHistory, sequentialHistory, historyConclusion, keyFindings, moduleForQuestion, peersConclusion, period, periodConclusion, priorYear, profitBridge, sourceRange, type Report } from '../lib/detail-model';
 import { rankEvidence, unsupportedYears } from '../lib/chat-evidence';
 function report(id: string, period: string, value: number, type='annual', published='2026-04-01'): Report { return { id, code:'1',company_name:'测试',title:period,report_type:type,published_at:published,parsed_at:published,industry:'测试',status:'online',metrics:[{metric:'revenue',value,unit:'元',source_page:2,source_label:'营业收入',confidence:1,verified:1,period}] }; }
 test('history excludes later periods and other fiscal durations, deduplicates corrected filings',()=>{
@@ -12,6 +12,15 @@ test('history excludes later periods and other fiscal durations, deduplicates co
  assert.deepEqual(comparableHistory([q,report('q1','2025Q1',1,'quarterly')],q).map(r=>r.id),['q']);
  const corrected=report('corrected','2024FY',11,'annual','2026-05-01');
  assert.equal(comparableHistory([old,corrected,current],current)[0].id,'corrected');
+});
+test('sequential history plots Q1/H1/Q3/FY in time order up to the selected period',()=>{
+ const q1=report('q1','2025Q1',1,'quarterly','2025-04-01');
+ const h1=report('h1','2025H1',5,'semiannual','2025-08-01');
+ const q3=report('q3','2025Q3',8,'quarterly','2025-10-01');
+ const fy=report('fy','2025FY',12,'annual','2026-04-01');
+ const h126=report('h126','2026H1',6,'semiannual','2026-08-01');
+ assert.deepEqual(sequentialHistory([q1,h1,q3,fy,h126],h126).map(r=>r.id),['q1','h1','q3','fy','h126']);
+ assert.deepEqual(comparableHistory([q1,h1,q3,fy,h126],h126).map(r=>r.id),['h1','h126']);
 });
 test('period prefers 一季度 title over stale FY metric', () => {
   const r = report('q1', '2026FY', 1, 'quarterly', '2026-04-29');
@@ -92,4 +101,24 @@ test('period conclusion stays within 50 characters', () => {
   const text = periodConclusion([previous, current], current);
   assert.ok([...text].length <= 50);
   assert.ok(text.includes('归母净利润') || text.includes('营收'));
+});
+
+test('module conclusions stay number-backed and omit empty claims', () => {
+  const metric = (name: string, value: number) => ({ metric: name as never, value, unit: '元', source_page: 6, source_label: name, confidence: 0.9, verified: 0, period: '' });
+  const build = (id: string, period: string, revenue: number, profit: number) => ({
+    id, code: '600000', company_name: '示例', title: period, report_type: 'annual', published_at: `${period.slice(0, 4)}-04-01`,
+    parsed_at: '2026-01-01', industry: '银行', status: 'online',
+    metrics: [{ ...metric('revenue', revenue), period }, { ...metric('net_profit', profit), period }],
+  });
+  const previous = build('prev', '2025FY', 1e10, 1e9);
+  const current = build('curr', '2026FY', 1.2e10, 8e8);
+  const bridge = profitBridge(1.2e10, 8e8, 1e10, 1e9)!;
+  assert.match(attributionConclusion(bridge), /归母净利同比减少.*收入贡献/);
+  assert.match(anomaliesConclusion([{ metric: 'net_profit', amount: -20 }], 4), /归母净利润同比 -20.00%/);
+  assert.equal(anomaliesConclusion([], 4), '核心指标同比波动均未超过 30%');
+  assert.equal(anomaliesConclusion([], 0), '');
+  assert.match(historyConclusion([previous, current]), /近2期营收/);
+  assert.equal(historyConclusion([current]), '');
+  assert.match(peersConclusion([{ rank: 2, total: 5, label: 'ROE' }]), /ROE第 2\/5 家/);
+  assert.equal(peersConclusion([{ rank: 1, total: 1, label: 'ROE' }]), '');
 });

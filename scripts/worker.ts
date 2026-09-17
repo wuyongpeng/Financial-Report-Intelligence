@@ -5,17 +5,15 @@ import { ensureSchema } from '../lib/migrate';
 import { sendAlert } from '../lib/alerts';
 import { getIngestControl } from '../lib/ingest-control';
 import { getGapScanState, setDownloadGate } from '../lib/ingest-progress';
+import { getIngestSettings, ingestPollIntervalMs } from '../lib/ingest-settings';
 
-const intervalMs = Number(process.env.INGEST_INTERVAL_MS ?? 600_000);
+const DISCOVER_WATCH_MS = 15_000;
 const bootstrapGapMs = Number(process.env.INGEST_BOOTSTRAP_GAP_MS ?? 90_000);
 const backlogIntervalMs = Number(process.env.INGEST_BACKLOG_INTERVAL_MS ?? 45_000);
-const days = Number(process.env.INGEST_DAYS ?? 2);
-const downloadLimit = Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2);
-const parseLimit = Number(process.env.INGEST_PARSE_LIMIT ?? 1);
 const pagePauseMs = Number(process.env.PAGE_PAUSE_MS ?? 1000);
-const downloadPauseMs = Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
 const maxPages = Number(process.env.INGEST_MAX_PAGES ?? 8);
 let busy = false;
+let lastDiscoverAt = 0;
 let discoverTimer: NodeJS.Timeout | undefined;
 let bootstrapTimer: NodeJS.Timeout | undefined;
 let backlogTimer: NodeJS.Timeout | undefined;
@@ -44,12 +42,13 @@ async function withLock(
 
 async function discoverTick() {
   const control = await getIngestControl();
+  const settings = getIngestSettings();
   const autoOn = control.autoCrawlEnabled;
   await withLock('discover', async () => {
     const feed = await runIngestion({
-      days,
-      downloadLimit: autoOn ? downloadLimit : 0,
-      parseLimit,
+      days: settings.lookbackDays,
+      downloadLimit: autoOn ? settings.downloadLimit : 0,
+      parseLimit: settings.parseLimit,
     });
     const gaps = await fillCoverageGaps({
       companyLimit: 8,
@@ -59,6 +58,13 @@ async function discoverTick() {
   });
 }
 
+function maybeDiscover() {
+  const intervalMs = ingestPollIntervalMs();
+  if (Date.now() - lastDiscoverAt < intervalMs) return;
+  lastDiscoverAt = Date.now();
+  void discoverTick();
+}
+
 async function coverageBootstrapTick() {
   if (getGapScanState().mode === 'steady') return;
   await withLock('coverage-bootstrap', () => fillCoverageGaps({ companyLimit: 8, downloadLimit: 0 }));
@@ -66,14 +72,15 @@ async function coverageBootstrapTick() {
 
 async function backlogTick() {
   const control = await getIngestControl();
+  const settings = getIngestSettings();
   const autoOn = control.autoCrawlEnabled;
   if (!autoOn) {
-    setDownloadGate({ nextAt: null, pauseMs: Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200), mode: 'paused' });
-    await withLock('backlog-parse-hold-download', () => processBacklog({ downloadLimit: 0, parseLimit }));
+    setDownloadGate({ nextAt: null, pauseMs: settings.downloadPauseSec * 1000, mode: 'paused' });
+    await withLock('backlog-parse-hold-download', () => processBacklog({ downloadLimit: 0, parseLimit: settings.parseLimit }));
     return;
   }
   await withLock('backlog', async () => {
-    const processed = await processBacklog({ downloadLimit, parseLimit });
+    const processed = await processBacklog({ downloadLimit: settings.downloadLimit, parseLimit: settings.parseLimit });
     return { processed };
   });
 }
@@ -108,14 +115,17 @@ async function main() {
   // Drain existing discovered PDFs immediately, then full discover.
   await backlogTick();
   await discoverTick();
+  lastDiscoverAt = Date.now();
   void ashareUniverseTick();
   backlogTimer = setInterval(() => void backlogTick(), backlogIntervalMs);
-  discoverTimer = setInterval(() => void discoverTick(), intervalMs);
+  discoverTimer = setInterval(() => maybeDiscover(), DISCOVER_WATCH_MS);
   bootstrapTimer = setInterval(() => void coverageBootstrapTick(), bootstrapGapMs);
   universeTimer = setInterval(() => { void ashareUniverseTick(); }, 30 * 60 * 1000);
   const coverage = getGapScanState();
+  const settings = getIngestSettings();
+  const intervalMs = ingestPollIntervalMs(settings);
   console.info(
-    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms, coverage-bootstrap every ${bootstrapGapMs}ms (until steady); days=${days} downloadLimit=${downloadLimit} parseLimit=${parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${downloadPauseMs} maxPages=${maxPages}; coverageMode=${coverage.mode}; ashare-universe daily after 01:00`,
+    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms, coverage-bootstrap every ${bootstrapGapMs}ms (until steady); days=${settings.lookbackDays} downloadLimit=${settings.downloadLimit} parseLimit=${settings.parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${settings.downloadPauseSec * 1000} pollIntervalMin=${settings.pollIntervalMin} maxPages=${maxPages}; coverageMode=${coverage.mode}; ashare-universe daily after 01:00`,
   );
 }
 

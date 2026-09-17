@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import CrawlLivePanel from '../crawl-live-panel';
+import { Icon } from '../ui-icons';
 import './system-ops.css';
 
 export default function SystemOps() {
@@ -14,7 +15,7 @@ export default function SystemOps() {
           <p>温和并发管线、来源健康与限流参数。完整公司抓取记录请进入抓取总览。</p>
         </div>
         <Link href="/crawl" className="sys-ops-crawl-link" aria-label="查看全部抓取记录">
-          查看全部抓取记录 <span aria-hidden="true">→</span>
+          查看全部抓取记录 <Icon name="arrowRight" size={14} />
         </Link>
       </header>
 

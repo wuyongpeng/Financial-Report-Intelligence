@@ -17,9 +17,10 @@ import {
   type PeriodCollectState,
 } from '@/lib/crawl-display';
 import { getCrawlCoverage, getCrawlStats } from '@/lib/crawl-mock';
-import { canonicalPeriodFromTitle } from '@/lib/ingest-period';
+import { canonicalPeriodFromTitle, isCanonicalPeriod } from '@/lib/ingest-period';
 import { expectedPeriodsThroughLatest, latestExpectedPeriod } from '@/lib/ingest-lookback';
 import { classifyFromName } from '@/lib/company-classify';
+import { ensureBackendSchema } from '@/lib/backend-schema';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,7 +67,7 @@ function buildPeriodStatuses(rows: Array<{
   };
   for (const row of rows) {
     const period = row.period;
-    if (!period) continue;
+    if (!period || period === '最新' || !isCanonicalPeriod(period)) continue;
     const state = stateFromAnnouncement(row.status, row.pdf_key, row.hasMetrics, row.metricsComplete);
     const prev = byPeriod.get(period);
     if (!prev || rank[state] > rank[prev.state]) {
@@ -201,6 +202,19 @@ export async function GET() {
       : [];
     priorLookup = new Map(priorMetrics.map((m) => [`${m.code}|${m.period}|${m.metric}`, Number(m.value)]));
 
+    const verdictById = new Map<string, 'ready' | 'pending' | 'failed'>();
+    try {
+      await ensureBackendSchema();
+      const verdictRows = allAnnIds.length
+        ? await db<Array<{ announcement_id: string; status: 'ready' | 'pending' | 'failed' }>>`
+            SELECT announcement_id, status FROM report_verdicts WHERE announcement_id IN ${db(allAnnIds)}
+          `
+        : [];
+      for (const row of verdictRows) verdictById.set(row.announcement_id, row.status);
+    } catch {
+      /* optional: crawl page still works before verdict table exists */
+    }
+
     const [run] = await db<Array<{ started_at: string; finished_at: string | null }>>`
       SELECT started_at, finished_at FROM ingest_runs ORDER BY started_at DESC LIMIT 1
     `;
@@ -216,7 +230,7 @@ export async function GET() {
           return !row.has_roe;
         });
         return {
-          period: canonicalPeriodFromTitle(row.title, row.published_at) || row.period,
+          period: canonicalPeriodFromTitle(row.title, row.published_at),
           status: row.status,
           pdf_key: row.pdf_key,
           title: row.title,
@@ -232,6 +246,10 @@ export async function GET() {
           publishedAt: row.published_at,
         };
       }));
+
+      for (const period of periodBuilt.periodStatuses) {
+        if (period.announcementId) period.verdictStatus = verdictById.get(period.announcementId) ?? null;
+      }
 
       // Homepage / company-level fields: newest *parsed* filing, not newest published announcement.
       const parsedPeriods = periodBuilt.periodStatuses.filter((p) => p.state === 'parsed' || p.state === 'parsed_partial');
@@ -321,7 +339,7 @@ export async function GET() {
         missingMetrics,
         metrics: preview,
         // Home left-bottom period buttons: one per *parsed* report
-        recentPeriods: pickRecentPeriods(parsedPeriods.map((p) => p.period), 6),
+        recentPeriods: pickRecentPeriods(parsedPeriods.map((p) => p.period), 3),
         periodStatuses: periodBuilt.periodStatuses,
         latestExpectedPeriod: periodBuilt.latestExpected,
         latestExpectedMissing: periodBuilt.latestExpectedMissing,

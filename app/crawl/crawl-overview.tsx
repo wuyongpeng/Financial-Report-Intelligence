@@ -1,25 +1,28 @@
 'use client';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type AnimationEvent, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
-  freshnessLabel,
+  canFillVerdict,
+  flattenCrawlFilings,
+  filingToPeriodStatus,
   METRIC_LABELS,
+  periodPrefixMatches,
   periodStateLabel,
-  reportTypeLabel,
-  hasDownloadedPdf,
+  uniquePeriodTokens,
   type CrawlCompanyCoverage,
+  type CrawlFilingRow,
   type CrawlPeriodStatus,
   type CrawlSourceKind,
   type CrawlStats,
-  type ParseStatus,
 } from '@/lib/crawl-display';
 import { parseHomeQuery, queryMatchesCompany } from '@/lib/home-search';
-import { periodMeetsAutoCutoff } from '@/lib/ingest-lookback';
+import { Icon } from '../ui-icons';
 import './crawl-overview.css';
 
 type SourceFilter = 'all' | CrawlSourceKind;
 type SortState = 'default' | 'asc' | 'desc';
+type TimeCol = 'discovered' | 'downloaded' | 'parsed';
 type QueueItem = {
   code: string;
   name: string;
@@ -90,6 +93,8 @@ type LivePayload = {
     parseLimit: number;
     pagePauseMs: number;
     downloadPauseMs: number;
+    lookbackDays?: number;
+    pollIntervalMin?: number;
     maxPages?: number;
     downloadTimeoutMs?: number;
     parseTimeoutMs?: number;
@@ -100,25 +105,18 @@ type LivePayload = {
 function formatCrawlTime(iso: string | null | undefined) {
   if (!iso) return '—';
   const d = new Date(iso);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${y}-${m}-${day} ${hh}:${mm}`;
-}
-
-function statusClass(status: ParseStatus) {
-  if (status === 'completed') return 'ok';
-  if (status === 'parsing') return 'busy';
-  if (status === 'queued') return 'pending';
-  if (status === 'pending') return 'pending';
-  return 'fail';
-}
-
-function metricLabel(name: string) {
-  const map: Record<string, string> = { revenue: '营收', net_profit: '净利', eps: 'EPS', roe: 'ROE' };
-  return map[name] ?? name;
+  if (Number.isNaN(d.getTime())) return '—';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
 }
 
 function cycleSort(current: SortState): SortState {
@@ -127,18 +125,98 @@ function cycleSort(current: SortState): SortState {
   return 'default';
 }
 
+type SettingsDraft = {
+  downloadPauseSec: string;
+  downloadLimit: string;
+  parseLimit: string;
+  lookbackDays: string;
+  pollIntervalMin: string;
+};
 
-function sourceApiLabel(item: CrawlCompanyCoverage) {
-  if (item.sourceApi) {
-    if (item.sourceApi === 'CNINFO') return '巨潮资讯 CNINFO';
-    if (item.sourceApi === 'SSE') return '上交所 SSE';
-    if (item.sourceApi === 'SZSE') return '深交所 SZSE';
-    return item.sourceApi;
-  }
-  if (item.source === 'exchange') return item.exchange === 'SSE' ? '上交所 SSE' : '深交所 SZSE';
-  if (item.source === 'cninfo') return '巨潮资讯 CNINFO';
-  return '尚未命中';
+const SETTINGS_BOUNDS = {
+  downloadPauseSec: { min: 1, max: 9999, fallback: 20 },
+  downloadLimit: { min: 1, max: 99, fallback: 5 },
+  parseLimit: { min: 1, max: 9, fallback: 2 },
+  lookbackDays: { min: 1, max: 99, fallback: 2 },
+  pollIntervalMin: { min: 1, max: 60, fallback: 2 },
+} as const;
+
+const SETTINGS_FIELDS: Array<{
+  key: keyof SettingsDraft;
+  label: string;
+  unit: string;
+  hint: string;
+  prefix?: string;
+}> = [
+  { key: 'downloadPauseSec', label: '排队下载间隔', unit: '秒', hint: '排队任务领取下载之间的等待时间，用于降低封控风险。' },
+  { key: 'downloadLimit', label: '并发下载数量', unit: '个', hint: '同时下载 PDF 的最大数量。' },
+  { key: 'parseLimit', label: '并发解析数量', unit: '个', hint: '同时解析 PDF 的最大数量。' },
+  { key: 'lookbackDays', label: '采集窗口', unit: '天', prefix: '最近', hint: '初始化完成后，增量扫描只看最近这些天的公告。' },
+  { key: 'pollIntervalMin', label: '抓取轮询间隔', unit: '分钟', hint: '扫描新公告和财报缺口的时间间隔。保存后 Worker 会按新间隔执行。' },
+];
+
+function clampSetting(key: keyof SettingsDraft, raw: string): number {
+  const bounds = SETTINGS_BOUNDS[key];
+  const trimmed = String(raw).trim();
+  if (!trimmed) return bounds.fallback;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return bounds.fallback;
+  return Math.min(bounds.max, Math.max(bounds.min, Math.round(n)));
 }
+
+function settingMaxDigits(max: number) {
+  return String(max).length;
+}
+
+function sanitizeSettingInput(raw: string, max: number): string {
+  return raw.replace(/\D/g, '').slice(0, settingMaxDigits(max));
+}
+
+function settingsDraftFromLive(live: LivePayload | null): SettingsDraft {
+  return {
+    downloadPauseSec: String(Math.max(1, Math.round((live?.limits.downloadPauseMs ?? 20_000) / 1000))),
+    downloadLimit: String(live?.limits.downloadLimit ?? live?.downloadSlots.max ?? 5),
+    parseLimit: String(live?.limits.parseLimit ?? live?.parseSlots.max ?? 2),
+    lookbackDays: String(live?.limits.lookbackDays ?? 2),
+    pollIntervalMin: String(live?.limits.pollIntervalMin ?? Math.max(1, Math.round((live?.limits.intervalMs ?? 120_000) / 60_000))),
+  };
+}
+
+type ControlSettingsPayload = {
+  downloadPauseSec?: number;
+  downloadLimit?: number;
+  parseLimit?: number;
+    lookbackDays?: number;
+    pollIntervalMin?: number;
+    settings?: {
+      downloadPauseSec?: number;
+      downloadLimit?: number;
+      parseLimit?: number;
+      lookbackDays?: number;
+      pollIntervalMin?: number;
+    };
+  };
+
+function settingsDraftFromControl(payload: ControlSettingsPayload | null, live: LivePayload | null): SettingsDraft {
+  const source = payload?.settings ?? payload;
+  if (source && Number.isFinite(Number(source.downloadPauseSec))) {
+    return {
+      downloadPauseSec: String(source.downloadPauseSec),
+      downloadLimit: String(source.downloadLimit ?? 5),
+      parseLimit: String(source.parseLimit ?? 2),
+      lookbackDays: String(source.lookbackDays ?? 2),
+      pollIntervalMin: String(source.pollIntervalMin ?? 2),
+    };
+  }
+  return settingsDraftFromLive(live);
+}
+
+function filingTimeValue(row: CrawlFilingRow, col: TimeCol) {
+  if (col === 'discovered') return row.discoveredAt ?? row.publishedAt ?? '';
+  if (col === 'downloaded') return row.downloadedAt ?? '';
+  return row.parsedAt ?? '';
+}
+
 
 type SourceProbe = {
   source: string;
@@ -401,7 +479,7 @@ function periodChipTitle(p: CrawlPeriodStatus) {
 }
 
 
-function IndustryTag({ item }: { item: Pick<CrawlCompanyCoverage, 'industry' | 'industryGroup'> }) {
+function IndustryTag({ item }: { item: { industry?: string; industryGroup?: string } }) {
   const l1 = (item.industryGroup || '').trim();
   const l2 = (item.industry || '').trim();
   if (!l1 && !l2) return null;
@@ -417,27 +495,6 @@ function IndustryTag({ item }: { item: Pick<CrawlCompanyCoverage, 'industry' | '
   return <div className="co-industry"><span>{l2 || l1}</span></div>;
 }
 
-function PeriodChips({ periods }: { periods?: CrawlPeriodStatus[] }) {
-  // Exactly 2 rows × up to 3 chips (newest first from API).
-  const list = (periods ?? []).filter((p) => !p.period || p.period === '最新' || periodMeetsAutoCutoff(p.period)).slice(0, 6);
-  if (!list.length) return <div className="co-sub">暂无报告期</div>;
-  const row1 = list.slice(0, 3);
-  const row2 = list.slice(3, 6);
-  const chip = (p: CrawlPeriodStatus) => (
-    <span key={p.period} className={`co-period ${p.state}`} data-tip={periodChipTitle(p)}>
-      {p.period}
-      <i>{periodStateLabel(p.state)}</i>
-      {p.sourceApi ? <em className="co-period-src">{sourceApiShort(p.sourceApi)}</em> : null}
-    </span>
-  );
-  return (
-    <div className="co-period-chips" aria-label="公告期次">
-      <div className="co-period-row">{row1.map(chip)}</div>
-      {row2.length > 0 ? <div className="co-period-row">{row2.map(chip)}</div> : null}
-    </div>
-  );
-}
-
 function queueDisplayName(item: Pick<QueueItem, 'name' | 'label' | 'period' | 'title'>) {
   if (item.label) return item.label;
   if (item.period) return `${item.name} ${item.period}`;
@@ -449,7 +506,6 @@ export default function CrawlOverview() {
   const searchParams = useSearchParams();
   const focusParam = (searchParams.get('focus') ?? '').trim();
   const focusCode = /^\d{6}$/.test(focusParam) ? focusParam : '';
-  const focusHandled = useRef<string | null>(null);
   const [all, setAll] = useState<CrawlCompanyCoverage[]>([]);
   const [stats, setStats] = useState<CrawlStats | null>(null);
   const [live, setLive] = useState<LivePayload | null>(null);
@@ -459,8 +515,8 @@ export default function CrawlOverview() {
   const [source, setSource] = useState<SourceFilter>('all');
   const [onlyFailed, setOnlyFailed] = useState(false);
   const [onlyParsing, setOnlyParsing] = useState(false);
+  const [timeCol, setTimeCol] = useState<TimeCol | null>(null);
   const [timeSort, setTimeSort] = useState<SortState>('default');
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [queuePopover, setQueuePopover] = useState<null | 'download' | 'parse' | 'downloading' | 'parsing'>(null);
   const [queueWaitTick, setQueueWaitTick] = useState(0);
   const dlQueueBtnRef = useRef<HTMLButtonElement>(null);
@@ -482,13 +538,19 @@ export default function CrawlOverview() {
     body: ReactNode;
     okLabel: string;
   }>(null);
-  const [periodPicker, setPeriodPicker] = useState<null | {
-    mode: 'crawl' | 'parse';
-    code: string;
-    name: string;
-    options: import('@/lib/crawl-display').CrawlPeriodStatus[];
-  }>(null);
-  const [pickedPeriod, setPickedPeriod] = useState<string>('');
+  const [periodPrefix, setPeriodPrefix] = useState('');
+  const [onlyMissingAi, setOnlyMissingAi] = useState(false);
+  const [forceRefreshAi, setForceRefreshAi] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [verdictOverrides, setVerdictOverrides] = useState<Record<string, 'ready' | 'pending' | 'failed'>>({});
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchProgress, setBatchProgress] = useState('');
+  const [settingsMounted, setSettingsMounted] = useState(false);
+  const [settingsClosing, setSettingsClosing] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(() => settingsDraftFromLive(null));
+  const settingsOpenGen = useRef(0);
+  const batchAbort = useRef(false);
 
   const refreshCoverage = useCallback(async () => {
     try {
@@ -613,49 +675,79 @@ export default function CrawlOverview() {
   useEffect(() => {
     if (!focusCode) return;
     setSearch((prev) => prev || focusCode);
-    setExpanded(focusCode);
   }, [focusCode]);
 
   useEffect(() => {
-    if (!focusCode || loading || !all.length) return;
-    if (focusHandled.current === focusCode) return;
+    if (!settingsClosing) return;
     const timer = window.setTimeout(() => {
-      const node = document.getElementById(`co-row-${focusCode}`);
-      if (node) {
-        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        focusHandled.current = focusCode;
-      }
+      setSettingsMounted(false);
+      setSettingsClosing(false);
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [focusCode, loading, all.length]);
+  }, [settingsClosing]);
 
-  const rows = useMemo(() => {
+  useEffect(() => {
+    if (!settingsMounted) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        settingsOpenGen.current += 1;
+        setSettingsClosing(true);
+        setSettingsSaving(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [settingsMounted]);
+
+  const allFilings = useMemo(() => flattenCrawlFilings(all).map((row) => ({
+    ...row,
+    verdictStatus: (row.announcementId && verdictOverrides[row.announcementId]) || row.verdictStatus,
+  })), [all, verdictOverrides]);
+
+  const periodOptions = useMemo(() => uniquePeriodTokens(allFilings), [allFilings]);
+
+  const filings = useMemo(() => {
     const keyword = search.trim();
     const parsed = parseHomeQuery(keyword);
     const needle = parsed.companyQuery || keyword;
-    let list = all.filter((item) => {
+    let list = allFilings.filter((item) => {
       if (source !== 'all' && item.source !== source) return false;
-      if (onlyFailed && item.parseStatus !== 'failed') return false;
-      if (onlyParsing && item.parseStatus !== 'parsing' && item.parseStatus !== 'queued') return false;
+      if (onlyFailed && item.state !== 'failed') return false;
+      if (onlyParsing && item.state !== 'downloaded') return false;
+      if (onlyMissingAi && item.verdictStatus === 'ready') return false;
+      if (!periodPrefixMatches(item.period, periodPrefix)) return false;
       if (!keyword) return true;
       return queryMatchesCompany(needle, item) || queryMatchesCompany(keyword, item);
     });
-    list = [...list];
-    if (timeSort !== 'default') {
-      list.sort((a, b) => {
-        const av = a.lastCrawlAt ?? '';
-        const bv = b.lastCrawlAt ?? '';
-        const cmp = av.localeCompare(bv) || a.rank - b.rank;
+    if (timeCol && timeSort !== 'default') {
+      list = [...list].sort((a, b) => {
+        const av = filingTimeValue(a, timeCol);
+        const bv = filingTimeValue(b, timeCol);
+        const cmp = av.localeCompare(bv) || a.code.localeCompare(b.code) || a.period.localeCompare(b.period);
         return timeSort === 'asc' ? cmp : -cmp;
       });
-    } else {
-      list.sort((a, b) => a.rank - b.rank || a.code.localeCompare(b.code));
     }
     return list;
-  }, [all, search, source, onlyFailed, onlyParsing, timeSort]);
+  }, [allFilings, search, source, onlyFailed, onlyParsing, onlyMissingAi, periodPrefix, timeCol, timeSort]);
 
-  const downloadMax = live?.downloadSlots.max ?? 2;
-  const parseMax = live?.parseSlots.max ?? 1;
+  const fillableFilings = useMemo(() => filings.filter((row) => canFillVerdict(row)), [filings]);
+  const selectedFillable = useMemo(
+    () => fillableFilings.filter((row) => Boolean(row.announcementId && selectedIds.has(row.announcementId))),
+    [fillableFilings, selectedIds],
+  );
+  const allVisibleSelected = fillableFilings.length > 0 && fillableFilings.every((row) => Boolean(row.announcementId && selectedIds.has(row.announcementId)));
+
+  const downloadMax = live?.downloadSlots.max ?? live?.limits.downloadLimit ?? 5;
+  const parseMax = live?.parseSlots.max ?? live?.limits.parseLimit ?? 2;
+  const lookbackDays = live?.limits.lookbackDays ?? 2;
+  const pollIntervalMin = live?.limits.pollIntervalMin ?? Math.max(1, Math.round((live?.limits.intervalMs ?? 120_000) / 60_000));
+  const downloadPauseSec = Math.max(1, Math.round((live?.limits.downloadPauseMs ?? 20_000) / 1000));
   const ingested = live
     ? (live.counts.ingested ?? ((live.counts.review ?? 0) + (live.counts.online ?? 0)))
     : (stats?.covered ?? all.filter((c) => c.parseStatus === 'completed').length);
@@ -663,24 +755,167 @@ export default function CrawlOverview() {
   const universe = stats?.universe ?? live?.counts.target_companies ?? (all.length || 60);
   const paused = !autoCrawlEnabled;
   const coverageReady = live?.coverageBootstrap?.mode === 'steady';
-  const coverageHint = coverageReady
-    ? '已初始化：默认只扫最近 2 天公告；下载与解析按排队继续。'
-    : `全量补齐中：已扫 ${live?.coverageBootstrap?.hunted ?? 0} 家，仍缺 ${live?.coverageBootstrap?.missingPeriods ?? '—'} 个 2025Q1+ 期次。`;
 
 
-  function companyHref(item: CrawlCompanyCoverage) {
-    return `/${item.code}`;
+  function companyHref(item: { code: string }, period?: string) {
+    return period ? `/${item.code}?period=${encodeURIComponent(period)}` : `/${item.code}`;
   }
 
-  function onTimeSort() {
-    setTimeSort((s) => cycleSort(s));
+  function toggleFiling(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelectVisible() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const row of fillableFilings) if (row.announcementId) next.delete(row.announcementId);
+      } else {
+        for (const row of fillableFilings) if (row.announcementId) next.add(row.announcementId);
+      }
+      return next;
+    });
+  }
+
+  async function runBatchVerdict() {
+    const jobs = forceRefreshAi
+      ? selectedFillable
+      : selectedFillable.filter((row) => row.verdictStatus !== 'ready');
+    const skipped = selectedFillable.length - jobs.length;
+    if (!jobs.length) {
+      setBatchProgress(selectedFillable.length
+        ? '所选财报均已有 AI 速判。勾选「覆盖已有」可重新分析。'
+        : '请先勾选已解析的财报。');
+      return;
+    }
+    const minutes = Math.max(1, Math.ceil(jobs.length / 2));
+    if (!window.confirm(`将对 ${jobs.length} 份已解析财报${forceRefreshAi ? '重新' : ''}生成 AI 速判，大约需要 ${minutes} 分钟（每份约 1 分钟）。继续？`)) return;
+    batchAbort.current = false;
+    setBatchBusy(true);
+    let done = 0;
+    let failed = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < jobs.length && !batchAbort.current) {
+        const item = jobs[cursor++];
+        const reportId = item.announcementId;
+        if (!reportId) continue;
+        const n = cursor;
+        setVerdictOverrides((map) => ({ ...map, [reportId]: 'pending' }));
+        setBatchProgress(`正在解析 ${n}/${jobs.length} · ${item.name} ${item.period}`);
+        try {
+          const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/verdict`, {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(forceRefreshAi ? { refresh: true } : { fill: true }),
+          });
+          if (!response.ok) throw new Error(String(response.status));
+          setVerdictOverrides((map) => ({ ...map, [reportId]: 'ready' }));
+          done += 1;
+        } catch {
+          setVerdictOverrides((map) => ({ ...map, [reportId]: 'failed' }));
+          failed += 1;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, jobs.length) }, () => worker()));
+    const stopped = batchAbort.current;
+    setBatchBusy(false);
+    setBatchProgress(`${stopped ? '已中止' : '完成'}。成功 ${done}，失败 ${failed}${skipped ? `，跳过已有 ${skipped}` : ''}`);
+    void refreshCoverage();
+  }
+
+  function onTimeSort(col: TimeCol) {
+    if (timeCol !== col) {
+      setTimeCol(col);
+      setTimeSort('asc');
+      return;
+    }
+    const next = cycleSort(timeSort);
+    setTimeSort(next);
+    if (next === 'default') setTimeCol(null);
+  }
+
+  function filterByCompany(name: string) {
+    setSearch(name);
   }
 
 
-  function toggleExpand(code: string) {
-    setExpanded((prev) => (prev === code ? null : code));
+  function closeSettings() {
+    settingsOpenGen.current += 1;
+    setSettingsClosing(true);
+    setSettingsSaving(false);
   }
 
+  function finishSettingsClose(event: AnimationEvent<HTMLElement>) {
+    if (event.target !== event.currentTarget) return;
+    if (event.animationName !== 'co-settings-slide-out' && event.animationName !== 'co-settings-fade-out') return;
+    setSettingsMounted(false);
+    setSettingsClosing(false);
+  }
+
+  async function openSettings() {
+    const gen = ++settingsOpenGen.current;
+    setQueuePopover(null);
+    setSettingsDraft(settingsDraftFromLive(live));
+    setSettingsClosing(false);
+    setSettingsMounted(true);
+    try {
+      const response = await fetch('/api/crawl/control', { cache: 'no-store' });
+      if (!response.ok || gen !== settingsOpenGen.current) return;
+      const payload = await response.json() as ControlSettingsPayload;
+      if (gen !== settingsOpenGen.current) return;
+      setSettingsDraft(settingsDraftFromControl(payload, live));
+    } catch {
+      /* keep live snapshot */
+    }
+  }
+
+  async function saveSettings() {
+    const next = {
+      downloadPauseSec: clampSetting('downloadPauseSec', settingsDraft.downloadPauseSec),
+      downloadLimit: clampSetting('downloadLimit', settingsDraft.downloadLimit),
+      parseLimit: clampSetting('parseLimit', settingsDraft.parseLimit),
+      lookbackDays: clampSetting('lookbackDays', settingsDraft.lookbackDays),
+      pollIntervalMin: clampSetting('pollIntervalMin', settingsDraft.pollIntervalMin),
+    };
+    setSettingsDraft({
+      downloadPauseSec: String(next.downloadPauseSec),
+      downloadLimit: String(next.downloadLimit),
+      parseLimit: String(next.parseLimit),
+      lookbackDays: String(next.lookbackDays),
+      pollIntervalMin: String(next.pollIntervalMin),
+    });
+    setSettingsSaving(true);
+    setTriggerMsg('');
+    try {
+      const response = await fetch('/api/crawl/control', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; note?: string; settings?: ControlSettingsPayload['settings'] } & ControlSettingsPayload;
+      if (!response.ok) {
+        setTriggerMsg(payload.error ?? '保存采集参数失败');
+        return;
+      }
+      setSettingsDraft(settingsDraftFromControl(payload, live));
+      closeSettings();
+      setTriggerMsg(payload.note ?? '已保存采集参数');
+      await refreshLive();
+    } catch (err) {
+      setTriggerMsg(`网络异常：${String(err)}`);
+    } finally {
+      setSettingsSaving(false);
+      window.setTimeout(() => setTriggerMsg(''), 4000);
+    }
+  }
 
   async function toggleAutoCrawl() {
     const next = !autoCrawlEnabled;
@@ -707,46 +942,6 @@ export default function CrawlOverview() {
       window.setTimeout(() => setTriggerMsg(''), 4000);
     }
   }
-
-  function openPeriodPicker(mode: 'crawl' | 'parse', item: CrawlCompanyCoverage) {
-    const all = item.periodStatuses ?? [];
-    const list = (mode === 'crawl'
-      ? all
-      : all.filter((p) => p.state === 'downloaded' || p.state === 'parsed' || Boolean(p.announcementId))
-    ).filter((p) => p.period && (p.period === '最新' || periodMeetsAutoCutoff(p.period)));
-    if (!list.length) {
-      window.alert(mode === 'crawl'
-        ? `${item.name}（${item.code}）暂无可选期次，将按默认窗口抓取`
-        : `${item.name}（${item.code}）没有已下载可解析的期次，请先抓取`);
-      if (mode === 'crawl') {
-        setPeriodPicker({ mode, code: item.code, name: item.name, options: [{ period: item.latestExpectedPeriod || '最新', state: 'expected' }] });
-        setPickedPeriod(item.latestExpectedPeriod || '最新');
-      }
-      return;
-    }
-    const preferred = mode === 'parse'
-      ? (list.find((p) => p.state === 'downloaded') ?? list[0])
-      : (list.find((p) => p.state === 'expected' || p.state === 'discovered') ?? list[0]);
-    setPickedPeriod(preferred.period);
-    setPeriodPicker({ mode, code: item.code, name: item.name, options: list });
-  }
-
-  async function confirmPeriodPicker() {
-    if (!periodPicker || !pickedPeriod) return;
-    const { mode, code, name, options } = periodPicker;
-    const chosen = options.find((p) => p.period === pickedPeriod) ?? options[0];
-    setPeriodPicker(null);
-    if (mode === 'crawl') {
-      await runCrawlCompany(code, name, chosen?.period === '最新' ? undefined : chosen?.period);
-    } else {
-      if (!chosen?.announcementId && chosen?.state === 'expected') {
-        window.alert(`${name} ${chosen.period} 尚未下载，请先抓取`);
-        return;
-      }
-      await runParseCompany(code, name, chosen);
-    }
-  }
-
 
   function triggerKey(mode: 'crawl' | 'parse', code: string, period?: string, announcementId?: string | null) {
     if (mode === 'parse') return `parse:${code}:${announcementId || period || 'all'}`;
@@ -932,20 +1127,6 @@ export default function CrawlOverview() {
     }
   }
 
-  async function crawlCompany(code: string, name: string, item: CrawlCompanyCoverage) {
-    openPeriodPicker('crawl', item);
-  }
-
-  async function parseCompany(code: string, name: string, item: CrawlCompanyCoverage) {
-    const hasPdf = Boolean(item.downloadedAt) || item.parseStatus === 'parsing' || item.parseStatus === 'queued' || item.parseStatus === 'failed' || item.parseStatus === 'completed' || hasDownloadedPdf(item)
-      || (item.periodStatuses ?? []).some((p) => p.state === 'downloaded' || p.state === 'parsed');
-    if (!hasPdf && item.parseStatus === 'pending' && !item.source) {
-      window.alert(`${name}（${code}）尚未抓取，请先点「抓取」`);
-      return;
-    }
-    openPeriodPicker('parse', item);
-  }
-
   const downloadQueueItems = useMemo(() => {
     const rest = (live?.queueItems ?? [])
       .filter((q) => q.stage === 'download')
@@ -1074,13 +1255,13 @@ export default function CrawlOverview() {
     <main className="app-shell co-shell">
       <section className="co-page">
         <div className="co-title-row">
-          <Link href="/" className="co-back-home" aria-label="返回首页">← 返回首页</Link>
+          <Link href="/" className="co-back-home" aria-label="返回首页"><Icon name="arrowLeft" size={14} /> 返回首页</Link>
           <h1>数据源采集</h1>
           <span className="co-title-meta">
             {loading ? '加载中' : ''}
           </span>
           <div className="co-title-actions">
-            <label className={`co-auto-toggle ${!autoCrawlEnabled ? 'paused' : ''}`} title={autoCrawlEnabled ? (coverageReady ? '已开启：初始化完成，每 10 分钟只扫最近 2 天公告；排队下载与解析继续。' : '已开启：先全量补齐 2025Q1 及之后缺口，完成后再只扫最近 2 天公告。') : '已关闭：下载中任务会完成，排队不再自动开始下载；仍会定时扫描新公告与缺口'}>
+            <label className={`co-auto-toggle ${!autoCrawlEnabled ? 'paused' : ''}`} title={autoCrawlEnabled ? (coverageReady ? `已开启：初始化完成，每 ${pollIntervalMin} 分钟只扫最近 ${lookbackDays} 天公告；排队下载与解析继续。` : `已开启：先全量补齐 2025Q1 及之后缺口，完成后再只扫最近 ${lookbackDays} 天公告。`) : '已关闭：下载中任务会完成，排队不再自动开始下载；仍会定时扫描新公告与缺口'}>
               <span>自动抓取</span>
               <button
                 type="button"
@@ -1094,11 +1275,6 @@ export default function CrawlOverview() {
                 <span className="co-switch-knob" aria-hidden="true" />
               </button>
             </label>
-            {live?.coverageBootstrap ? (
-            <span className={`co-coverage-mode ${coverageReady ? 'ready' : 'boot'}`} title={coverageHint}>
-              {coverageReady ? '已初始化 · 近2天' : '全量补齐中'}
-            </span>
-            ) : null}
             <span className="co-coverage">{covered}/{universe} 家已覆盖</span>
             <span className="co-ops-help" tabIndex={0} aria-label="采集参数说明">
               <svg className="co-ops-help-ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
@@ -1106,15 +1282,16 @@ export default function CrawlOverview() {
               </svg>
               <span className="co-ops-tip" role="tooltip">
                 <strong>采集说明</strong>
-                <p className="co-ops-tip-lead">先全量补齐 2025Q1 及之后缺口：找到下载源进入排队下载，下完自动排队解析。全部扫过且不再缺可补期次后进入已初始化，默认只扫最近 2 天公告。关闭后仍扫描公告，但排队不再自动开始下载。</p>
+                <p className="co-ops-tip-lead">先全量补齐 2025Q1 及之后缺口：找到下载源进入排队下载，下完自动排队解析。全部扫过且不再缺可补期次后进入已初始化，默认只扫最近 {lookbackDays} 天公告。关闭后仍扫描公告，但排队不再自动开始下载。</p>
                 <ul>
                   <li><em>自动抓取</em><span>{autoCrawlEnabled ? '开' : '关'}</span></li>
                   <li><em>覆盖状态</em><span>{coverageReady ? '已初始化' : '全量补齐中'}</span></li>
                   <li><em>下载并发</em><span>{downloadMax}</span></li>
                   <li><em>解析并发</em><span>{parseMax}</span></li>
-                  <li><em>轮询间隔</em><span>约 {Math.round((live?.limits?.intervalMs ?? 600_000) / 60000)} 分钟</span></li>
+                  <li><em>下载间隔</em><span>{downloadPauseSec} 秒</span></li>
+                  <li><em>轮询间隔</em><span>{pollIntervalMin} 分钟</span></li>
                   <li><em>超时</em><span>下载/解析各 5 分钟</span></li>
-                  <li><em>采集窗口</em><span>{coverageReady ? '近 2 天公告' : '最早 2025Q1'}</span></li>
+                  <li><em>采集窗口</em><span>{coverageReady ? `近 ${lookbackDays} 天公告` : '最早 2025Q1'}</span></li>
                 </ul>
               </span>
             </span>
@@ -1123,7 +1300,7 @@ export default function CrawlOverview() {
 
         <div className="co-pipebar" role="status" aria-label="采集监控">
           <SourceDots health={sourceProbes ?? live?.health} />
-          <span className="co-sb-arrow co-sb-flow" aria-hidden="true">→</span>
+          <span className="co-sb-arrow co-sb-flow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
           <div className="co-sb-pipeline">
             <span className="co-sb-node-wrap">
               <button
@@ -1150,7 +1327,7 @@ export default function CrawlOverview() {
                 anchorRef={dlQueueBtnRef}
               />
             </span>
-            <span className="co-sb-arrow" aria-hidden="true">→</span>
+            <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
             <span className="co-sb-node-wrap">
               <button
                 type="button"
@@ -1167,7 +1344,7 @@ export default function CrawlOverview() {
                 open={queuePopover === 'downloading'}
                 title="下载中"
                 items={downloadingItems}
-                empty={queueCount > 0 ? '槽位空闲，排队等待 Worker 领取（约 20s/45s 一轮）' : '当前无下载任务'}
+                empty={queueCount > 0 ? `槽位空闲，排队等待 Worker 领取（约 ${downloadPauseSec}s 一轮）` : '当前无下载任务'}
                 note={paused
                   ? '自动抓取已关：下载中的任务会完成，排队不再自动进入下载槽。'
                   : (queueCount > 0 && downloadUsed === 0 ? '有排队但下载槽空闲：等待 Worker 或本页软触发领取。' : undefined)}
@@ -1175,7 +1352,7 @@ export default function CrawlOverview() {
                 anchorRef={dlActiveBtnRef}
               />
             </span>
-            <span className="co-sb-arrow" aria-hidden="true">→</span>
+            <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
             <span className="co-sb-node-wrap">
               <button
                 type="button"
@@ -1197,7 +1374,7 @@ export default function CrawlOverview() {
                 anchorRef={parseQueueBtnRef}
               />
             </span>
-            <span className="co-sb-arrow" aria-hidden="true">→</span>
+            <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
             <span className="co-sb-node-wrap">
               <button
                 type="button"
@@ -1220,43 +1397,21 @@ export default function CrawlOverview() {
                 anchorRef={parseActiveBtnRef}
               />
             </span>
-            <span className="co-sb-arrow" aria-hidden="true">→</span>
+            <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
             <span className="co-sb-node static">已入库(<b>{ingested}</b>)</span>
           </div>
+          <button
+            type="button"
+            className="co-pipebar-settings"
+            aria-label="采集设置"
+            aria-expanded={settingsMounted && !settingsClosing}
+            title="采集设置"
+            onClick={() => { if (settingsMounted && !settingsClosing) closeSettings(); else void openSettings(); }}
+          >
+            <Icon name="settings" size={18} />
+          </button>
         </div>
         <p className="co-stage-msg" role="status" aria-live="polite">{triggerMsg || ''}</p>
-
-      {periodPicker ? (
-        <div className="co-period-modal" role="dialog" aria-modal="true" aria-label={periodPicker.mode === 'crawl' ? '选择要抓取的财报' : '选择要解析的财报'}>
-          <div className="co-period-modal-card">
-            <header>
-              <h3>{periodPicker.mode === 'crawl' ? '选择要抓取的财报' : '选择要解析的财报'}</h3>
-              <p>{periodPicker.name}（{periodPicker.code}）</p>
-            </header>
-            <div className="co-period-modal-list" role="radiogroup">
-              {periodPicker.options.map((opt) => (
-                <label key={opt.period} className={pickedPeriod === opt.period ? 'on' : ''}>
-                  <input
-                    type="radio"
-                    name="co-period-pick"
-                    checked={pickedPeriod === opt.period}
-                    onChange={() => setPickedPeriod(opt.period)}
-                  />
-                  <span>
-                    <b>{opt.period}</b>
-                    <em>{periodStateLabel(opt.state)}</em>
-                    {opt.title ? <small>{opt.title}</small> : null}
-                  </span>
-                </label>
-              ))}
-            </div>
-            <footer>
-              <button type="button" className="co-period-cancel" onClick={() => setPeriodPicker(null)}>取消</button>
-              <button type="button" className="co-period-ok" onClick={() => void confirmPeriodPicker()}>确定</button>
-            </footer>
-          </div>
-        </div>
-      ) : null}
 
       {actionConfirm ? (
         <div className="co-confirm-backdrop" role="dialog" aria-modal="true" aria-label={actionConfirm.title}>
@@ -1273,18 +1428,36 @@ export default function CrawlOverview() {
 
         <div className="co-toolbar">
           <label className="co-search">
-            <span aria-hidden="true">⌕</span>
+            <Icon name="search" size={14} />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="公司 / 代码"
               aria-label="搜索公司或代码"
             />
+            {search ? (
+              <button
+                type="button"
+                className="co-search-clear"
+                aria-label="清空检索"
+                onClick={() => setSearch('')}
+              >
+                ×
+              </button>
+            ) : null}
           </label>
           <select value={source} onChange={(e) => setSource(e.target.value as SourceFilter)} aria-label="来源筛选">
             <option value="all">全部来源</option>
             <option value="exchange">交易所直连</option>
             <option value="cninfo">巨潮资讯</option>
+          </select>
+          <select
+            value={periodOptions.includes(periodPrefix.trim().toUpperCase()) ? periodPrefix.trim().toUpperCase() : periodPrefix}
+            onChange={(e) => setPeriodPrefix(e.target.value)}
+            aria-label="选择报告期"
+          >
+            <option value="">全部期次</option>
+            {periodOptions.map((token) => <option key={token} value={token}>{token}</option>)}
           </select>
           <div className="co-toggles" role="group" aria-label="快速筛选">
             <button
@@ -1296,7 +1469,7 @@ export default function CrawlOverview() {
                 if (!onlyFailed) setOnlyParsing(false);
               }}
             >
-              仅看失败
+              失败
             </button>
             <button
               type="button"
@@ -1307,143 +1480,150 @@ export default function CrawlOverview() {
                 if (!onlyParsing) setOnlyFailed(false);
               }}
             >
-              仅看解析中
+              解析中
+            </button>
+            <button
+              type="button"
+              className={`co-toggle ${onlyMissingAi ? 'on' : ''}`}
+              aria-pressed={onlyMissingAi}
+              onClick={() => setOnlyMissingAi((v) => !v)}
+            >
+              未解析
             </button>
           </div>
-          <span className="co-sort-hint" aria-live="polite">
-            {loading ? '加载中…' : `共 ${rows.length} 家`}
-            {timeSort !== 'default' ? ` · 按抓取时间${timeSort === 'asc' ? '升序' : '降序'}` : ''}
-            
-          </span>
+          <div className="co-toolbar-right">
+            <span className="co-sort-hint" aria-live="polite">
+              {loading ? '…' : `${filings.length} 份`}
+            </span>
+          </div>
         </div>
 
-        <div className="co-table-wrap" role="region" aria-label="抓取记录表">
-          <table className="co-table">
+        {(selectedFillable.length > 0 || batchBusy || batchProgress) ? (
+          <div className="co-selection-bar" role="region" aria-label="批量操作">
+            <strong>{selectedFillable.length}</strong>
+            <span>份已选</span>
+            <label className="co-check-label">
+              <input type="checkbox" checked={forceRefreshAi} onChange={(e) => setForceRefreshAi(e.target.checked)} disabled={batchBusy} />
+              覆盖已有
+            </label>
+            <button
+              type="button"
+              className="co-batch-run"
+              disabled={batchBusy || !selectedFillable.length}
+              onClick={() => void runBatchVerdict()}
+            >
+              {batchBusy ? '正在解析…' : '批量解析'}
+            </button>
+            {batchBusy ? (
+              <button type="button" className="co-toggle" onClick={() => { batchAbort.current = true; }}>中止</button>
+            ) : selectedFillable.length ? (
+              <button type="button" className="co-toggle" onClick={() => setSelectedIds(new Set())}>取消选择</button>
+            ) : null}
+            {batchProgress ? <span className="co-batch-progress" role="status">{batchProgress}</span> : null}
+          </div>
+        ) : null}
+
+        <div className="co-table-wrap is-filings" role="region" aria-label="全量财报列表">
+          <table className="co-table co-table-compact">
             <thead>
               <tr>
-                <th>公司 / 代码</th>
-                <th>
-                  <SortHeader label="最近抓取" state={timeSort} onCycle={onTimeSort} />
+                <th className="co-check-col">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    disabled={!fillableFilings.length || batchBusy}
+                    onChange={toggleSelectVisible}
+                    aria-label="全选当前列表中可解析的财报"
+                  />
                 </th>
-                <th>公告期次</th>
+                <th className="co-col-company">公司 / 代码</th>
+                <th className="co-col-period">期次</th>
+                <th className="co-col-source">来源</th>
+                <th className="co-col-time">
+                  <SortHeader label="发现" state={timeCol === 'discovered' ? timeSort : 'default'} onCycle={() => onTimeSort('discovered')} />
+                </th>
+                <th className="co-col-time">
+                  <SortHeader label="抓取" state={timeCol === 'downloaded' ? timeSort : 'default'} onCycle={() => onTimeSort('downloaded')} />
+                </th>
+                <th className="co-col-time">
+                  <SortHeader label="解析" state={timeCol === 'parsed' ? timeSort : 'default'} onCycle={() => onTimeSort('parsed')} />
+                </th>
+                <th className="co-col-ops">操作</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((item) => {
-                const open = expanded === item.code;
+              {filings.map((item) => {
+                const fillable = canFillVerdict(item);
+                const checked = Boolean(item.announcementId && selectedIds.has(item.announcementId));
+                const period = filingToPeriodStatus(item);
                 return (
-                  <Fragment key={item.code}>
-                    <tr
-                      id={`co-row-${item.code}`}
-                      className={`co-row ${open ? 'open' : ''} ${item.parseStatus === 'failed' ? 'is-fail' : ''} ${focusCode === item.code ? 'co-row-focus' : ''}`}
-                      onClick={() => toggleExpand(item.code)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          toggleExpand(item.code);
-                        }
-                      }}
-                      tabIndex={0}
-                      aria-expanded={open}
-                    >
-                      <td>
-                        <Link href={companyHref(item)} onClick={(e) => e.stopPropagation()}>
+                  <tr key={item.key} className={item.state === 'failed' ? 'is-fail' : ''}>
+                    <td className="co-check-col">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!fillable || batchBusy}
+                        onChange={(e) => item.announcementId && toggleFiling(item.announcementId, e.target.checked)}
+                        aria-label={`${item.name} ${item.period}`}
+                      />
+                    </td>
+                    <td className="co-col-company">
+                      <span className="co-company-cell">
+                        <button
+                          type="button"
+                          className="co-company-btn"
+                          onClick={() => filterByCompany(item.name)}
+                        >
                           {item.name}
-                          <span className="co-code">{item.code}</span>
-                        </Link>
-                        <IndustryTag item={item} />
-                      </td>
-                      <td>
-                        <div>{formatCrawlTime(item.lastCrawlAt)}</div>
-                        <div className="co-sub">{freshnessLabel(item.lastCrawlAt)}</div>
-                      </td>
-                      <td>
-                        <PeriodChips periods={item.periodStatuses} />
-                      </td>
-                    </tr>
-                    {open && (
-                      <tr key={`${item.code}-detail`} className="co-detail-row">
-                        <td colSpan={3} onClick={(e) => e.stopPropagation()}>
-                          <div className="co-ann-panel">
-                            <div className="co-ann-head">
-                              <strong>公告列表</strong>
-                              <Link href={companyHref(item)}>打开公司详情 →</Link>
-                            </div>
-                            <table className="co-ann-table">
-                              <thead>
-                                <tr>
-                                  <th>期次</th>
-                                  <th>状态</th>
-                                  <th>来源</th>
-                                  <th>发现</th>
-                                  <th>抓取</th>
-                                  <th>解析</th>
-                                  <th>操作</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {(item.periodStatuses ?? []).filter((p) => p.period === '最新' || periodMeetsAutoCutoff(p.period)).map((p) => (
-                                  <tr key={`${item.code}-${p.period}-${p.announcementId ?? 'x'}`}>
-                                    <td className="co-ann-period">
-                                      {p.state === 'parsed' || p.state === 'parsed_partial' ? (
-                                        <Link
-                                          href={`/${item.code}?period=${encodeURIComponent(p.period)}`}
-                                          className="co-ann-period-link"
-                                          title={`打开 ${p.period} 详情`}
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          <b>{p.period}</b>
-                                        </Link>
-                                      ) : (
-                                        <b>{p.period}</b>
-                                      )}
-                                      {p.title ? <div className="co-sub" title={p.title}>{p.title.replace(/\s+/g, ' ').slice(0, 36)}</div> : null}
-                                    </td>
-                                    <td><span className={`co-period ${p.state}`}>{periodStateLabel(p.state)}</span></td>
-                                    <td>{sourceApiShort(p.sourceApi)}</td>
-                                    <td>{formatCrawlTime(p.discoveredAt ?? p.publishedAt ?? null)}</td>
-                                    <td>{formatCrawlTime(p.downloadedAt ?? null)}</td>
-                                    <td>{formatCrawlTime(p.parsedAt ?? null)}</td>
-                                    <td>
-                                      <div className="co-actions">
-                                        <button
-                                          type="button"
-                                          className="co-text-act co-act-crawl"
-                                          disabled={isTriggering('crawl', item.code, p.period === '最新' ? undefined : p.period)}
-                                          onClick={() => askCrawl(item.code, item.name, p)}
-                                        >{isTriggering('crawl', item.code, p.period === '最新' ? undefined : p.period) ? '抓取中…' : '抓取'}</button>
-                                        <button
-                                          type="button"
-                                          className="co-text-act co-act-parse"
-                                          disabled={isTriggering('parse', item.code, p.period, p.announcementId) || (p.state === 'expected' && !p.announcementId)}
-                                          onClick={() => askParse(item.code, item.name, p)}
-                                        >{isTriggering('parse', item.code, p.period, p.announcementId) ? '解析中…' : '解析'}</button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                                {!(item.periodStatuses ?? []).some((p) => p.period === '最新' || periodMeetsAutoCutoff(p.period)) && (
-                                  <tr><td colSpan={7} className="co-sub">暂无公告（采集窗口最早 2025Q1）</td></tr>
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+                        </button>
+                        <span className="co-code">{item.code}</span>
+                      </span>
+                      <IndustryTag item={item} />
+                    </td>
+                    <td className="co-col-period">
+                      <Link
+                        href={companyHref(item, item.period)}
+                        className="co-period-link"
+                        data-tip={periodChipTitle(period)}
+                      >
+                        {item.period}
+                      </Link>
+                    </td>
+                    <td className="co-col-source">{sourceApiShort(item.sourceApi)}</td>
+                    <td className="co-col-time"><span className="co-time">{formatCrawlTime(item.discoveredAt ?? item.publishedAt ?? null)}</span></td>
+                    <td className="co-col-time"><span className="co-time">{formatCrawlTime(item.downloadedAt ?? null)}</span></td>
+                    <td className="co-col-time">
+                      <span className="co-time">{formatCrawlTime(item.parsedAt ?? null)}</span>
+                    </td>
+                    <td className="co-col-ops">
+                      <div className="co-actions">
+                        <button
+                          type="button"
+                          className="co-text-act"
+                          disabled={isTriggering('crawl', item.code, item.period)}
+                          onClick={() => askCrawl(item.code, item.name, period)}
+                        >{isTriggering('crawl', item.code, item.period) ? '抓取中…' : '抓取'}</button>
+                        <button
+                          type="button"
+                          className="co-text-act"
+                          disabled={isTriggering('parse', item.code, item.period, item.announcementId) || (item.state === 'expected' && !item.announcementId)}
+                          onClick={() => askParse(item.code, item.name, period)}
+                        >{isTriggering('parse', item.code, item.period, item.announcementId) ? '解析中…' : '解析'}</button>
+                      </div>
+                    </td>
+                  </tr>
                 );
               })}
-              {!rows.length && (
+              {!filings.length && (
                 <tr>
-                  <td colSpan={3}>
+                  <td colSpan={8}>
                     <div className={`co-empty ${loading ? 'co-loading' : ''}`} role="status" aria-live="polite">
                       {loading ? (
                         <>
                           <span className="co-loading-spin" aria-hidden="true" />
                           正在加载…
                         </>
-                      ) : '没有符合条件的抓取记录'}
+                      ) : '没有符合条件的财报'}
                     </div>
                   </td>
                 </tr>
@@ -1451,60 +1631,70 @@ export default function CrawlOverview() {
             </tbody>
           </table>
         </div>
-
-        <div className="co-mobile" aria-label="抓取记录（移动端）">
-          <div className="co-mobile-sort">
-            <SortHeader label="最近抓取" state={timeSort} onCycle={onTimeSort} />
-          </div>
-          {rows.map((item) => (
-            <article className={`co-card ${focusCode === item.code ? 'co-row-focus' : ''}`} id={`co-card-${item.code}`} key={item.code}>
-              <div className="co-card-top">
-                <div>
-                  <h3>
-                    <Link href={companyHref(item)}>{item.name}</Link>
-                  </h3>
-                  <p>{item.code} · {formatCrawlTime(item.lastCrawlAt)}</p>
-                </div>
-              </div>
-              <div className="co-card-meta">
-                <PeriodChips periods={item.periodStatuses} />
-              </div>
-              <details>
-                <summary>展开详情</summary>
-                <div className="co-card-detail">
-                  <div className="co-actions">
-                    <button type="button" className="co-text-act" disabled={isTriggering('crawl', item.code)} onClick={() => void crawlCompany(item.code, item.name, item)}>抓取</button>
-                    <button type="button" className="co-text-act" disabled={isTriggering('parse', item.code)} onClick={() => void parseCompany(item.code, item.name, item)}>解析</button>
-                  </div>
-                  <div>行业：{(item.industryGroup && item.industry && item.industryGroup !== item.industry) ? `${item.industryGroup} / ${item.industry}` : (item.industry || item.industryGroup || "—")}</div>
-                  <div>公告：{item.announcementTitle ?? '—'}</div>
-                  <div>命中 API：{sourceApiLabel(item)}</div>
-                  <div>发现：{formatCrawlTime(item.discoveredAt ?? item.lastCrawlAt)}</div>
-                  <div>下载：{formatCrawlTime(item.downloadedAt)}</div>
-                  <div>解析：{formatCrawlTime(item.parsedAt)}</div>
-                  {item.parseError && <div>说明：{item.parseError}</div>}
-                  {!item.metricsComplete && item.missingMetrics.length > 0 && (
-                    <div>缺少指标：{item.missingMetrics.map(metricLabel).join(' / ')}</div>
-                  )}
-                  <div>
-                    <Link href={companyHref(item)}>打开公司详情 →</Link>
-                  </div>
-                </div>
-              </details>
-            </article>
-          ))}
-          {!rows.length && (
-            <div className={`co-empty ${loading ? 'co-loading' : ''}`} role="status" aria-live="polite">
-              {loading ? (
-                <>
-                  <span className="co-loading-spin" aria-hidden="true" />
-                  正在加载…
-                </>
-              ) : '没有符合条件的抓取记录'}
-            </div>
-          )}
-        </div>
       </section>
+      {settingsMounted ? (
+        <div
+          className={`co-settings-backdrop${settingsClosing ? ' closing' : ''}`}
+          role="presentation"
+          onClick={closeSettings}
+          onAnimationEnd={finishSettingsClose}
+        >
+          <aside
+            className="co-settings-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="co-settings-title"
+            onClick={(event) => event.stopPropagation()}
+            onAnimationEnd={finishSettingsClose}
+          >
+            <header className="co-settings-head">
+              <h2 id="co-settings-title">采集设置</h2>
+              <button type="button" className="co-settings-close" aria-label="关闭设置" onClick={closeSettings}>
+                <Icon name="x" size={14} />
+              </button>
+            </header>
+            <div className="co-settings-body">
+              {SETTINGS_FIELDS.map((field) => {
+                const bounds = SETTINGS_BOUNDS[field.key];
+                const maxLength = settingMaxDigits(bounds.max);
+                return (
+                  <div key={field.key} className="co-settings-field">
+                    <span className="co-settings-label" tabIndex={0}>
+                      {field.label}
+                      <span className="co-settings-tip" role="tooltip">
+                        {field.hint} 范围 {bounds.min}–{bounds.max}{field.unit}，默认 {bounds.fallback}{field.unit}。
+                      </span>
+                    </span>
+                    <span className="co-settings-prefix">{field.prefix ?? ''}</span>
+                    <span className="co-settings-input">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={maxLength}
+                        aria-label={field.prefix ? `${field.prefix}${settingsDraft[field.key] || ''}${field.unit}` : field.label}
+                        value={settingsDraft[field.key]}
+                        disabled={settingsSaving}
+                        onChange={(event) => setSettingsDraft((draft) => ({
+                          ...draft,
+                          [field.key]: sanitizeSettingInput(event.target.value, bounds.max),
+                        }))}
+                      />
+                      <b>{field.unit}</b>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <footer className="co-settings-foot">
+              <button type="button" className="co-confirm-cancel" onClick={closeSettings} disabled={settingsSaving}>取消</button>
+              <button type="button" className="co-confirm-ok" onClick={() => void saveSettings()} disabled={settingsSaving}>
+                {settingsSaving ? '保存中…' : '确认'}
+              </button>
+            </footer>
+          </aside>
+        </div>
+      ) : null}
     </main>
   );
 }

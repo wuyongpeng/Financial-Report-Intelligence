@@ -1,22 +1,28 @@
 import { demoAccessEnabled, isAppUser } from '@/lib/auth';
 import { getIngestControl, setIngestControl } from '@/lib/ingest-control';
-import { setDownloadGate } from '@/lib/ingest-progress';
+import { getDownloadGate, setDownloadGate } from '@/lib/ingest-progress';
+import { getIngestSettings, setIngestSettings, type IngestSettings } from '@/lib/ingest-settings';
 
 export const dynamic = 'force-dynamic';
 
 function authorized(request: Request) {
   const token = process.env.INTERNAL_INGEST_TOKEN;
   const bearer = request.headers.get('authorization');
-  if (token && bearer === `Bearer ${token}`) return 'token';
+  if (token && bearer === 'Bearer ' + token) return 'token';
   if (isAppUser(request)) return 'session';
   if (demoAccessEnabled()) return 'demo';
   return null;
 }
 
+function payload(control: Awaited<ReturnType<typeof getIngestControl>>, settings: IngestSettings) {
+  return { ...control, settings, ...settings };
+}
+
 export async function GET() {
   const control = await getIngestControl();
+  const settings = getIngestSettings();
   return Response.json(
-    { ok: true, ...control },
+    { ok: true, ...payload(control, settings) },
     { headers: { 'cache-control': 'no-store' } },
   );
 }
@@ -25,7 +31,15 @@ export async function POST(request: Request) {
   const auth = authorized(request);
   if (!auth) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  let body: { autoCrawlEnabled?: unknown; downloadPaused?: unknown } = {};
+  let body: {
+    autoCrawlEnabled?: unknown;
+    downloadPaused?: unknown;
+    downloadPauseSec?: unknown;
+    downloadLimit?: unknown;
+    parseLimit?: unknown;
+    lookbackDays?: unknown;
+    pollIntervalMin?: unknown;
+  } = {};
   try {
     body = await request.json();
   } catch {
@@ -35,28 +49,38 @@ export async function POST(request: Request) {
   const patch: { autoCrawlEnabled?: boolean; downloadPaused?: boolean } = {};
   if (typeof body.autoCrawlEnabled === 'boolean') patch.autoCrawlEnabled = body.autoCrawlEnabled;
   if (typeof body.downloadPaused === 'boolean') patch.downloadPaused = body.downloadPaused;
-  if (!('autoCrawlEnabled' in patch) && !('downloadPaused' in patch)) {
-    return Response.json({ error: '需要 autoCrawlEnabled 或 downloadPaused 布尔值' }, { status: 400 });
+  const settingsPatch: Partial<IngestSettings> = {};
+  if (body.downloadPauseSec !== undefined) settingsPatch.downloadPauseSec = Number(body.downloadPauseSec);
+  if (body.downloadLimit !== undefined) settingsPatch.downloadLimit = Number(body.downloadLimit);
+  if (body.parseLimit !== undefined) settingsPatch.parseLimit = Number(body.parseLimit);
+  if (body.lookbackDays !== undefined) settingsPatch.lookbackDays = Number(body.lookbackDays);
+  if (body.pollIntervalMin !== undefined) settingsPatch.pollIntervalMin = Number(body.pollIntervalMin);
+  const hasSettings = Object.keys(settingsPatch).length > 0;
+  if (!('autoCrawlEnabled' in patch) && !('downloadPaused' in patch) && !hasSettings) {
+    return Response.json({ error: '需要自动抓取开关或采集参数' }, { status: 400 });
   }
 
-  const control = await setIngestControl(patch);
+  const control = Object.keys(patch).length ? await setIngestControl(patch) : await getIngestControl();
+  const settings = hasSettings ? setIngestSettings(settingsPatch) : getIngestSettings();
+  const pauseMs = settings.downloadPauseSec * 1000;
   if (control.downloadPaused) {
-    setDownloadGate({
-      nextAt: null,
-      pauseMs: Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200),
-      mode: 'paused',
-    });
+    setDownloadGate({ nextAt: null, pauseMs, mode: 'paused' });
+  } else if (hasSettings) {
+    const gate = getDownloadGate();
+    setDownloadGate({ ...gate, pauseMs });
   }
 
   let note = '已更新';
-  if (typeof patch.autoCrawlEnabled === 'boolean' || typeof patch.downloadPaused === 'boolean') {
+  if (hasSettings && !('autoCrawlEnabled' in patch) && !('downloadPaused' in patch)) {
+    note = `已保存采集参数：下载间隔 ${settings.downloadPauseSec}s · 下载并发 ${settings.downloadLimit} · 解析并发 ${settings.parseLimit} · 采集窗口近 ${settings.lookbackDays} 天 · 轮询间隔 ${settings.pollIntervalMin} 分钟`;
+  } else if (typeof patch.autoCrawlEnabled === 'boolean' || typeof patch.downloadPaused === 'boolean') {
     note = control.autoCrawlEnabled
       ? '已开启自动抓取：识别 PDF 地址并并发下载'
       : '已关闭自动抓取：下载中的任务会完成，排队任务不再自动开始下载；仍会定时扫描新公告';
   }
 
   return Response.json(
-    { ok: true, auth, ...control, note },
+    { ok: true, auth, ...payload(control, settings), note },
     { headers: { 'cache-control': 'no-store' } },
   );
 }

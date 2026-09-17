@@ -94,3 +94,13 @@ CREATE TABLE IF NOT EXISTS review_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS review_events_announcement_idx ON review_events (announcement_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS report_verdicts (
+  announcement_id TEXT PRIMARY KEY REFERENCES announcements(id) ON DELETE CASCADE,
+  payload JSONB,
+  model TEXT,
+  status TEXT NOT NULL CHECK (status IN ('pending','ready','failed')),
+  error TEXT,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

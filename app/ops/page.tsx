@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from '../ui-icons';
 
 type LiveLimits = {
   intervalMs?: number;
+  pollIntervalMin?: number;
   downloadLimit?: number;
   parseLimit?: number;
   pagePauseMs?: number;
@@ -81,7 +83,7 @@ export default function OpsPage() {
     <main className="app-shell" style={{ minHeight: '100dvh' }}>
       <section style={{ width: 'min(720px, calc(100% - 40px))', margin: '0 auto', padding: '24px 0 40px' }}>
         <p style={{ margin: '0 0 8px' }}>
-          <Link href="/sources" style={{ color: '#3064db', textDecoration: 'none', fontWeight: 600 }}>← 返回数据采集</Link>
+          <Link href="/sources" style={{ color: '#3064db', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8 }}><Icon name="arrowLeft" size={14} /> 返回数据采集</Link>
         </p>
         <h1 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 650 }}>采集运维参数</h1>
         <p style={{ margin: '0 0 16px', fontSize: 13, color: '#78869a' }}>
@@ -106,7 +108,7 @@ export default function OpsPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <dt style={{ color: '#8090a6', margin: 0 }}>轮询间隔</dt>
-              <dd style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>约 {Math.round((limits.intervalMs ?? 600_000) / 60000)} 分钟</dd>
+              <dd style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>{limits.pollIntervalMin ?? Math.max(1, Math.round((limits.intervalMs ?? 120_000) / 60000))} 分钟</dd>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <dt style={{ color: '#8090a6', margin: 0 }}>抓取并发上限</dt>
@@ -122,7 +124,7 @@ export default function OpsPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <dt style={{ color: '#8090a6', margin: 0 }}>PDF 下载间隔</dt>
-              <dd style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>{limits.downloadPauseMs ?? 1200} ms</dd>
+              <dd style={{ margin: 0, fontVariantNumeric: 'tabular-nums' }}>{limits.downloadPauseMs ?? 5000} ms</dd>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <dt style={{ color: '#8090a6', margin: 0 }}>最大翻页</dt>

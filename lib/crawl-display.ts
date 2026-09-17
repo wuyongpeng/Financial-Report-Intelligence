@@ -2,9 +2,12 @@
  * Shared crawl coverage types and display helpers for home + /crawl.
  * Real data comes from /api/crawl; mock remains a last-resort fallback only.
  */
+import { isCanonicalPeriod } from './ingest-period';
+import { periodMeetsAutoCutoff } from './ingest-lookback';
 export type CrawlSourceKind = 'exchange' | 'cninfo';
 export type ParseStatus = 'completed' | 'parsing' | 'queued' | 'failed' | 'pending';
 export type PeriodCollectState = 'parsed' | 'parsed_partial' | 'downloaded' | 'discovered' | 'expected' | 'failed';
+export type IndustryGroup = '科技' | '消费' | '新能源' | '医药' | '金融' | '周期' | '制造军工' | '其他';
 export type CrawlPeriodStatus = {
   period: string;
   state: PeriodCollectState;
@@ -23,9 +26,30 @@ export type CrawlPeriodStatus = {
   missingMetrics?: Array<'revenue' | 'net_profit' | 'eps' | 'roe'>;
   /** 硬失败时的错误摘要（红「解析失败」悬停用） */
   parseError?: string | null;
+  /** AI 速判落库状态；无记录为 null */
+  verdictStatus?: 'ready' | 'pending' | 'failed' | null;
+};
+
+export type CrawlFilingRow = {
+  key: string;
+  code: string;
+  name: string;
+  industry: string;
+  industryGroup: IndustryGroup;
+  source: CrawlSourceKind | null;
+  period: string;
+  title: string | null;
+  state: PeriodCollectState;
+  announcementId: string | null;
+  verdictStatus: 'ready' | 'pending' | 'failed' | null;
+  sourceApi?: string | null;
+  discoveredAt?: string | null;
+  downloadedAt?: string | null;
+  parsedAt?: string | null;
+  publishedAt?: string | null;
+  parseError?: string | null;
 };
 export type CrawlReportType = 'annual' | 'semiannual' | 'quarterly' | 'other';
-export type IndustryGroup = '科技' | '消费' | '新能源' | '医药' | '金融' | '周期' | '制造军工' | '其他';
 export type HeadlineMetricName = 'revenue' | 'net_profit' | 'eps' | 'roe';
 
 export type CrawlMetricPreview = {
@@ -62,7 +86,7 @@ export type CrawlCompanyCoverage = {
   metricsComplete: boolean;
   missingMetrics: HeadlineMetricName[];
   metrics: CrawlMetricPreview[];
-  /** Up to a few latest report-period tokens, e.g. 2026Q1 / 2026H1 / 2025FY */
+  /** Newest parsed period tokens for homepage chips, capped at 3 */
   recentPeriods: string[];
   /** Collected + expected periods so UI does not imply “fully done” from an old H1. */
   periodStatuses?: CrawlPeriodStatus[];
@@ -222,6 +246,83 @@ export function reportTypeSortKey(type: CrawlReportType | null, period: string |
 export function periodDisplay(period: string | null | undefined) {
   if (!period) return '暂无报告期';
   return period.replace('FY', ' 年报').replace('H1', ' 中报').replace('Q1', ' 一季报').replace('Q3', ' 三季报').replace('Q2', ' 二季报');
+}
+
+export function openingCompanyLabel(code: string, name?: string | null) {
+  const n = (name ?? '').trim();
+  return n ? `${n} (${code})` : code;
+}
+
+export function flattenCrawlFilings(companies: CrawlCompanyCoverage[]): CrawlFilingRow[] {
+  const rows: CrawlFilingRow[] = [];
+  for (const company of companies) {
+    for (const period of company.periodStatuses ?? []) {
+      if (!isCanonicalPeriod(period.period) || !periodMeetsAutoCutoff(period.period)) continue;
+      rows.push({
+        key: period.announcementId ?? `${company.code}:${period.period}`,
+        code: company.code,
+        name: company.name,
+        industry: company.industry,
+        industryGroup: company.industryGroup,
+        source: company.source,
+        period: period.period,
+        title: period.title ?? null,
+        state: period.state,
+        announcementId: period.announcementId ?? null,
+        verdictStatus: period.verdictStatus ?? null,
+        sourceApi: period.sourceApi,
+        discoveredAt: period.discoveredAt,
+        downloadedAt: period.downloadedAt,
+        parsedAt: period.parsedAt,
+        publishedAt: period.publishedAt,
+        parseError: period.parseError,
+      });
+    }
+  }
+  rows.sort((a, b) => periodTokenKey(b.period) - periodTokenKey(a.period) || a.code.localeCompare(b.code));
+  return rows;
+}
+
+export function filingToPeriodStatus(row: CrawlFilingRow): CrawlPeriodStatus {
+  return {
+    period: row.period,
+    state: row.state,
+    title: row.title,
+    announcementId: row.announcementId,
+    sourceApi: row.sourceApi,
+    discoveredAt: row.discoveredAt,
+    downloadedAt: row.downloadedAt,
+    parsedAt: row.parsedAt,
+    publishedAt: row.publishedAt,
+    parseError: row.parseError,
+    verdictStatus: row.verdictStatus,
+  };
+}
+
+export function uniquePeriodTokens(rows: Array<{ period: string }>) {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (/^20\d{2}(FY|H1|Q[1-3])$/.test(row.period)) seen.add(row.period);
+  }
+  return [...seen].sort((a, b) => periodTokenKey(b) - periodTokenKey(a));
+}
+
+export function periodPrefixMatches(period: string, prefix: string) {
+  const needle = prefix.trim().toUpperCase();
+  if (!needle) return true;
+  return period.toUpperCase().startsWith(needle);
+}
+
+export function canFillVerdict(row: { state: PeriodCollectState; announcementId?: string | null }) {
+  return Boolean(row.announcementId) && (row.state === 'parsed' || row.state === 'parsed_partial');
+}
+
+export function verdictStatusLabel(status: 'ready' | 'pending' | 'failed' | null | undefined, fillable: boolean) {
+  if (status === 'ready') return '已生成';
+  if (status === 'pending') return '生成中';
+  if (status === 'failed') return '失败';
+  if (!fillable) return '—';
+  return '未生成';
 }
 
 export function formatMetricValue(metric: HeadlineMetricName, value: number) {

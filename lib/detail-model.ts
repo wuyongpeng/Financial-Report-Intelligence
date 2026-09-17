@@ -60,6 +60,17 @@ export function comparableHistory(reports: Report[], selected: Report) {
   }
   return [...unique.values()].sort((a,b) => periodKey(a)-periodKey(b));
 }
+/** Time-ordered Q1 / H1 / Q3 / FY series so the trend chart shows path, not only YoY pairs. */
+export function sequentialHistory(reports: Report[], selected: Report, limit = 8) {
+  const cap = periodKey(selected);
+  const unique = new Map<string, Report>();
+  for (const r of [...reports].sort((a, b) => b.published_at.localeCompare(a.published_at))) {
+    if (periodKey(r) > cap || !r.metrics.length) continue;
+    const token = period(r);
+    if (!unique.has(token)) unique.set(token, r);
+  }
+  return [...unique.values()].sort((a, b) => periodKey(a) - periodKey(b) || a.published_at.localeCompare(b.published_at)).slice(-limit);
+}
 export function priorYear(reports: Report[], selected: Report) {
   const p = period(selected); const year = p.match(/20\d{2}/)?.[0];
   if (!year) return undefined;
@@ -136,6 +147,48 @@ export function keyFindings(reports: Report[], selected: Report): Finding[] {
 function clipChars(text: string, max = 50) {
   const chars = [...text];
   return chars.length <= max ? text : `${chars.slice(0, max - 1).join('')}…`;
+}
+
+function signedPct(delta: number) {
+  return `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%`;
+}
+
+/** One-line, number-backed module headlines. Empty string means show nothing. */
+export function attributionConclusion(bridge: NonNullable<ReturnType<typeof profitBridge>>) {
+  const delta = bridge.profit - bridge.previousProfit;
+  const verb = delta > 0 ? '增加' : delta < 0 ? '减少' : '持平';
+  const amountText = delta === 0 ? '' : ` ${format(Math.abs(delta), 'net_profit')}`;
+  return `归母净利同比${verb}${amountText}，其中收入贡献 ${format(bridge.revenueEffect, 'net_profit')}、净利率贡献 ${format(bridge.marginEffect, 'net_profit')}`;
+}
+
+export function anomaliesConclusion(flagged: Array<{ metric: MetricName; amount: number }>, comparableCount = 0) {
+  if (flagged.length) {
+    return flagged.map((d) => `${labels[d.metric]}同比 ${d.amount >= 0 ? '+' : ''}${d.amount.toFixed(2)}%`).join('；');
+  }
+  return comparableCount > 0 ? '核心指标同比波动均未超过 30%' : '';
+}
+
+export function historyConclusion(history: Report[]) {
+  if (history.length < 2) return '';
+  const first = history[0], last = history[history.length - 1];
+  const bits: string[] = [];
+  const a = value(first, 'revenue'), b = value(last, 'revenue');
+  if (a !== undefined && b !== undefined) {
+    const delta = change(b, a);
+    bits.push(`营收由 ${format(a, 'revenue')} 至 ${format(b, 'revenue')}${delta === undefined ? '' : `（${signedPct(delta)}）`}`);
+  }
+  const pa = value(first, 'net_profit'), pb = value(last, 'net_profit');
+  if (pa !== undefined && pb !== undefined) {
+    const delta = change(pb, pa);
+    bits.push(`归母净利由 ${format(pa, 'net_profit')} 至 ${format(pb, 'net_profit')}${delta === undefined ? '' : `（${signedPct(delta)}）`}`);
+  }
+  return bits.length ? `近${history.length}期${bits.join('，')}` : '';
+}
+
+export function peersConclusion(rows: Array<{ rank: number; total: number; label: string }>) {
+  const usable = rows.filter((row) => row.total >= 2);
+  if (!usable.length) return '';
+  return `${usable.map((row) => `${row.label}第 ${row.rank}/${row.total} 家`).join('，')}，非全行业排名`;
 }
 
 /** One-line overview conclusion; keep it short enough to scan. */

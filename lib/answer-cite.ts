@@ -52,8 +52,12 @@ export function citeHoverText(source: { companyName?: string; period?: string; p
   return [source.companyName, source.period, '财报', `(第 ${source.page} 页)`].filter(Boolean).join(' ');
 }
 
+export function citeFilingLabel(source: { companyName?: string; period?: string }) {
+  return [source.companyName, source.period, filingKindLabel(source.period)].filter(Boolean).join(' ');
+}
+
 export function citeReferenceText(source: { companyName?: string; period?: string; page: number }) {
-  return [source.companyName, source.period, filingKindLabel(source.period), `(第 ${source.page} 页)`].filter(Boolean).join(' ');
+  return [citeFilingLabel(source), `(第 ${source.page} 页)`].filter(Boolean).join(' ');
 }
 
 export function matchAnswerCitation<T extends { id?: string; page: number }>(
@@ -70,7 +74,20 @@ export function matchAnswerCitation<T extends { id?: string; page: number }>(
   return undefined;
 }
 
-export function uniqueAnswerSources<T extends { id?: string; reportId?: string; page: number }>(
+function filingSourceKey(cited: { reportId?: string; code?: string; companyName?: string; period?: string; page: number }) {
+  if (cited.reportId) return `id:${cited.reportId}`;
+  const filing = [cited.code, cited.companyName, cited.period].filter(Boolean).join(':');
+  return filing ? `filing:${filing}` : `page:${cited.page}`;
+}
+
+export function uniqueAnswerSources<T extends {
+  id?: string;
+  reportId?: string;
+  page: number;
+  code?: string;
+  companyName?: string;
+  period?: string;
+}>(
   text: string,
   citations: T[] | undefined,
   pageLabel: (page: number) => string,
@@ -81,7 +98,7 @@ export function uniqueAnswerSources<T extends { id?: string; reportId?: string; 
     if (token.kind !== 'mark') continue;
     const cited = matchAnswerCitation(token, citations, pageLabel);
     if (!cited) continue;
-    const key = `${cited.reportId ?? ''}:${cited.page}`;
+    const key = filingSourceKey(cited);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(cited);

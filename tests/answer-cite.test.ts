@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { citeHoverText, citeReferenceText, filingPageHref, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '../lib/answer-cite';
+import { citeFilingLabel, citeHoverText, citeReferenceText, filingPageHref, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '../lib/answer-cite';
 
 test('keeps a gap between glued evidence markers', () => {
   const tokens = tokenizeAnswerCites('+54.63%【E1】【E2】');
@@ -27,17 +27,31 @@ test('filing page href encodes code and period', () => {
 test('source labels stay short in hover and expanded in references', () => {
   const source = { companyName: '韦尔股份', period: '2025Q3', page: 1 };
   assert.equal(citeHoverText(source), '韦尔股份 2025Q3 财报 (第 1 页)');
+  assert.equal(citeFilingLabel(source), '韦尔股份 2025Q3 季度报告');
   assert.equal(citeReferenceText(source), '韦尔股份 2025Q3 季度报告 (第 1 页)');
 });
 
-test('unique answer sources keep first occurrence of each filing page', () => {
+test('unique answer sources keep first occurrence of each filing, not each page', () => {
   const sources = uniqueAnswerSources(
-    '利润率有所提升【E1】，现金流改善【E2】【E1】',
+    '利润率有所提升【E1】，现金流改善【E2】【E1】，同比【E3】',
     [
-      { id: 'E1', reportId: 'r1', page: 1 },
-      { id: 'E2', reportId: 'r1', page: 8 },
+      { id: 'E1', reportId: 'r1', page: 1, companyName: '工业富联', period: '2026Q1' },
+      { id: 'E2', reportId: 'r1', page: 8, companyName: '工业富联', period: '2026Q1' },
+      { id: 'E3', reportId: 'r2', page: 1, companyName: '工业富联', period: '2025Q1' },
     ],
     page => `P${page}`,
   );
-  assert.deepEqual(sources.map(s => s.id), ['E1', 'E2']);
+  assert.deepEqual(sources.map(s => s.id), ['E1', 'E3']);
+});
+
+test('unique answer sources fall back to company and period when reportId is missing', () => {
+  const sources = uniqueAnswerSources(
+    '本期【E1】与另一页【E2】',
+    [
+      { id: 'E1', page: 1, companyName: '工业富联', period: '2026Q1' },
+      { id: 'E2', page: 2, companyName: '工业富联', period: '2026Q1' },
+    ],
+    page => `P${page}`,
+  );
+  assert.deepEqual(sources.map(s => s.id), ['E1']);
 });

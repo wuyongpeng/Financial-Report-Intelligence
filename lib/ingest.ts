@@ -1,6 +1,7 @@
 import companiesJson from '@/data/companies.json';
 import seedReportsJson from '@/data/seed-reports.json';
 import { getDb } from './db';
+import { ensureBackendSchema } from './backend-schema';
 import { parseCoreMetrics } from './parser';
 import { fetchAllSources, fetchReportsForCode } from './sources';
 import { putReport, readReport } from './storage';
@@ -27,6 +28,7 @@ import {
   setGapScanState,
   setIngestProgress,
 } from './ingest-progress';
+import { getIngestSettings } from './ingest-settings';
 
 const companies = companiesJson as Company[];
 const companyByCode = new Map(companies.map((company) => [company.code, company]));
@@ -196,8 +198,8 @@ export async function recoverStaleRuns() {
 }
 
 function downloadPauseMs() {
-  const base = Number(process.env.DOWNLOAD_PAUSE_MS ?? 1200);
-  return Number.isFinite(base) ? Math.max(400, base) : 1200;
+  const sec = getIngestSettings().downloadPauseSec;
+  return Math.max(1000, sec * 1000);
 }
 
 function withDownloadJitter(ms: number) {
@@ -402,6 +404,7 @@ export async function processBacklog(options: {
           clearTimeout(parseTimer);
         }
         const createdAt = new Date().toISOString();
+        await ensureBackendSchema();
         await db.begin(async (tx) => {
           for (const metric of extracted.metrics) {
             await tx`
@@ -431,6 +434,10 @@ export async function processBacklog(options: {
               updated_at=${createdAt}
             WHERE id=${record.id}
           `;
+          await tx`DELETE FROM report_verdicts WHERE announcement_id=${record.id}`;
+        });
+        void import('./report-verdict-store').then(({ getOrCreateReportVerdict }) => getOrCreateReportVerdict(record.id)).catch((error) => {
+          console.warn('[verdict] persist after parse failed', { id: record.id, error: String(error) });
         });
         clearIngestProgress(record.id);
         parsed += 1;
@@ -460,12 +467,10 @@ export async function processBacklog(options: {
   }
   const pendingLeft = Math.max(0, downloadCandidates.length - downloaded);
   if (pendingLeft > 0 && downloaded >= downloadLimit) {
-    const roundMs = Number(process.env.INGEST_BACKLOG_INTERVAL_MS ?? 45_000);
-    const softMs = 20_000;
-    const wait = Math.max(pauseBetweenDownloads, Math.min(roundMs, softMs));
+    const wait = withDownloadJitter(pauseBetweenDownloads);
     setDownloadGate({
       nextAt: new Date(Date.now() + wait).toISOString(),
-      pauseMs: wait,
+      pauseMs: pauseBetweenDownloads,
       mode: 'inter-round',
     });
   } else if (downloaded > 0 || parsed > 0) {
@@ -481,10 +486,10 @@ export async function runIngestion(options: {
   await recoverStaleRuns();
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
-  const days = options.days ?? 2;
-  // Gentle defaults: never blast the monitored pool in one tick.
-  const downloadLimit = options.downloadLimit ?? Number(process.env.INGEST_DOWNLOAD_LIMIT ?? 2);
-  const parseLimit = options.parseLimit ?? Number(process.env.INGEST_PARSE_LIMIT ?? 1);
+  const settings = getIngestSettings();
+  const days = options.days ?? settings.lookbackDays;
+  const downloadLimit = options.downloadLimit ?? settings.downloadLimit;
+  const parseLimit = options.parseLimit ?? settings.parseLimit;
   await db`INSERT INTO ingest_runs (id, started_at, status) VALUES (${runId}, ${startedAt}, 'running')`;
 
   try {
