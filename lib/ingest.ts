@@ -621,7 +621,7 @@ export async function processBacklog(options: {
         const coreOk = hasCoreMetrics(extracted.metrics);
         patchIngestProgress(record.id, { detail: '生成财报速览…' });
         try {
-          // 解析后必须把速览全文（结论、关键变化、归因模块）写进 report_verdicts；
+          // 解析后排队写入速览：LLM 全局闸门同时只跑 1 路，避免 429。
           // 手动重新解析同样走这里，成功则覆盖旧速览，失败则保留上一份。
           await refreshReportVerdict(record.id);
         } catch (error) {

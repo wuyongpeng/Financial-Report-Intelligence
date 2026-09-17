@@ -204,15 +204,17 @@ export async function GET() {
       : [];
     priorLookup = new Map(priorMetrics.map((m) => [`${m.code}|${m.period}|${m.metric}`, Number(m.value)]));
 
-    const verdictById = new Map<string, 'ready' | 'pending' | 'failed'>();
+    const verdictById = new Map<string, { status: 'ready' | 'pending' | 'failed'; generatedAt: string | null }>();
     try {
       await ensureBackendSchema();
       const verdictRows = allAnnIds.length
-        ? await db<Array<{ announcement_id: string; status: 'ready' | 'pending' | 'failed' }>>`
-            SELECT announcement_id, status FROM report_verdicts WHERE announcement_id IN ${db(allAnnIds)}
+        ? await db<Array<{ announcement_id: string; status: 'ready' | 'pending' | 'failed'; generated_at: string | null }>>`
+            SELECT announcement_id, status, generated_at FROM report_verdicts WHERE announcement_id IN ${db(allAnnIds)}
           `
         : [];
-      for (const row of verdictRows) verdictById.set(row.announcement_id, row.status);
+      for (const row of verdictRows) {
+        verdictById.set(row.announcement_id, { status: row.status, generatedAt: row.generated_at });
+      }
     } catch {
       /* optional: crawl page still works before verdict table exists */
     }
@@ -250,7 +252,10 @@ export async function GET() {
       }));
 
       for (const period of periodBuilt.periodStatuses) {
-        if (period.announcementId) period.verdictStatus = verdictById.get(period.announcementId) ?? null;
+        if (!period.announcementId) continue;
+        const verdict = verdictById.get(period.announcementId);
+        period.verdictStatus = verdict?.status ?? null;
+        period.verdictGeneratedAt = verdict?.status === 'ready' ? verdict.generatedAt : null;
       }
 
       // Homepage / company-level fields: newest *parsed* filing, not newest published announcement.

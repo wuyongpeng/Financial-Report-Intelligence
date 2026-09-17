@@ -175,7 +175,7 @@
 .co-batch-run{border:0;background:#334155;color:#fff;border-radius:8px;padding:0 12px;height:32px;font-size:12px;cursor:pointer}
 .co-batch-run:disabled{opacity:.45;cursor:not-allowed}
 .co-check-col{width:36px;text-align:center}
-.co-table-compact{min-width:980px}
+.co-table-compact{min-width:1080px}
 .co-table-compact th,.co-table-compact td{padding:6px 8px;font-size:12px;vertical-align:middle}
 .co-col-company{min-width:148px}
 .co-col-period{white-space:nowrap}

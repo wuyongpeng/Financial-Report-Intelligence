@@ -28,6 +28,8 @@ export type CrawlPeriodStatus = {
   parseError?: string | null;
   /** AI 速判落库状态；无记录为 null */
   verdictStatus?: 'ready' | 'pending' | 'failed' | null;
+  /** report_verdicts.generated_at；仅 status=ready 时用于列表展示 */
+  verdictGeneratedAt?: string | null;
 };
 
 export type CrawlFilingRow = {
@@ -42,6 +44,7 @@ export type CrawlFilingRow = {
   state: PeriodCollectState;
   announcementId: string | null;
   verdictStatus: 'ready' | 'pending' | 'failed' | null;
+  verdictGeneratedAt?: string | null;
   sourceApi?: string | null;
   discoveredAt?: string | null;
   downloadedAt?: string | null;
@@ -270,6 +273,7 @@ export function flattenCrawlFilings(companies: CrawlCompanyCoverage[]): CrawlFil
         state: period.state,
         announcementId: period.announcementId ?? null,
         verdictStatus: period.verdictStatus ?? null,
+        verdictGeneratedAt: period.verdictStatus === 'ready' ? period.verdictGeneratedAt ?? null : null,
         sourceApi: period.sourceApi,
         discoveredAt: period.discoveredAt,
         downloadedAt: period.downloadedAt,
@@ -296,6 +300,7 @@ export function filingToPeriodStatus(row: CrawlFilingRow): CrawlPeriodStatus {
     publishedAt: row.publishedAt,
     parseError: row.parseError,
     verdictStatus: row.verdictStatus,
+    verdictGeneratedAt: row.verdictGeneratedAt,
   };
 }
 

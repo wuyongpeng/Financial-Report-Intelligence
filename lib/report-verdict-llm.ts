@@ -1,5 +1,6 @@
 import { loadRagContext } from './rag';
 import { parseReportVerdictJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
+import { fetchChatCompletions, withLlmSlot } from './llm-gate';
 
 export const VERDICT_QUESTION = '本期财报整体怎么看？营业收入、净利润、每股收益、净资产收益率、营业成本、毛利率、经营现金流、资产负债有哪些真正值得关注的同比变化？主营业务在产品、地区或分部上的收入结构有哪些原文明确写出的变化？管理层讨论与分析是否写了净利润变动原因？请结合原文中的具体数字。';
 
@@ -41,60 +42,52 @@ JSON Schema：
 ${JSON.stringify(VERDICT_JSON_SCHEMA)}`;
 }
 
-async function completeJson(messages: Array<{ role: string; content: string }>) {
-  const baseUrl = process.env.LLM_BASE_URL, model = process.env.LLM_MODEL;
-  if (!baseUrl || !model) return null;
-  const controller = new AbortController();
+function timeoutMs() {
   const setting = Number(process.env.LLM_TIMEOUT_MS ?? 60_000);
-  const timer = setTimeout(() => controller.abort(), Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 120_000) : 60_000);
+  return Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 120_000) : 60_000;
+}
+
+async function completeJson(messages: Array<{ role: string; content: string }>) {
+  const model = process.env.LLM_MODEL;
+  if (!process.env.LLM_BASE_URL || !model) return null;
+  const tokens = Number(process.env.LLM_MAX_TOKENS ?? 6000);
+  const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 6000), 8192) : 6000;
+  const body = {
+    model,
+    temperature: 0,
+    max_tokens: maxTokens,
+    response_format: { type: 'json_object' },
+    enable_thinking: false,
+    messages,
+  };
   try {
-    const tokens = Number(process.env.LLM_MAX_TOKENS ?? 6000);
-    const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 6000), 8192) : 6000;
-    const body = {
-      model,
-      temperature: 0,
-      max_tokens: maxTokens,
-      response_format: { type: 'json_object' },
-      enable_thinking: false,
-      messages,
-    };
-    let upstream = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: { 'content-type': 'application/json', ...(process.env.LLM_API_KEY ? { authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}) },
-      body: JSON.stringify(body),
-    });
-    if (!upstream.ok) {
-      const failed = await upstream.text().catch(() => '');
-      console.warn('[verdict] json_object request failed', { status: upstream.status, body: failed.slice(0, 400) });
-      if (upstream.status >= 400 && upstream.status < 500) {
-        const fallback = { model: body.model, temperature: body.temperature, max_tokens: body.max_tokens, messages: body.messages };
-        upstream = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-          method: 'POST',
-          signal: controller.signal,
-          headers: { 'content-type': 'application/json', ...(process.env.LLM_API_KEY ? { authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}) },
-          body: JSON.stringify(fallback),
-        });
-      } else {
+    return await withLlmSlot(async () => {
+      let upstream = await fetchChatCompletions(body, { timeoutMs: timeoutMs() });
+      if (!upstream.ok) {
+        const failed = await upstream.text().catch(() => '');
+        console.warn('[verdict] json_object request failed', { status: upstream.status, body: failed.slice(0, 400) });
+        if (upstream.status >= 400 && upstream.status < 500 && upstream.status !== 429) {
+          const fallback = { model: body.model, temperature: body.temperature, max_tokens: body.max_tokens, messages: body.messages };
+          upstream = await fetchChatCompletions(fallback, { timeoutMs: timeoutMs() });
+        } else {
+          return null;
+        }
+      }
+      if (!upstream.ok) {
+        console.warn('[verdict] model http', upstream.status);
         return null;
       }
-    }
-    if (!upstream.ok) {
-      console.warn('[verdict] model http', upstream.status);
-      return null;
-    }
-    const payload = await upstream.json() as {
-      choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
-    };
-    const message = payload.choices?.[0]?.message;
-    const content = (message?.content ?? message?.reasoning_content ?? '').trim();
-    if (!content) console.warn('[verdict] empty model content', { finish: payload.choices?.[0]?.finish_reason, keys: message ? Object.keys(message) : [] });
-    return content || null;
+      const payload = await upstream.json() as {
+        choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
+      };
+      const message = payload.choices?.[0]?.message;
+      const content = (message?.content ?? message?.reasoning_content ?? '').trim();
+      if (!content) console.warn('[verdict] empty model content', { finish: payload.choices?.[0]?.finish_reason, keys: message ? Object.keys(message) : [] });
+      return content || null;
+    });
   } catch (error) {
     console.warn('[verdict] model call failed', { message: String(error) });
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

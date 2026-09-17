@@ -1,5 +1,6 @@
 import type { RagContext } from './rag';
 import type { AnswerResult, MemoryMessage } from './conversations';
+import { fetchChatCompletions, withLlmSlot } from './llm-gate';
 
 export type AnswerRewrite = 'detailed' | 'brief' | 'retry';
 
@@ -45,59 +46,57 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
   });
   if (signal.aborted) return result('', 'cancelled', 'interrupted');
   if (context.directAnswer) return result(context.directAnswer, context.mode);
-  const baseUrl = process.env.LLM_BASE_URL, model = process.env.LLM_MODEL;
-  if (!baseUrl || !model) return result(context.fallback, context.mode, 'complete', ['model-not-configured']);
-  const controller = new AbortController();
-  const cancel = () => controller.abort();
-  signal.addEventListener('abort', cancel, { once: true });
+  const model = process.env.LLM_MODEL;
+  if (!process.env.LLM_BASE_URL || !model) return result(context.fallback, context.mode, 'complete', ['model-not-configured']);
   const setting = Number(process.env.LLM_TIMEOUT_MS ?? 60_000);
-  const timer = setTimeout(cancel, Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 120_000) : 60_000);
+  const timeoutMs = Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 120_000) : 60_000;
   let answer = '', truncated = false;
   try {
-    const tokens = Number(process.env.LLM_MAX_TOKENS ?? 1600);
-    const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 128), 8192) : 1600;
-    const sized = rewrite === 'detailed' ? Math.min(Math.round(maxTokens * 1.4), 8192) : maxTokens;
-    const upstream = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST', signal: controller.signal,
-      headers: { 'content-type': 'application/json', ...(process.env.LLM_API_KEY ? { authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}) },
-      body: JSON.stringify({ model, temperature: 0, max_tokens: sized, stream: Boolean(emit), messages: modelMessages(context, history, rewrite) }),
-    });
-    if (!upstream.ok || !upstream.body) throw new Error(`Model HTTP ${upstream.status}`);
-    if (!emit) {
-      const payload = await upstream.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
-      answer = payload.choices?.[0]?.message?.content?.trim() ?? '';
-      truncated = payload.choices?.[0]?.finish_reason === 'length';
-    } else {
-      const reader = upstream.body.getReader(), decoder = new TextDecoder();
-      let buffer = '', finished = false;
-      try {
-        while (!finished) {
-          const { done, value } = await reader.read();
-          const parsed = parseSse(buffer + decoder.decode(value ?? new Uint8Array(), { stream: !done }), done);
-          buffer = parsed.rest;
-          for (const event of parsed.events) {
-            if (event === '[DONE]') { finished = true; continue; }
-            let payload: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: string }> };
-            try { payload = JSON.parse(event); } catch { continue; }
-            const choice = payload.choices?.[0];
-            if (choice?.finish_reason) { finished = true; truncated = choice.finish_reason === 'length'; }
-            if (choice?.delta?.reasoning_content && !answer) emit({ status: 'reasoning' });
-            if (choice?.delta?.content) { answer += choice.delta.content; emit({ content: choice.delta.content }); }
-            if (answer.length > 32_000) { truncated = true; finished = true; break; }
+    return await withLlmSlot(async () => {
+      const tokens = Number(process.env.LLM_MAX_TOKENS ?? 1600);
+      const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 128), 8192) : 1600;
+      const sized = rewrite === 'detailed' ? Math.min(Math.round(maxTokens * 1.4), 8192) : maxTokens;
+      const upstream = await fetchChatCompletions(
+        { model, temperature: 0, max_tokens: sized, stream: Boolean(emit), messages: modelMessages(context, history, rewrite) },
+        { signal, timeoutMs },
+      );
+      if (!upstream.ok || !upstream.body) throw new Error(`Model HTTP ${upstream.status}`);
+      if (!emit) {
+        const payload = await upstream.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
+        answer = payload.choices?.[0]?.message?.content?.trim() ?? '';
+        truncated = payload.choices?.[0]?.finish_reason === 'length';
+      } else {
+        const reader = upstream.body.getReader(), decoder = new TextDecoder();
+        let buffer = '', finished = false;
+        try {
+          while (!finished) {
+            const { done, value } = await reader.read();
+            const parsed = parseSse(buffer + decoder.decode(value ?? new Uint8Array(), { stream: !done }), done);
+            buffer = parsed.rest;
+            for (const event of parsed.events) {
+              if (event === '[DONE]') { finished = true; continue; }
+              let payload: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: string }> };
+              try { payload = JSON.parse(event); } catch { continue; }
+              const choice = payload.choices?.[0];
+              if (choice?.finish_reason) { finished = true; truncated = choice.finish_reason === 'length'; }
+              if (choice?.delta?.reasoning_content && !answer) emit({ status: 'reasoning' });
+              if (choice?.delta?.content) { answer += choice.delta.content; emit({ content: choice.delta.content }); }
+              if (answer.length > 32_000) { truncated = true; finished = true; break; }
+            }
+            if (done) { if (!finished && answer) truncated = true; break; }
           }
-          if (done) { if (!finished && answer) truncated = true; break; }
-        }
-      } finally { await reader.cancel().catch(() => undefined); }
-    }
-    if (signal.aborted) return result(answer, 'cancelled', 'interrupted');
-    if (!answer) return result(context.fallback, context.mode, 'complete', ['model-empty']);
-    if (truncated) return result(`${answer}\n\n回答未完整生成，请重试。`, 'llm-interrupted', 'interrupted', ['incomplete-answer']);
-    const citations = validateCitations(answer, context);
-    if (citations.invalid.length || (context.evidence.length && !citations.evidence.length)) return result(context.fallback, context.mode, 'complete', ['citation-validation-failed']);
-    return result(answer, 'llm-rag');
+        } finally { await reader.cancel().catch(() => undefined); }
+      }
+      if (signal.aborted) return result(answer, 'cancelled', 'interrupted');
+      if (!answer) return result(context.fallback, context.mode, 'complete', ['model-empty']);
+      if (truncated) return result(`${answer}\n\n回答未完整生成，请重试。`, 'llm-interrupted', 'interrupted', ['incomplete-answer']);
+      const citations = validateCitations(answer, context);
+      if (citations.invalid.length || (context.evidence.length && !citations.evidence.length)) return result(context.fallback, context.mode, 'complete', ['citation-validation-failed']);
+      return result(answer, 'llm-rag');
+    }, signal);
   } catch {
     if (signal.aborted) return result(answer, 'cancelled', 'interrupted');
     if (answer) return result(`${answer}\n\n回答中断，以上内容尚不完整，请重试。`, 'llm-interrupted', 'interrupted', ['model-interrupted']);
     return result(context.fallback, context.mode, 'complete', ['model-unavailable']);
-  } finally { clearTimeout(timer); signal.removeEventListener('abort', cancel); }
+  }
 }

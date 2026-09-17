@@ -16,7 +16,7 @@ type VerdictRow = {
 
 const inflight = new Map<string, Promise<ReportVerdict | null>>();
 const STALE_MS = 3 * 60 * 1000;
-const WAIT_MS = 90_000;
+const WAIT_MS = 4 * 60 * 1000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));

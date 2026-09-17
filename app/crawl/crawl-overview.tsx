@@ -24,7 +24,7 @@ import './crawl-overview.css';
 
 type SourceFilter = 'all' | CrawlSourceKind;
 type SortState = 'default' | 'asc' | 'desc';
-type TimeCol = 'discovered' | 'downloaded' | 'parsed';
+type TimeCol = 'discovered' | 'downloaded' | 'parsed' | 'verdict';
 type QueueItem = {
   code: string;
   name: string;
@@ -217,6 +217,7 @@ function settingsDraftFromControl(payload: ControlSettingsPayload | null, live: 
 function filingTimeValue(row: CrawlFilingRow, col: TimeCol) {
   if (col === 'discovered') return row.discoveredAt ?? row.publishedAt ?? '';
   if (col === 'downloaded') return row.downloadedAt ?? '';
+  if (col === 'verdict') return row.verdictStatus === 'ready' ? row.verdictGeneratedAt ?? '' : '';
   return row.parsedAt ?? '';
 }
 
@@ -497,6 +498,7 @@ function periodChipTitle(p: CrawlPeriodStatus) {
   if (p.discoveredAt) lines.push(`发现：${formatCrawlTime(p.discoveredAt ?? null)}`);
   if (p.downloadedAt) lines.push(`抓取：${formatCrawlTime(p.downloadedAt ?? null)}`);
   if (p.parsedAt) lines.push(`解析：${formatCrawlTime(p.parsedAt ?? null)}`);
+  if (p.verdictStatus === 'ready' && p.verdictGeneratedAt) lines.push(`智析：${formatCrawlTime(p.verdictGeneratedAt)}`);
   if (p.title) lines.push(p.title.replace(/\s+/g, ' ').slice(0, 48));
   return lines.join('\n');
 }
@@ -1713,6 +1715,9 @@ export default function CrawlOverview() {
                 <th className="co-col-time">
                   <SortHeader label="解析" state={timeCol === 'parsed' ? timeSort : 'default'} onCycle={() => onTimeSort('parsed')} />
                 </th>
+                <th className="co-col-time">
+                  <SortHeader label="智析" state={timeCol === 'verdict' ? timeSort : 'default'} onCycle={() => onTimeSort('verdict')} />
+                </th>
                 <th className="co-col-ops">操作</th>
               </tr>
             </thead>
@@ -1761,6 +1766,9 @@ export default function CrawlOverview() {
                     <td className="co-col-time">
                       <span className="co-time">{formatCrawlTime(item.parsedAt ?? null)}</span>
                     </td>
+                    <td className="co-col-time">
+                      <span className="co-time">{formatCrawlTime(item.verdictStatus === 'ready' ? item.verdictGeneratedAt : null)}</span>
+                    </td>
                     <td className="co-col-ops">
                       <div className="co-actions">
                         <button
@@ -1788,7 +1796,7 @@ export default function CrawlOverview() {
               })}
               {!filings.length && (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     <div className={`co-empty ${loading ? 'co-loading' : ''}`} role="status" aria-live="polite">
                       {loading ? (
                         <>
