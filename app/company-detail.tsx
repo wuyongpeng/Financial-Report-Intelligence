@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { amount, anomaliesConclusion, attributionConclusion, cashConversion, change, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { amount, anomaliesConclusion, attributionConclusion, cashConversion, change, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { acceptVerdictPayload, changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
@@ -252,7 +252,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const data = await r.json() as { reports: Report[] };
       if (abort.signal.aborted) return;
       const parsed = data.reports.filter(r => r.parsed_at || r.metrics.length).sort((a,b) => periodKey(b)-periodKey(a) || b.published_at.localeCompare(a.published_at));
-      const all = parsed.length ? parsed : data.reports;
+      const all = pickCanonicalReports(parsed.length ? parsed : data.reports);
       setReports(all);
       const hint = preferredPeriod ? parsePeriodHints(preferredPeriod) : parsePeriodHints('');
       if (preferredPeriod && !hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(preferredPeriod)) {

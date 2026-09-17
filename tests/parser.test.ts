@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseCoreMetricPages } from '../lib/parser';
+import { parseCoreMetricPages, PDFJS_PARSE_MAX_BYTES, parseCoreMetrics, shouldExtractTextExternally } from '../lib/parser';
 
 test('extracts and scales the four core metrics from a summary page', () => {
   const metrics = parseCoreMetricPages([
@@ -54,3 +54,41 @@ test('parenthesized currency amounts do not skip to the prior-period column', ()
   assert.equal(metrics.find(m => m.metric === 'operating_cash_flow')?.value, -500000);
   assert.equal(parseCoreMetricPages(['合并利润表 单位：元 营业总成本 80000']).some(m => m.metric === 'operating_cost'), false);
 });
+
+test('large PDFs skip in-memory pdf.js and use external text extract', async () => {
+  assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES), false);
+  assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES + 1), true);
+
+  const { execFileSync } = await import('node:child_process');
+  try {
+    execFileSync('pdftotext', ['-v'], { stdio: 'ignore' });
+  } catch {
+    return;
+  }
+
+  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = await mkdtemp(join(tmpdir(), 'fri-pdf-'));
+  const filePath = join(dir, 'sample.pdf');
+  await writeFile(filePath, minimalTextPdf());
+  try {
+    const extracted = await parseCoreMetrics(null, { filePath });
+    assert.ok(Array.isArray(extracted.metrics));
+    assert.ok(Array.isArray(extracted.chunks));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+function minimalTextPdf() {
+  const stream = 'BT /F1 12 Tf 50 700 Td (Hello) Tj ET';
+  const body = [
+    '1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj',
+    '2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj',
+    '3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj',
+    `4 0 obj<< /Length ${stream.length} >>stream\n${stream}\nendstream endobj`,
+    '5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj',
+  ].join('\n');
+  return Buffer.from(`%PDF-1.1\n${body}\ntrailer<< /Root 1 0 R >>\n%%EOF\n`);
+}

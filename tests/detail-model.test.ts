@@ -13,6 +13,19 @@ test('history excludes later periods and other fiscal durations, deduplicates co
  const corrected=report('corrected','2024FY',11,'annual','2026-05-01');
  assert.equal(comparableHistory([old,corrected,current],current)[0].id,'corrected');
 });
+test('YoY history prefers the complete A-share filing over an H-share stub',()=>{
+ const ashare=report('a','2026Q1',10,'quarterly','2026-04-30');
+ ashare.title='工商银行2026年第一季度报告';
+ ashare.status='review';
+ ashare.metrics.push({metric:'net_profit',value:1,unit:'元',source_page:1,source_label:'净利润',confidence:1,verified:1,period:'2026Q1'});
+ const hshare=report('h','2026Q1',99,'quarterly','2026-04-30');
+ hshare.title='工商银行H股公告-2026年第一季度报告';
+ hshare.status='parse_partial';
+ const prior=report('p','2025Q1',8,'quarterly','2025-04-30');
+ prior.title='工商银行2025年第一季度报告';
+ assert.equal(comparableHistory([hshare,ashare,prior],ashare).map(r=>r.id).join(','),'p,a');
+ assert.equal(priorYear([hshare,ashare,prior],ashare)?.id,'p');
+});
 test('sequential history plots Q1/H1/Q3/FY in time order up to the selected period',()=>{
  const q1=report('q1','2025Q1',1,'quarterly','2025-04-01');
  const h1=report('h1','2025H1',5,'semiannual','2025-08-01');

@@ -1,4 +1,11 @@
 export const parsedMetricNames = ['revenue', 'net_profit', 'eps', 'roe', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost'] as const;
+export const PARSE_PAGE_LIMIT = 120;
+/** pdf.js loads the whole file; above this, extract the first pages from disk instead. */
+export const PDFJS_PARSE_MAX_BYTES = 50 * 1024 * 1024;
+
+export function shouldExtractTextExternally(byteLength: number) {
+  return byteLength > PDFJS_PARSE_MAX_BYTES;
+}
 // Currency rows share one scaling path; ratios and per-share values must not be scaled.
 const currencyMetrics = new Set(['revenue', 'net_profit', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost']);
 
@@ -83,7 +90,7 @@ function allLabelPositions(text: string, label: string) {
 
 function metricCandidates(pages: string[], definition: MetricDefinition) {
   const candidates: Candidate[] = [];
-  for (let pageIndex = 0; pageIndex < Math.min(pages.length, 120); pageIndex += 1) {
+  for (let pageIndex = 0; pageIndex < Math.min(pages.length, PARSE_PAGE_LIMIT); pageIndex += 1) {
     const page = normalizePageText(pages[pageIndex]);
     const isSummary = /主要会计数据|主要财务指标|报告摘要/.test(page);
     const statement = definition.metric === 'total_assets' || definition.metric === 'total_liabilities' ? /合并资产负债表|资产负债表/
@@ -141,45 +148,70 @@ export function parseCoreMetricPages(pages: string[]) {
   return LABELS.map((definition) => chooseCandidate(metricCandidates(pages, definition))).filter((metric): metric is ParsedMetric => Boolean(metric));
 }
 
-async function extractWithPoppler(bytes: ArrayBuffer) {
+function splitPdfToTextPages(output: string) {
+  const pages = output.split('\f').map((page) => page.trim());
+  if (pages.at(-1) === '') pages.pop();
+  return pages;
+}
+
+async function extractWithPoppler(bytes: ArrayBuffer | null, filePath?: string) {
   try {
     const { execFileSync } = await import('node:child_process');
-    const output = execFileSync('pdftotext', ['-layout', '-f', '1', '-l', '120', '-', '-'], {
-      input: Buffer.from(bytes),
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 60_000,
-    });
-    const pages = output.split('\f').map((page) => page.trim());
-    if (pages.at(-1) === '') pages.pop();
-    return pages;
+    const args = ['-layout', '-f', '1', '-l', String(PARSE_PAGE_LIMIT)];
+    const output = filePath
+      ? execFileSync('pdftotext', [...args, filePath, '-'], {
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: 120_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      : execFileSync('pdftotext', [...args, '-', '-'], {
+        input: Buffer.from(bytes ?? new ArrayBuffer(0)),
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: 120_000,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      });
+    return splitPdfToTextPages(output);
   } catch (error) {
     console.warn('[parser] Poppler fallback unavailable', { message: String(error) });
     return [];
   }
 }
 
-export async function parseCoreMetrics(bytes: ArrayBuffer) {
+function toChunks(pages: string[]) {
+  return pages.slice(0, PARSE_PAGE_LIMIT).map((content, index) => ({
+    page: index + 1,
+    content: content.replace(/\s+/g, ' ').trim().slice(0, 5000),
+  })).filter((chunk) => chunk.content.length >= 40);
+}
+
+export async function parseCoreMetrics(bytes: ArrayBuffer | null, options?: { filePath?: string }) {
+  const filePath = options?.filePath;
+  const size = bytes?.byteLength ?? 0;
+  const usePdfJs = Boolean(bytes && size > 0 && !shouldExtractTextExternally(size));
+
+  if (!usePdfJs) {
+    const pages = await extractWithPoppler(bytes, filePath);
+    return { totalPages: pages.length, metrics: parseCoreMetricPages(pages), chunks: toChunks(pages) };
+  }
+
   const { extractText, getDocumentProxy } = await import('unpdf');
   // PDF.js may transfer/detach its input buffer. Keep an independent copy for
   // the Poppler fallback before handing bytes to PDF.js.
-  const fallbackBytes = bytes.slice(0);
-  const pdf = await getDocumentProxy(new Uint8Array(bytes));
+  const fallbackBytes = bytes!.slice(0);
+  const pdf = await getDocumentProxy(new Uint8Array(bytes!));
   const extracted = await extractText(pdf, { mergePages: false }).finally(() => pdf.loadingTask.destroy());
   const primaryPages = Array.isArray(extracted.text) ? extracted.text : [extracted.text];
   let pages = primaryPages;
   let metrics = parseCoreMetricPages(pages);
   if (metrics.length < LABELS.length) {
-    const fallbackPages = await extractWithPoppler(fallbackBytes);
+    const fallbackPages = await extractWithPoppler(fallbackBytes, filePath);
     const fallbackMetrics = parseCoreMetricPages(fallbackPages);
     if (fallbackMetrics.length > metrics.length) {
       pages = fallbackPages;
       metrics = fallbackMetrics;
     }
   }
-  const chunks = pages.slice(0, 120).map((content, index) => ({
-    page: index + 1,
-    content: content.replace(/\s+/g, ' ').trim().slice(0, 5000),
-  })).filter((chunk) => chunk.content.length >= 40);
-  return { totalPages: pages.length, metrics, chunks };
+  return { totalPages: pages.length, metrics, chunks: toChunks(pages) };
 }

@@ -123,7 +123,7 @@ export async function loadRagContext(reportId: string, question: string, history
   if (historyIntent) {
     const historical = await db<Report[]>`SELECT a.id, a.code, a.company_name, a.report_type, a.title, a.published_at, c.industry FROM announcements a
       JOIN companies c ON c.code=a.code
-      WHERE a.code=${target.code} AND a.id<>${reportId}
+      WHERE a.code=${target.code} AND a.id<>${reportId} AND a.status <> 'auto_skipped'
         AND EXISTS (SELECT 1 FROM financial_metrics m WHERE m.announcement_id=a.id)
       ORDER BY CASE
         WHEN EXISTS (
@@ -138,7 +138,7 @@ export async function loadRagContext(reportId: string, question: string, history
   if (namedPeerCodes.length) {
     const namedPeers = await db<Report[]>`SELECT DISTINCT ON (a.code) a.id, a.code, a.company_name, a.report_type, a.title, a.published_at, c.industry
       FROM announcements a JOIN companies c ON c.code=a.code
-      WHERE a.code IN ${db(namedPeerCodes)}
+      WHERE a.code IN ${db(namedPeerCodes)} AND a.status <> 'auto_skipped'
         AND EXISTS (SELECT 1 FROM financial_metrics m WHERE m.announcement_id=a.id)
       ORDER BY a.code,
         CASE WHEN EXISTS (SELECT 1 FROM financial_metrics m WHERE m.announcement_id=a.id AND m.period=${period || ''}) THEN 0 ELSE 1 END,
@@ -148,7 +148,7 @@ export async function loadRagContext(reportId: string, question: string, history
   if (peerIntent && target.industry && target.industry !== '待分类') {
     const peers = await db<Report[]>`SELECT DISTINCT ON (a.code) a.id, a.code, a.company_name, a.report_type, a.title, a.published_at, c.industry
       FROM announcements a JOIN companies c ON c.code=a.code
-      WHERE c.industry=${target.industry} AND c.enabled=true AND a.code<>${target.code}
+      WHERE c.industry=${target.industry} AND c.enabled=true AND a.code<>${target.code} AND a.status <> 'auto_skipped'
         AND EXISTS (SELECT 1 FROM financial_metrics m WHERE m.announcement_id=a.id)
       ORDER BY a.code,
         CASE WHEN EXISTS (SELECT 1 FROM financial_metrics m WHERE m.announcement_id=a.id AND m.period=${period || ''}) THEN 0 ELSE 1 END,

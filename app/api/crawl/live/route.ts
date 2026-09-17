@@ -1,7 +1,8 @@
 import { getDb } from '@/lib/db';
 import { apiError } from '@/lib/api';
+import { estimateDownloadQueueWait } from '@/lib/crawl-display';
 import { getIngestControl } from '@/lib/ingest-control';
-import { periodFromTitle } from '@/lib/ingest-period';
+import { buildCoveredPeriodKeys, pendingDownloadSkipReason, periodFromTitle } from '@/lib/ingest-period';
 import { getDownloadGate, getGapScanState, listIngestProgress } from '@/lib/ingest-progress';
 import { getIngestSettings, ingestPollIntervalMs } from '@/lib/ingest-settings';
 
@@ -92,16 +93,30 @@ export async function GET() {
           : run.error ?? run.status,
     }));
 
-    const downloadQueue = await db<Array<{
-      code: string; company_name: string; status: string; title: string; published_at: string; source: string; updated_at: string;
+    const downloadQueueRows = await db<Array<{
+      id: string; code: string; company_name: string; status: string; title: string; published_at: string; source: string; updated_at: string;
+      parse_error: string | null;
     }>>`
-      SELECT code, company_name, status, title, published_at, source, updated_at
+      SELECT id, code, company_name, status, title, published_at, source, updated_at, parse_error
       FROM announcements ann
       WHERE status IN ('discovered', 'download_failed')
         AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
       ORDER BY CASE WHEN status='discovered' THEN 0 ELSE 1 END, published_at DESC
-      LIMIT 80
     `;
+    const pendingCodes = [...new Set(downloadQueueRows.map((row) => row.code))];
+    const ingestedForQueue = pendingCodes.length
+      ? await db<Array<{ code: string; title: string; published_at: string }>>`
+          SELECT code, title, published_at
+          FROM announcements
+          WHERE code = ANY(${pendingCodes}::text[])
+            AND status IN ('downloaded', 'downloading', 'parsing', 'review', 'online', 'parse_partial')
+            AND pdf_key IS NOT NULL
+        `
+      : [];
+    const coveredPeriodKeys = buildCoveredPeriodKeys(ingestedForQueue);
+    const visibleDownloadQueue = downloadQueueRows.filter((row) => !pendingDownloadSkipReason(row, coveredPeriodKeys));
+    const downloadQueue = visibleDownloadQueue.slice(0, 80);
+    if (counts) counts.pending_download = visibleDownloadQueue.length;
     const parseQueue = await db<Array<{
       code: string; company_name: string; status: string; title: string; published_at: string;
       parse_error: string | null; pdf_key: string | null; parsed_at: string | null; source: string; updated_at: string;
@@ -169,28 +184,16 @@ export async function GET() {
     const queueItems = [
       ...downloadQueue.map((row, i) => {
         const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
-        let reason = '';
-        let waitSec: number | undefined;
-        if (!control.autoCrawlEnabled || control.downloadPaused) {
-          reason = '自动抓取已关：排队任务暂不开始下载';
-        } else if (row.status === 'download_failed') {
-          const failedAt = new Date(row.updated_at).getTime();
-          const cooldownMs = Math.max(pauseMs * 15, 30_000);
-          const remain = Number.isFinite(failedAt)
-            ? Math.max(0, Math.ceil((failedAt + cooldownMs - Date.now()) / 1000))
-            : 0;
-          const unit = Math.max(1, Math.ceil(pauseMs / 1000));
-          const gated = gateWaitSec > 0 ? gateWaitSec : 0;
-          waitSec = Math.max(remain, gated) + i * unit;
-          reason = waitSec > 0 ? `上次失败，${waitSec}s 后重试` : '上次失败，即将重试';
-        } else if (downloadSlots.used >= downloadSlots.max) {
-          reason = i === 0 ? '等待下载槽空闲' : `排队第 ${i + 1} 位`;
-        } else {
-          const unit = Math.max(1, Math.ceil(pauseMs / 1000));
-          const base = gateWaitSec > 0 ? gateWaitSec : (downloadGate.mode === 'inter-round' || downloadGate.mode === 'inter-download' ? unit : 0);
-          waitSec = base + i * unit;
-          reason = waitSec > 0 ? `约 ${waitSec}s 后可下载` : (i === 0 ? '即将领取' : `排队第 ${i + 1} 位`);
-        }
+        const eta = estimateDownloadQueueWait({
+          index: i,
+          failed: row.status === 'download_failed',
+          updatedAt: row.updated_at,
+          gateWaitSec,
+          pauseSec: Math.max(1, Math.ceil(pauseMs / 1000)),
+          slotsUsed: downloadSlots.used,
+          slotsMax: downloadSlots.max,
+          autoEnabled: control.autoCrawlEnabled && !control.downloadPaused,
+        });
         return {
           code: row.code,
           name: row.company_name,
@@ -201,8 +204,10 @@ export async function GET() {
           position: i + 1,
           title: row.title,
           source: row.source,
-          reason,
-          waitSec,
+          reason: eta.reason,
+          waitSec: eta.waitSec,
+          parseError: row.parse_error,
+          lastError: row.parse_error,
         };
       }),
       ...parseQueue.map((row, i) => {

@@ -1,5 +1,6 @@
 import type { Announcement } from './types';
-import { classifyReportTitle } from './ingest-period';
+import { classifyReportTitle, isFullFinancialReport } from './ingest-period';
+import { ssePdfUrlFromPath } from './pdf-download';
 
 export type SourcePage = { items: Announcement[]; rawCount: number };
 
@@ -67,10 +68,6 @@ function classify(title: string): Announcement['reportType'] {
   return classifyReportTitle(title);
 }
 
-function isFullFinancialReport(title: string) {
-  return !/摘要|取消|英文版/.test(title) && classify(title) !== 'other';
-}
-
 async function safeFetch(url: string, init: RequestInit, timeoutMs = 12000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -132,7 +129,7 @@ export async function fetchSse(days = 2, page = 1, pageSize = 200, stockCode?: s
       source: 'SSE' as const, sourceId: path || `${code}-${item.SSEDATE}-${title}`,
       code, name: String(item.SECURITY_NAME ?? ''), title,
       publishedAt: new Date(`${String(item.SSEDATE ?? dateOnly())}T00:00:00+08:00`).toISOString(),
-      pdfUrl: path.startsWith('http') ? path : `https://www.sse.com.cn${path}`, reportType: classify(title),
+      pdfUrl: ssePdfUrlFromPath(path), reportType: classify(title),
     };
   }).filter((item) => item.code && item.pdfUrl && isFullFinancialReport(item.title));
   return { items, rawCount: raw.length };
@@ -347,38 +344,31 @@ async function fetchExchangeReportsForCode(code: string, days: number): Promise<
   }
 }
 
-function normalizeTitleKey(title: string) {
-  return title.replace(/\s+/g, '').replace(/[（(][^）)]*[）)]/g, '').toLowerCase();
+function cninfoAnnouncementFromRaw(raw: Record<string, unknown>, fallback: { code: string; name: string }): Announcement | null {
+  const title = String(raw.announcementTitle ?? '').replace(/<[^>]+>/g, '');
+  const item: Announcement = {
+    source: 'CNINFO',
+    sourceId: String(raw.announcementId ?? ''),
+    code: String(raw.secCode ?? fallback.code),
+    name: String(raw.secName ?? fallback.name),
+    title,
+    publishedAt: new Date(Number(raw.announcementTime ?? Date.now())).toISOString(),
+    pdfUrl: `https://static.cninfo.com.cn/${String(raw.adjunctUrl ?? '').replace(/^\//, '')}`,
+    reportType: classify(title),
+  };
+  if (!item.sourceId || !item.code || !item.pdfUrl.includes('cninfo') || !isFullFinancialReport(item.title)) return null;
+  return item;
 }
 
-/** Same filing from SSE/SZSE vs CNINFO → keep exchange PDF URL. */
-function preferExchangeSources(items: Announcement[]): Announcement[] {
-  const rank = (s: Announcement['source']) => (s === 'CNINFO' ? 2 : 0);
-  const byKey = new Map<string, Announcement>();
-  for (const item of items) {
-    const key = `${item.code}|${item.publishedAt.slice(0, 10)}|${normalizeTitleKey(item.title)}`;
-    const prev = byKey.get(key);
-    if (!prev || rank(item.source) < rank(prev.source)) byKey.set(key, item);
-  }
-  return [...byKey.values()];
-}
-
-/**
- * Targeted discovery for one monitored code.
- * Order: exchange (SSE/SZSE/BSE) first, then 巨潮 orgId 兜底.
- * `days` is the CNINFO seDate window. Period cutoff is applied by ingest.ts.
- */
-export async function fetchReportsForCode(code: string, name: string, days = 400): Promise<Announcement[]> {
-  const unique = new Map<string, Announcement>();
-  for (const item of await fetchExchangeReportsForCode(code, days)) {
-    unique.set(`${item.source}:${item.sourceId}`, item);
-  }
-
+/** 巨潮按代码拉年报/中报/季报，供交易所 PDF 失败时兜底。 */
+export async function fetchCninfoReportsForCode(code: string, name: string, days = 400): Promise<Announcement[]> {
   const orgId = await resolveCninfoOrgId(code);
-  if (orgId) {
-    const column = code.startsWith('6') || code.startsWith('9') ? 'sse' : 'szse';
+  if (!orgId) return [];
+  const column = code.startsWith('6') || code.startsWith('9') ? 'sse' : 'szse';
+  const found: Announcement[] = [];
+  for (const pageNum of [1, 2]) {
     const form = new URLSearchParams({
-      pageNum: '1', pageSize: '50', column, tabName: 'fulltext',
+      pageNum: String(pageNum), pageSize: '50', column, tabName: 'fulltext',
       plate: '', stock: `${code},${orgId}`, searchkey: '', secid: '',
       category: 'category_ndbg_szsh;category_bndbg_szsh;category_yjdbg_szsh;category_sjdbg_szsh',
       trade: '', seDate: `${dateOnly(days)}~${dateOnly()}`, sortName: '', sortType: '', isHLtitle: 'true',
@@ -394,26 +384,31 @@ export async function fetchReportsForCode(code: string, name: string, days = 400
         body: form,
       }, 15000);
       const payload = await response.json() as { announcements?: Array<Record<string, unknown>> };
-      for (const raw of payload.announcements ?? []) {
-        const title = String(raw.announcementTitle ?? '').replace(/<[^>]+>/g, '');
-        const item: Announcement = {
-          source: 'CNINFO',
-          sourceId: String(raw.announcementId ?? ''),
-          code: String(raw.secCode ?? code),
-          name: String(raw.secName ?? name),
-          title,
-          publishedAt: new Date(Number(raw.announcementTime ?? Date.now())).toISOString(),
-          pdfUrl: `https://static.cninfo.com.cn/${String(raw.adjunctUrl ?? '').replace(/^\//, '')}`,
-          reportType: classify(title),
-        };
-        if (item.sourceId && item.code === code && item.pdfUrl.includes('cninfo') && isFullFinancialReport(item.title)) {
-          unique.set(`${item.source}:${item.sourceId}`, item);
-        }
+      const raw = payload.announcements ?? [];
+      for (const row of raw) {
+        const item = cninfoAnnouncementFromRaw(row, { code, name });
+        if (item && item.code === code) found.push(item);
       }
+      if (!raw.length) break;
     } catch {
-      /* CNINFO fallback failed — keep exchange hits */
+      break;
     }
   }
+  return found;
+}
 
-  return preferExchangeSources([...unique.values()]);
+/**
+ * Targeted discovery for one monitored code.
+ * Order: exchange (SSE/SZSE/BSE) first, then 巨潮 orgId 兜底.
+ * `days` is the CNINFO seDate window. Period cutoff is applied by ingest.ts.
+ */
+export async function fetchReportsForCode(code: string, name: string, days = 400): Promise<Announcement[]> {
+  const unique = new Map<string, Announcement>();
+  for (const item of await fetchExchangeReportsForCode(code, days)) {
+    unique.set(`${item.source}:${item.sourceId}`, item);
+  }
+  for (const item of await fetchCninfoReportsForCode(code, name, days)) {
+    unique.set(`${item.source}:${item.sourceId}`, item);
+  }
+  return [...unique.values()];
 }

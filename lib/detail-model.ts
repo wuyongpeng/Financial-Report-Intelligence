@@ -1,4 +1,5 @@
 import { canonicalPeriodFromTitle, reportKindFromPeriod } from './ingest-period';
+import { betterKeepCandidate } from './period-dedupe';
 
 export const metricNames = ['revenue', 'net_profit', 'eps', 'roe'] as const;
 // Balance-sheet and cash-flow rows power the health module; they are not headline cards.
@@ -54,9 +55,10 @@ export function periodKey(report: Report) {
 export function comparableHistory(reports: Report[], selected: Report) {
   const suffix = period(selected).replace(/20\d{2}/, '');
   const unique = new Map<string, Report>();
-  for (const r of [...reports].sort((a,b) => b.published_at.localeCompare(a.published_at))) {
+  for (const r of reports) {
     if (filingType(r) !== filingType(selected) || periodKey(r) > periodKey(selected) || period(r).replace(/20\d{2}/, '') !== suffix || !r.metrics.length) continue;
-    if (!unique.has(period(r))) unique.set(period(r), r);
+    const token = period(r);
+    unique.set(token, betterKeepCandidate(unique.get(token), r));
   }
   return [...unique.values()].sort((a,b) => periodKey(a)-periodKey(b));
 }
@@ -64,10 +66,10 @@ export function comparableHistory(reports: Report[], selected: Report) {
 export function sequentialHistory(reports: Report[], selected: Report, limit = 8) {
   const cap = periodKey(selected);
   const unique = new Map<string, Report>();
-  for (const r of [...reports].sort((a, b) => b.published_at.localeCompare(a.published_at))) {
+  for (const r of reports) {
     if (periodKey(r) > cap || !r.metrics.length) continue;
     const token = period(r);
-    if (!unique.has(token)) unique.set(token, r);
+    unique.set(token, betterKeepCandidate(unique.get(token), r));
   }
   return [...unique.values()].sort((a, b) => periodKey(a) - periodKey(b) || a.published_at.localeCompare(b.published_at)).slice(-limit);
 }
@@ -75,7 +77,17 @@ export function priorYear(reports: Report[], selected: Report) {
   const p = period(selected); const year = p.match(/20\d{2}/)?.[0];
   if (!year) return undefined;
   const prior = p.replace(year, String(Number(year) - 1));
-  return reports.find(r => filingType(r) === filingType(selected) && period(r) === prior);
+  let best: Report | undefined;
+  for (const r of reports) {
+    if (filingType(r) !== filingType(selected) || period(r) !== prior || !r.metrics.length) continue;
+    best = betterKeepCandidate(best, r);
+  }
+  return best;
+}
+export function pickCanonicalReports(reports: Report[]) {
+  const unique = new Map<string, Report>();
+  for (const r of reports) unique.set(period(r), betterKeepCandidate(unique.get(period(r)), r));
+  return [...unique.values()].sort((a, b) => periodKey(b) - periodKey(a) || b.published_at.localeCompare(a.published_at));
 }
 export function moduleForQuestion(q: string) {
   if (/为什么|原因|归因|利润.*下降|利润.*变化/.test(q)) return 'attribution';

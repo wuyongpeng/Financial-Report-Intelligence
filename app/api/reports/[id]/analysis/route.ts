@@ -20,7 +20,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const peers: Array<{ code: string; company_name: string; metric: string; value: number; unit: string }> = period ? await db<Array<{ code: string; company_name: string; metric: string; value: number; unit: string }>>`
     SELECT DISTINCT ON (a.code, m.metric) a.code, a.company_name, m.metric, m.value, m.unit
     FROM financial_metrics m JOIN announcements a ON a.id=m.announcement_id JOIN companies c ON c.code=a.code
-    WHERE c.industry=${target.industry} AND m.period=${period} AND a.report_type=${target.report_type} AND m.metric IN ('revenue','net_profit','eps','roe')
+    WHERE c.industry=${target.industry} AND m.period=${period} AND a.report_type=${target.report_type} AND a.status <> 'auto_skipped' AND m.metric IN ('revenue','net_profit','eps','roe')
     ORDER BY a.code, m.metric, a.published_at DESC LIMIT 200
   ` : [];
   const year = period?.match(/20\d{2}/)?.[0];
@@ -28,7 +28,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const previousPeers = previousPeriod ? await db<Array<{ code: string; value: number }>>`
     SELECT DISTINCT ON (a.code) a.code, m.value
     FROM financial_metrics m JOIN announcements a ON a.id=m.announcement_id JOIN companies c ON c.code=a.code
-    WHERE c.industry=${target.industry} AND m.period=${previousPeriod} AND a.report_type=${target.report_type} AND m.metric='revenue'
+    WHERE c.industry=${target.industry} AND m.period=${previousPeriod} AND a.report_type=${target.report_type} AND a.status <> 'auto_skipped' AND m.metric='revenue'
     ORDER BY a.code, a.published_at DESC LIMIT 50
   ` : [];
   for (const current of peers.filter(p => p.metric === 'revenue')) {
@@ -38,7 +38,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
   const history = previousPeriod ? await db<Array<{ metric: string; value: number }>>`
     SELECT DISTINCT ON (m.metric) m.metric, m.value FROM financial_metrics m JOIN announcements a ON a.id=m.announcement_id
-    WHERE a.code=${target.code} AND a.report_type=${target.report_type} AND m.period=${previousPeriod}
+    WHERE a.code=${target.code} AND a.report_type=${target.report_type} AND a.status <> 'auto_skipped' AND m.period=${previousPeriod}
     ORDER BY m.metric, a.published_at DESC
   ` : [];
   const latest = new Map(reportMetrics.map((metric) => [metric.metric, metric.value]));

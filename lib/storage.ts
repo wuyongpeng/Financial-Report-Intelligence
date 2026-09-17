@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 
 function reportsRoot() {
@@ -19,6 +19,19 @@ export async function putReport(key: string, bytes: ArrayBuffer) {
   const temporary = `${target}.part`;
   await writeFile(temporary, new Uint8Array(bytes));
   await rename(temporary, target);
+}
+
+export function reportPath(key: string) {
+  return resolveKey(key);
+}
+
+export async function reportByteLength(key: string) {
+  try {
+    return (await stat(resolveKey(key))).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
 }
 
 export async function readReport(key: string) {

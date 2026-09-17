@@ -3,9 +3,10 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type AnimationEvent, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
-  canFillVerdict,
+  canBatchParseFiling,
   flattenCrawlFilings,
   filingToPeriodStatus,
+  formatQueueLastError,
   METRIC_LABELS,
   periodPrefixMatches,
   periodStateLabel,
@@ -41,6 +42,7 @@ type QueueItem = {
   startedAt?: string;
   ageMs?: number;
   waitSec?: number;
+  lastError?: string | null;
 };
 
 type LivePayload = {
@@ -305,6 +307,23 @@ function holdOptimistic(startedAt: number, minMs = 1800) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, remain));
 }
 
+function renderQueueReason(text: string, lastError?: string | null) {
+  const errorTip = lastError ? (formatQueueLastError(lastError) ?? lastError) : null;
+  const marker = '上次失败';
+  if (!errorTip || !text.includes(marker)) return text;
+  const idx = text.indexOf(marker);
+  return (
+    <>
+      {text.slice(0, idx)}
+      <span className="co-sb-pop-fail" tabIndex={0}>
+        {marker}
+        <span className="co-sb-pop-fail-tip" role="tooltip">{errorTip}</span>
+      </span>
+      {text.slice(idx + marker.length)}
+    </>
+  );
+}
+
 function QueuePopover({
   open,
   title,
@@ -327,6 +346,7 @@ function QueuePopover({
     reason?: string;
     progress?: string;
     waitSec?: number;
+    lastError?: string | null;
   }>;
   empty: string;
   onClose: () => void;
@@ -407,7 +427,9 @@ function QueuePopover({
               </span>
             </div>
             {(item.reason || item.progress) ? (
-              <div className="co-sb-pop-reason">{item.progress || item.reason}</div>
+              <div className="co-sb-pop-reason">
+                {renderQueueReason(item.progress || item.reason || '', item.lastError)}
+              </div>
             ) : null}
           </li>
         )) : (
@@ -540,9 +562,7 @@ export default function CrawlOverview() {
   }>(null);
   const [periodPrefix, setPeriodPrefix] = useState('');
   const [onlyMissingAi, setOnlyMissingAi] = useState(false);
-  const [forceRefreshAi, setForceRefreshAi] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [verdictOverrides, setVerdictOverrides] = useState<Record<string, 'ready' | 'pending' | 'failed'>>({});
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchProgress, setBatchProgress] = useState('');
   const [settingsMounted, setSettingsMounted] = useState(false);
@@ -705,10 +725,7 @@ export default function CrawlOverview() {
     };
   }, [settingsMounted]);
 
-  const allFilings = useMemo(() => flattenCrawlFilings(all).map((row) => ({
-    ...row,
-    verdictStatus: (row.announcementId && verdictOverrides[row.announcementId]) || row.verdictStatus,
-  })), [all, verdictOverrides]);
+  const allFilings = useMemo(() => flattenCrawlFilings(all), [all]);
 
   const periodOptions = useMemo(() => uniquePeriodTokens(allFilings), [allFilings]);
 
@@ -736,12 +753,11 @@ export default function CrawlOverview() {
     return list;
   }, [allFilings, search, source, onlyFailed, onlyParsing, onlyMissingAi, periodPrefix, timeCol, timeSort]);
 
-  const fillableFilings = useMemo(() => filings.filter((row) => canFillVerdict(row)), [filings]);
-  const selectedFillable = useMemo(
-    () => fillableFilings.filter((row) => Boolean(row.announcementId && selectedIds.has(row.announcementId))),
-    [fillableFilings, selectedIds],
+  const selectedFilings = useMemo(
+    () => filings.filter((row) => selectedIds.has(row.key)),
+    [filings, selectedIds],
   );
-  const allVisibleSelected = fillableFilings.length > 0 && fillableFilings.every((row) => Boolean(row.announcementId && selectedIds.has(row.announcementId)));
+  const allVisibleSelected = filings.length > 0 && filings.every((row) => selectedIds.has(row.key));
 
   const downloadMax = live?.downloadSlots.max ?? live?.limits.downloadLimit ?? 5;
   const parseMax = live?.parseSlots.max ?? live?.limits.parseLimit ?? 2;
@@ -774,61 +790,83 @@ export default function CrawlOverview() {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (allVisibleSelected) {
-        for (const row of fillableFilings) if (row.announcementId) next.delete(row.announcementId);
+        for (const row of filings) next.delete(row.key);
       } else {
-        for (const row of fillableFilings) if (row.announcementId) next.add(row.announcementId);
+        for (const row of filings) next.add(row.key);
       }
       return next;
     });
   }
 
-  async function runBatchVerdict() {
-    const jobs = forceRefreshAi
-      ? selectedFillable
-      : selectedFillable.filter((row) => row.verdictStatus !== 'ready');
-    const skipped = selectedFillable.length - jobs.length;
+  async function runBatchJobs(
+    jobs: CrawlFilingRow[],
+    mode: 'crawl' | 'parse',
+    confirmText: string,
+  ) {
     if (!jobs.length) {
-      setBatchProgress(selectedFillable.length
-        ? '所选财报均已有 AI 速判。勾选「覆盖已有」可重新分析。'
-        : '请先勾选已解析的财报。');
+      setBatchProgress(mode === 'parse' ? '所选财报尚未下载，请先批量抓取。' : '请先勾选要处理的财报。');
       return;
     }
-    const minutes = Math.max(1, Math.ceil(jobs.length / 2));
-    if (!window.confirm(`将对 ${jobs.length} 份已解析财报${forceRefreshAi ? '重新' : ''}生成 AI 速判，大约需要 ${minutes} 分钟（每份约 1 分钟）。继续？`)) return;
+    if (!window.confirm(confirmText)) return;
     batchAbort.current = false;
     setBatchBusy(true);
     let done = 0;
     let failed = 0;
-    let cursor = 0;
-    const worker = async () => {
-      while (cursor < jobs.length && !batchAbort.current) {
-        const item = jobs[cursor++];
-        const reportId = item.announcementId;
-        if (!reportId) continue;
-        const n = cursor;
-        setVerdictOverrides((map) => ({ ...map, [reportId]: 'pending' }));
-        setBatchProgress(`正在解析 ${n}/${jobs.length} · ${item.name} ${item.period}`);
-        try {
-          const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/verdict`, {
-            method: 'POST',
-            cache: 'no-store',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(forceRefreshAi ? { refresh: true } : { fill: true }),
-          });
-          if (!response.ok) throw new Error(String(response.status));
-          setVerdictOverrides((map) => ({ ...map, [reportId]: 'ready' }));
-          done += 1;
-        } catch {
-          setVerdictOverrides((map) => ({ ...map, [reportId]: 'failed' }));
-          failed += 1;
-        }
+    for (let i = 0; i < jobs.length; i++) {
+      if (batchAbort.current) break;
+      const item = jobs[i];
+      const label = `${item.name} ${item.period}`;
+      setBatchProgress(`正在${mode === 'crawl' ? '抓取' : '解析'} ${i + 1}/${jobs.length} · ${label}`);
+      try {
+        const response = await fetch('/api/crawl/trigger', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(mode === 'crawl'
+            ? {
+                mode: 'manual',
+                codes: [item.code],
+                fullHistory: false,
+                periods: [item.period],
+                ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
+              }
+            : {
+                mode: 'parse',
+                codes: [item.code],
+                parseOnly: true,
+                periods: [item.period],
+                ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
+              }),
+        });
+        const payload = await response.json() as { ok?: boolean; error?: string };
+        if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
+        done += 1;
+      } catch {
+        failed += 1;
       }
-    };
-    await Promise.all(Array.from({ length: Math.min(2, jobs.length) }, () => worker()));
+      void refreshLive();
+    }
     const stopped = batchAbort.current;
     setBatchBusy(false);
-    setBatchProgress(`${stopped ? '已中止' : '完成'}。成功 ${done}，失败 ${failed}${skipped ? `，跳过已有 ${skipped}` : ''}`);
+    setBatchProgress(`${stopped ? '已中止' : '完成'}。成功 ${done}，失败 ${failed}`);
     void refreshCoverage();
+    void refreshLive();
+  }
+
+  function runBatchCrawl() {
+    const jobs = selectedFilings;
+    void runBatchJobs(jobs, 'crawl', `将批量抓取 ${jobs.length} 份财报，已抓取过的会重新下载。继续？`);
+  }
+
+  function runBatchParse() {
+    const jobs = selectedFilings.filter((row) => canBatchParseFiling(row));
+    const skipped = selectedFilings.length - jobs.length;
+    void runBatchJobs(
+      jobs,
+      'parse',
+      skipped
+        ? `将解析 ${jobs.length} 份已下载财报（跳过 ${skipped} 份未下载），已解析的会重新抽取。继续？`
+        : `将批量解析 ${jobs.length} 份财报，已解析的会重新抽取指标。继续？`,
+    );
   }
 
   function onTimeSort(col: TimeCol) {
@@ -1011,11 +1049,11 @@ export default function CrawlOverview() {
     if (!actionConfirm) return;
     const { mode, code, name, period, periodStatus } = actionConfirm;
     setActionConfirm(null);
-    if (mode === 'crawl') await runCrawlCompany(code, name, period);
+    if (mode === 'crawl') await runCrawlCompany(code, name, period, periodStatus?.announcementId);
     else await runParseCompany(code, name, periodStatus);
   }
 
-  async function runCrawlCompany(code: string, name: string, period?: string) {
+  async function runCrawlCompany(code: string, name: string, period?: string, announcementId?: string | null) {
     const key = triggerKey('crawl', code, period);
     if (rowTriggering === key) return;
     const label = period ? `${name} ${period}` : `${name}（${code}）`;
@@ -1041,6 +1079,7 @@ export default function CrawlOverview() {
           codes: [code],
           fullHistory: !period,
           ...(period ? { periods: [period] } : {}),
+          ...(announcementId ? { announcementIds: [announcementId] } : {}),
         }),
       });
       const payload = await response.json() as {
@@ -1144,6 +1183,7 @@ export default function CrawlOverview() {
           reason: waitSec > 0
             ? (q.status === 'retry' ? `上次失败，${waitSec}s 后重试` : `约 ${waitSec}s 后可下载`)
             : q.reason,
+          lastError: q.lastError || q.parseError || undefined,
           waitSec: waitSec > 0 ? waitSec : undefined,
         };
       });
@@ -1491,37 +1531,37 @@ export default function CrawlOverview() {
               未解析
             </button>
           </div>
+          <div className="co-batch-acts" role="group" aria-label="批量操作">
+            <button
+              type="button"
+              className="co-batch-run"
+              disabled={batchBusy || !selectedFilings.length}
+              onClick={() => runBatchCrawl()}
+            >
+              {batchBusy ? '处理中…' : '批量抓取'}
+            </button>
+            <button
+              type="button"
+              className="co-batch-run"
+              disabled={batchBusy || !selectedFilings.length}
+              onClick={() => runBatchParse()}
+            >
+              批量解析
+            </button>
+            {selectedFilings.length ? <span className="co-batch-count">已选 {selectedFilings.length}</span> : null}
+            {batchBusy ? (
+              <button type="button" className="co-toggle" onClick={() => { batchAbort.current = true; }}>中止</button>
+            ) : selectedFilings.length ? (
+              <button type="button" className="co-toggle" onClick={() => setSelectedIds(new Set())}>取消选择</button>
+            ) : null}
+            {batchProgress ? <span className="co-batch-progress" role="status">{batchProgress}</span> : null}
+          </div>
           <div className="co-toolbar-right">
             <span className="co-sort-hint" aria-live="polite">
               {loading ? '…' : `${filings.length} 份`}
             </span>
           </div>
         </div>
-
-        {(selectedFillable.length > 0 || batchBusy || batchProgress) ? (
-          <div className="co-selection-bar" role="region" aria-label="批量操作">
-            <strong>{selectedFillable.length}</strong>
-            <span>份已选</span>
-            <label className="co-check-label">
-              <input type="checkbox" checked={forceRefreshAi} onChange={(e) => setForceRefreshAi(e.target.checked)} disabled={batchBusy} />
-              覆盖已有
-            </label>
-            <button
-              type="button"
-              className="co-batch-run"
-              disabled={batchBusy || !selectedFillable.length}
-              onClick={() => void runBatchVerdict()}
-            >
-              {batchBusy ? '正在解析…' : '批量解析'}
-            </button>
-            {batchBusy ? (
-              <button type="button" className="co-toggle" onClick={() => { batchAbort.current = true; }}>中止</button>
-            ) : selectedFillable.length ? (
-              <button type="button" className="co-toggle" onClick={() => setSelectedIds(new Set())}>取消选择</button>
-            ) : null}
-            {batchProgress ? <span className="co-batch-progress" role="status">{batchProgress}</span> : null}
-          </div>
-        ) : null}
 
         <div className="co-table-wrap is-filings" role="region" aria-label="全量财报列表">
           <table className="co-table co-table-compact">
@@ -1531,9 +1571,9 @@ export default function CrawlOverview() {
                   <input
                     type="checkbox"
                     checked={allVisibleSelected}
-                    disabled={!fillableFilings.length || batchBusy}
+                    disabled={!filings.length || batchBusy}
                     onChange={toggleSelectVisible}
-                    aria-label="全选当前列表中可解析的财报"
+                    aria-label="全选当前列表中的财报"
                   />
                 </th>
                 <th className="co-col-company">公司 / 代码</th>
@@ -1553,8 +1593,7 @@ export default function CrawlOverview() {
             </thead>
             <tbody>
               {filings.map((item) => {
-                const fillable = canFillVerdict(item);
-                const checked = Boolean(item.announcementId && selectedIds.has(item.announcementId));
+                const checked = selectedIds.has(item.key);
                 const period = filingToPeriodStatus(item);
                 return (
                   <tr key={item.key} className={item.state === 'failed' ? 'is-fail' : ''}>
@@ -1562,8 +1601,8 @@ export default function CrawlOverview() {
                       <input
                         type="checkbox"
                         checked={checked}
-                        disabled={!fillable || batchBusy}
-                        onChange={(e) => item.announcementId && toggleFiling(item.announcementId, e.target.checked)}
+                        disabled={batchBusy}
+                        onChange={(e) => toggleFiling(item.key, e.target.checked)}
                         aria-label={`${item.name} ${item.period}`}
                       />
                     </td>
@@ -1600,13 +1639,13 @@ export default function CrawlOverview() {
                         <button
                           type="button"
                           className="co-text-act"
-                          disabled={isTriggering('crawl', item.code, item.period)}
+                          disabled={batchBusy || isTriggering('crawl', item.code, item.period)}
                           onClick={() => askCrawl(item.code, item.name, period)}
                         >{isTriggering('crawl', item.code, item.period) ? '抓取中…' : '抓取'}</button>
                         <button
                           type="button"
                           className="co-text-act"
-                          disabled={isTriggering('parse', item.code, item.period, item.announcementId) || (item.state === 'expected' && !item.announcementId)}
+                          disabled={batchBusy || isTriggering('parse', item.code, item.period, item.announcementId) || (item.state === 'expected' && !item.announcementId)}
                           onClick={() => askParse(item.code, item.name, period)}
                         >{isTriggering('parse', item.code, item.period, item.announcementId) ? '解析中…' : '解析'}</button>
                       </div>

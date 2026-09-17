@@ -24,8 +24,8 @@ export async function GET(request: Request) {
           )=4 ORDER BY a.published_at DESC LIMIT 1
         ) a ON true WHERE c.enabled=true ORDER BY c.rank LIMIT ${limit}`
       : code
-      ? await db<ReportRow[]>`SELECT a.*, c.industry, c.rank FROM announcements a JOIN companies c ON c.code=a.code WHERE a.code=${code} ORDER BY a.published_at DESC LIMIT ${limit}`
-      : await db<ReportRow[]>`SELECT a.*, c.industry, c.rank FROM announcements a JOIN companies c ON c.code=a.code ORDER BY a.published_at DESC LIMIT ${limit}`;
+      ? await db<ReportRow[]>`SELECT a.*, c.industry, c.rank FROM announcements a JOIN companies c ON c.code=a.code WHERE a.code=${code} AND a.status <> 'auto_skipped' ORDER BY a.published_at DESC LIMIT ${limit}`
+      : await db<ReportRow[]>`SELECT a.*, c.industry, c.rank FROM announcements a JOIN companies c ON c.code=a.code WHERE a.status <> 'auto_skipped' ORDER BY a.published_at DESC LIMIT ${limit}`;
     if (reports.length) {
       await healFilingLabels(db, reports.map((item) => ({
         id: item.id,

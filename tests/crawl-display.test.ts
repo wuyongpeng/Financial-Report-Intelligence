@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  canBatchParseFiling,
   canFillVerdict,
+  estimateDownloadQueueWait,
   flattenCrawlFilings,
+  formatQueueLastError,
   openingCompanyLabel,
   periodPrefixMatches,
   uniquePeriodTokens,
@@ -74,4 +77,59 @@ test('only parsed filings can be batch-filled', () => {
   assert.equal(canFillVerdict({ state: 'downloaded', announcementId: 'a1' }), false);
   assert.equal(verdictStatusLabel(null, true), '未生成');
   assert.equal(verdictStatusLabel('ready', true), '已生成');
+});
+
+test('batch parse allows downloaded or parsed filings, not expected gaps', () => {
+  assert.equal(canBatchParseFiling({ state: 'parsed', announcementId: 'a1' }), true);
+  assert.equal(canBatchParseFiling({ state: 'downloaded', announcementId: 'a1' }), true);
+  assert.equal(canBatchParseFiling({ state: 'expected', announcementId: null }), false);
+  assert.equal(canBatchParseFiling({ state: 'discovered', announcementId: 'a2' }), false);
+  assert.equal(canBatchParseFiling({ state: 'discovered', announcementId: 'a2', downloadedAt: '2026-09-01T00:00:00Z' }), true);
+});
+
+test('failed download wait uses 30s cooldown plus gate, not 15x pause', () => {
+  const now = Date.parse('2026-09-17T07:00:00Z');
+  const failed97sAgo = new Date(now - 97_000).toISOString();
+  const first = estimateDownloadQueueWait({
+    index: 0,
+    failed: true,
+    updatedAt: failed97sAgo,
+    now,
+    gateWaitSec: 20,
+    pauseSec: 20,
+    slotsUsed: 0,
+    slotsMax: 5,
+    autoEnabled: true,
+  });
+  assert.equal(first.waitSec, 20);
+  const second = estimateDownloadQueueWait({
+    index: 1,
+    failed: true,
+    updatedAt: failed97sAgo,
+    now,
+    gateWaitSec: 20,
+    pauseSec: 20,
+    slotsUsed: 0,
+    slotsMax: 5,
+    autoEnabled: true,
+  });
+  assert.equal(second.waitSec, 40);
+  const justFailed = estimateDownloadQueueWait({
+    index: 0,
+    failed: true,
+    updatedAt: new Date(now).toISOString(),
+    now,
+    gateWaitSec: 5,
+    pauseSec: 20,
+    slotsUsed: 0,
+    slotsMax: 5,
+    autoEnabled: true,
+  });
+  assert.equal(justFailed.waitSec, 30);
+});
+
+test('queue last error is shown in Chinese for common download failures', () => {
+  assert.equal(formatQueueLastError('Error: Downloaded object is not a PDF'), '下载内容不是 PDF');
+  assert.equal(formatQueueLastError('PDF 404'), 'PDF 请求失败（404）');
+  assert.equal(formatQueueLastError('下载超时（5分钟），已退回排队下载'), '下载超时（5分钟），已退回排队下载');
 });

@@ -2,13 +2,14 @@ import companiesJson from '@/data/companies.json';
 import seedReportsJson from '@/data/seed-reports.json';
 import { getDb } from './db';
 import { ensureBackendSchema } from './backend-schema';
-import { parseCoreMetrics } from './parser';
-import { fetchAllSources, fetchReportsForCode } from './sources';
-import { putReport, readReport } from './storage';
+import { parseCoreMetrics, shouldExtractTextExternally } from './parser';
+import { fetchAllSources, fetchCninfoReportsForCode, fetchReportsForCode } from './sources';
+import { putReport, readReport, reportByteLength, reportPath } from './storage';
 import { sendAlert } from './alerts';
 import { hasCoreMetrics } from './metric-quality';
 import type { Announcement, Company } from './types';
-import { asIsoDate, periodFromTitle } from './ingest-period';
+import { asIsoDate, buildCoveredPeriodKeys, isFullFinancialReport, pendingDownloadSkipMessage, pendingDownloadSkipReason, periodCoverageKey, periodFromTitle } from './ingest-period';
+import { DUPLICATE_PERIOD_KEEP_MESSAGE, duplicateIdsToSkip } from './period-dedupe';
 import {
   announcementMeetsAutoCutoff,
   autoCollectSearchDays,
@@ -29,6 +30,7 @@ import {
   setIngestProgress,
 } from './ingest-progress';
 import { getIngestSettings } from './ingest-settings';
+import { isPdfBytes, looksLikeBlockedPdf, pdfUrlCandidates, pickCninfoFallback } from './pdf-download';
 
 const companies = companiesJson as Company[];
 const companyByCode = new Map(companies.map((company) => [company.code, company]));
@@ -195,6 +197,17 @@ export async function recoverStaleRuns() {
     WHERE status='parsing'
       AND updated_at < NOW() - INTERVAL '5 minutes'
   `;
+  // 体积搁置改为抽前 120 页重试，不再永久占「排队解析」
+  await db`
+    UPDATE announcements
+    SET status='downloaded',
+        parse_error='体积较大，改为抽取前 120 页后重试',
+        updated_at=NOW()
+    WHERE (
+        (status='parse_parked' AND parse_error LIKE 'PDF 超过 50MB%')
+        OR (status='parse_partial' AND parsed_at IS NULL AND parse_error ILIKE '%50%MB%')
+      )
+  `;
 }
 
 function downloadPauseMs() {
@@ -204,6 +217,102 @@ function downloadPauseMs() {
 
 function withDownloadJitter(ms: number) {
   return ms + Math.floor(Math.random() * Math.min(600, Math.max(150, ms * 0.35)));
+}
+
+function refererForSource(source: string) {
+  if (source === 'CNINFO') return 'https://www.cninfo.com.cn/';
+  if (source === 'SSE') return 'https://www.sse.com.cn/';
+  if (source === 'BSE') return 'https://www.bse.cn/';
+  return 'https://www.szse.cn/';
+}
+
+async function fetchPdfBytes(url: string, referer: string, signal: AbortSignal) {
+  const response = await fetch(url, {
+    signal,
+    headers: {
+      accept: 'application/pdf,*/*;q=0.8',
+      referer,
+      'user-agent': 'FinanceReportIntelligence/1.0 (+https://github.com/wuyongpeng/Financial-Report-Intelligence)',
+    },
+  });
+  if (!response.ok) throw new Error(`PDF ${response.status}`);
+  const bytes = await response.arrayBuffer();
+  if (isPdfBytes(bytes)) return bytes;
+  if (looksLikeBlockedPdf(bytes)) throw new Error('交易所拦截了 PDF 下载（返回的不是文件）');
+  throw new Error('Downloaded object is not a PDF');
+}
+
+async function retireRedundantPendingDownloads(keepIds: string[] = []) {
+  const db = getDb();
+  const keep = new Set(keepIds);
+  const pending = await db<Array<{ id: string; code: string; title: string; published_at: string }>>`
+    SELECT id, code, title, published_at
+    FROM announcements ann
+    WHERE status IN ('discovered', 'download_failed')
+      AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
+  `;
+  if (!pending.length) return { skipped: 0 };
+  const codes = [...new Set(pending.map((row) => row.code))];
+  const ingested = await db<Array<{ code: string; title: string; published_at: string }>>`
+    SELECT code, title, published_at
+    FROM announcements
+    WHERE code = ANY(${codes}::text[])
+      AND status IN ('downloaded', 'downloading', 'parsing', 'review', 'online', 'parse_partial', 'parse_parked')
+      AND pdf_key IS NOT NULL
+  `;
+  const coveredKeys = buildCoveredPeriodKeys(ingested);
+  const byReason = { 'not-report': [] as string[], 'duplicate-period': [] as string[] };
+  for (const row of pending) {
+    const reason = pendingDownloadSkipReason(row, coveredKeys, keep);
+    if (reason) byReason[reason].push(row.id);
+  }
+  let skipped = 0;
+  for (const reason of ['not-report', 'duplicate-period'] as const) {
+    const ids = byReason[reason];
+    if (!ids.length) continue;
+    const message = pendingDownloadSkipMessage(reason);
+    const result = await db`
+      UPDATE announcements
+      SET status='auto_skipped', parse_error=${message}, updated_at=NOW()
+      WHERE id=ANY(${ids}::text[])
+        AND status IN ('discovered', 'download_failed')
+    `;
+    skipped += result.count;
+  }
+  return { skipped };
+}
+
+export async function retireDuplicateIngestedReports() {
+  const db = getDb();
+  const rows = await db<Array<{
+    id: string; code: string; title: string; status: string; published_at: string; parsed_at: string | null; core_count: number;
+  }>>`
+    SELECT a.id, a.code, a.title, a.status, a.published_at, a.parsed_at,
+      (SELECT COUNT(*)::int FROM financial_metrics m
+        WHERE m.announcement_id=a.id AND m.metric IN ('revenue','net_profit','eps','roe')) AS core_count
+    FROM announcements a
+    WHERE a.status NOT IN ('auto_skipped', 'discovered', 'download_failed', 'downloading', 'parsing')
+      AND EXISTS (SELECT 1 FROM companies c WHERE c.code=a.code AND c.enabled=true)
+  `;
+  const skipIds = duplicateIdsToSkip(rows.map((row) => ({
+    id: row.id,
+    code: row.code,
+    title: row.title,
+    status: row.status,
+    published_at: row.published_at,
+    parsed_at: row.parsed_at,
+    coreCount: row.core_count,
+  })));
+  if (!skipIds.length) return { skipped: 0 };
+  const result = await db`
+    UPDATE announcements
+    SET status='auto_skipped',
+        parse_error=${DUPLICATE_PERIOD_KEEP_MESSAGE},
+        updated_at=NOW()
+    WHERE id=ANY(${skipIds}::text[])
+      AND status NOT IN ('auto_skipped', 'downloading', 'parsing')
+  `;
+  return { skipped: result.count };
 }
 
 export async function processBacklog(options: {
@@ -221,10 +330,27 @@ export async function processBacklog(options: {
   const retryPartial = announcementIds.length > 0 || (codes.length > 0 && fullHistory);
   const pauseBetweenDownloads = downloadPauseMs();
   await recoverStaleRuns();
+  await retireRedundantPendingDownloads(announcementIds);
+  await retireDuplicateIngestedReports();
+  const cninfoFallbackByCode = new Map<string, Promise<Announcement[]>>();
 
   // 关键下载与解析候选，避免 LIMIT 被大量「已下载待解析」占满导致永远不下 PDF。
   const codeFilter = codes.length === 0;
   const idFilter = announcementIds.length === 0;
+  // 指定公告的手动抓取：退回排队并清掉本地 PDF，才会真正重新下载。
+  if (downloadLimit > 0 && announcementIds.length) {
+    await db`
+      UPDATE announcements
+      SET status='discovered',
+          pdf_key=NULL,
+          pdf_sha256=NULL,
+          downloaded_at=NULL,
+          parse_error=NULL,
+          updated_at=NOW()
+      WHERE id=ANY(${announcementIds}::text[])
+        AND status NOT IN ('downloading', 'parsing')
+    `;
+  }
   const downloadCandidates = downloadLimit > 0
     ? await db<StoredAnnouncement[]>`
         SELECT id, source, source_id, code, company_name, title, report_type, published_at, pdf_url, pdf_key, status
@@ -251,6 +377,12 @@ export async function processBacklog(options: {
           OR (${retryPartial} AND status = 'parse_partial' AND pdf_key IS NOT NULL)
           OR (status IN ('review', 'online') AND pdf_key IS NOT NULL
             AND NOT EXISTS (SELECT 1 FROM report_chunks WHERE report_chunks.announcement_id=announcements.id))
+          OR (
+            ${!idFilter}
+            AND pdf_key IS NOT NULL
+            AND id=ANY(${announcementIds}::text[])
+            AND status NOT IN ('downloading', 'parsing')
+          )
         )
           AND (${codeFilter} OR code=ANY(${codes}::text[]))
           AND (${idFilter} OR id=ANY(${announcementIds}::text[]))
@@ -266,6 +398,7 @@ export async function processBacklog(options: {
   let failed = 0;
   let skippedCutoff = 0;
   const idSet = new Set(announcementIds);
+  const claimedPeriods = new Set<string>();
   for (const record of backlog) {
     if (downloaded >= downloadLimit && parsed >= parseLimit) break;
     try {
@@ -288,14 +421,33 @@ export async function processBacklog(options: {
         `;
         continue;
       }
+      if (!record.pdf_key && !idSet.has(record.id) && !isFullFinancialReport(record.title)) {
+        skippedCutoff += 1;
+        await db`
+          UPDATE announcements
+          SET status='auto_skipped',
+              parse_error=${pendingDownloadSkipMessage('not-report')},
+              updated_at=NOW()
+          WHERE id=${record.id} AND status IN ('discovered', 'download_failed')
+        `;
+        continue;
+      }
+      const coverageKey = periodCoverageKey(record.code, record.title, record.published_at);
+      if (!record.pdf_key && coverageKey && claimedPeriods.has(coverageKey) && !idSet.has(record.id)) {
+        skippedCutoff += 1;
+        await db`
+          UPDATE announcements
+          SET status='auto_skipped',
+              parse_error=${pendingDownloadSkipMessage('duplicate-period')},
+              updated_at=NOW()
+          WHERE id=${record.id} AND status IN ('discovered', 'download_failed')
+        `;
+        continue;
+      }
       let bytes: ArrayBuffer | null = null;
       let pdfKey = record.pdf_key;
       if (!pdfKey && downloaded < downloadLimit) {
         const period = periodFromTitle(record.title, record.published_at);
-        const referer = record.source === 'CNINFO' ? 'https://www.cninfo.com.cn/'
-          : record.source === 'SSE' ? 'https://www.sse.com.cn/'
-            : record.source === 'BSE' ? 'https://www.bse.cn/'
-              : 'https://www.szse.cn/';
         const startedAt = new Date().toISOString();
         await db`
           UPDATE announcements SET status='downloading', parse_error=NULL, updated_at=${startedAt}
@@ -313,23 +465,48 @@ export async function processBacklog(options: {
           startedAt,
         });
         const controller = new AbortController();
-        // Hard cap: abort hung body read; recoverStaleRuns also resets downloading > 5min.
         const timer = setTimeout(() => controller.abort(), 5 * 60 * 1000);
-        let response: Response;
+        let lastError = '';
+        let usedUrl = record.pdf_url;
         try {
-          patchIngestProgress(record.id, { detail: `请求 PDF（${record.source}）…` });
-          response = await fetch(record.pdf_url, { signal: controller.signal, headers: {
-            accept: 'application/pdf,*/*;q=0.8', referer,
-            'user-agent': 'FinanceReportIntelligence/1.0 (+https://github.com/wuyongpeng/Financial-Report-Intelligence)',
-          } });
-          if (!response.ok) throw new Error(`PDF ${response.status}`);
-          patchIngestProgress(record.id, { detail: '下载 PDF 字节…' });
-          bytes = await response.arrayBuffer();
+          const urls = pdfUrlCandidates(record.source, record.pdf_url);
+          for (const url of urls) {
+            patchIngestProgress(record.id, { detail: `请求 PDF（${record.source}）…` });
+            try {
+              bytes = await fetchPdfBytes(url, refererForSource(record.source), controller.signal);
+              usedUrl = url;
+              break;
+            } catch (error) {
+              lastError = String(error);
+            }
+          }
+          if (!bytes && record.source !== 'CNINFO') {
+            patchIngestProgress(record.id, { detail: '交易所失败，改从巨潮资讯下载…' });
+            let pending = cninfoFallbackByCode.get(record.code);
+            if (!pending) {
+              pending = fetchCninfoReportsForCode(record.code, record.company_name, autoCollectSearchDays());
+              cninfoFallbackByCode.set(record.code, pending);
+            }
+            const fallback = pickCninfoFallback(record, await pending);
+            if (!fallback) {
+              lastError = lastError || '交易所下载失败，巨潮未找到同期货报';
+            } else {
+              try {
+                bytes = await fetchPdfBytes(fallback.pdfUrl, refererForSource('CNINFO'), controller.signal);
+                usedUrl = fallback.pdfUrl;
+              } catch (error) {
+                lastError = String(error);
+              }
+            }
+          }
         } finally {
           clearTimeout(timer);
         }
-        if (!bytes) throw new Error('PDF 下载结果为空');
-        if (new TextDecoder().decode(bytes.slice(0, 4)) !== '%PDF') throw new Error('Downloaded object is not a PDF');
+        if (!bytes) throw new Error(lastError.replace(/^Error:\s*/i, '') || 'PDF 下载结果为空');
+        if (usedUrl !== record.pdf_url) {
+          await db`UPDATE announcements SET pdf_url=${usedUrl}, updated_at=NOW() WHERE id=${record.id}`;
+          record.pdf_url = usedUrl;
+        }
         patchIngestProgress(record.id, { detail: `写入存储（${Math.round(bytes.byteLength / 1024)} KB）…` });
         const digest = await sha256(bytes);
         pdfKey = `reports/${record.code}/${record.id}.pdf`;
@@ -342,6 +519,7 @@ export async function processBacklog(options: {
         // Keep progress visible briefly so live UI can show 「刚下完 → 排队解析」
         patchIngestProgress(record.id, { detail: '下载完成，准备解析…' });
         downloaded += 1;
+        if (coverageKey) claimedPeriods.add(coverageKey);
         if (downloaded < downloadLimit) {
           const wait = withDownloadJitter(pauseBetweenDownloads);
           setDownloadGate({
@@ -352,24 +530,20 @@ export async function processBacklog(options: {
           await new Promise((resolve) => setTimeout(resolve, wait));
         }
         // Fall through: same-tick parse when parseLimit allows (bytes already in memory).
-      } else if (pdfKey && parsed < parseLimit) {
-        const object = await readReport(pdfKey);
-        if (object) bytes = object.buffer.slice(object.byteOffset, object.byteOffset + object.byteLength);
       }
 
+      const filePath = pdfKey ? reportPath(pdfKey) : undefined;
+      const onDiskBytes = pdfKey ? await reportByteLength(pdfKey) : null;
       // Just-downloaded rows must still parse in this pass even if parseCandidates was empty at query time.
-      if (!bytes && pdfKey && parsed < parseLimit) {
+      if (!bytes && pdfKey && parsed < parseLimit && !(onDiskBytes != null && shouldExtractTextExternally(onDiskBytes))) {
         const object = await readReport(pdfKey);
         if (object) bytes = object.buffer.slice(object.byteOffset, object.byteOffset + object.byteLength);
       }
-
-      if (bytes && bytes.byteLength > 50 * 1024 * 1024) {
-        clearIngestProgress(record.id);
-        // 永久搁置：出现在「排队解析」但不占待解析、也不自动再排
-        await db`UPDATE announcements SET status='parse_parked', parse_error='PDF 超过 50MB，已搁置（不占用待解析）', updated_at=NOW() WHERE id=${record.id}`;
-        continue;
+      if (bytes && filePath && shouldExtractTextExternally(bytes.byteLength)) {
+        bytes = null;
       }
-      if (bytes && parsed < parseLimit) {
+
+      if (parsed < parseLimit && (bytes || (filePath && onDiskBytes))) {
         const period = periodFromTitle(record.title, record.published_at);
         const parseStarted = new Date().toISOString();
         await db`
@@ -393,7 +567,7 @@ export async function processBacklog(options: {
         try {
           // parseCoreMetrics 本身不接 abort；用竞态实现硬超时，recoverStaleRuns 兜底
           extracted = await Promise.race([
-            parseCoreMetrics(bytes),
+            parseCoreMetrics(bytes, { filePath }),
             new Promise<never>((_, reject) => {
               parseController.signal.addEventListener('abort', () => {
                 reject(new Error('解析超时（5分钟）'));
@@ -402,6 +576,17 @@ export async function processBacklog(options: {
           ]);
         } finally {
           clearTimeout(parseTimer);
+        }
+        if (!extracted.metrics.length && !extracted.chunks.length) {
+          clearIngestProgress(record.id);
+          await db`
+            UPDATE announcements
+            SET status='parse_parked',
+                parse_error='未能抽取正文（扫描件或无法读出文字），已搁置',
+                updated_at=NOW()
+            WHERE id=${record.id}
+          `;
+          continue;
         }
         const createdAt = new Date().toISOString();
         await ensureBackendSchema();

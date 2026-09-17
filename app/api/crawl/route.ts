@@ -130,6 +130,7 @@ export async function GET() {
         a.downloaded_at, a.parsed_at, a.status, a.parse_error, a.title, a.pdf_key
       FROM announcements a
       JOIN companies c ON c.code=a.code AND c.enabled=true
+      WHERE a.status <> 'auto_skipped'
       ORDER BY a.code, a.published_at DESC, a.discovered_at DESC
     `;
     const latestByCode = new Map(latest.map((row) => [row.code, row]));
@@ -158,6 +159,7 @@ export async function GET() {
             EXISTS (SELECT 1 FROM financial_metrics fm WHERE fm.announcement_id=a.id AND fm.metric='roe') AS has_roe
           FROM announcements a
           WHERE a.code = ANY(${companyCodes}::text[])
+            AND a.status <> 'auto_skipped'
         `
       : [];
     const annPeriodsByCode = new Map<string, AnnPeriodRow[]>();

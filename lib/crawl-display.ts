@@ -317,6 +317,66 @@ export function canFillVerdict(row: { state: PeriodCollectState; announcementId?
   return Boolean(row.announcementId) && (row.state === 'parsed' || row.state === 'parsed_partial');
 }
 
+/** Matches processBacklog: auto retry `download_failed` after 30s (not 15× pause). */
+export const DOWNLOAD_FAIL_RETRY_SEC = 30;
+
+export function estimateDownloadQueueWait(input: {
+  index: number;
+  failed: boolean;
+  updatedAt?: string | null;
+  now?: number;
+  gateWaitSec: number;
+  pauseSec: number;
+  slotsUsed: number;
+  slotsMax: number;
+  autoEnabled: boolean;
+}): { waitSec?: number; reason: string } {
+  if (!input.autoEnabled) {
+    return { reason: '自动抓取已关：排队任务暂不开始下载' };
+  }
+  const unit = Math.max(1, Math.round(input.pauseSec));
+  const slotsFull = input.slotsUsed >= input.slotsMax;
+  if (slotsFull && !input.failed) {
+    return { reason: input.index === 0 ? '等待下载槽空闲' : `排队第 ${input.index + 1} 位` };
+  }
+  let failRemain = 0;
+  if (input.failed) {
+    const failedAt = input.updatedAt ? new Date(input.updatedAt).getTime() : NaN;
+    failRemain = Number.isFinite(failedAt)
+      ? Math.max(0, Math.ceil((failedAt + DOWNLOAD_FAIL_RETRY_SEC * 1000 - (input.now ?? Date.now())) / 1000))
+      : 0;
+  }
+  const gated = Math.max(0, input.gateWaitSec);
+  const waitSec = Math.max(failRemain, gated) + input.index * unit;
+  if (input.failed) {
+    return {
+      waitSec: waitSec > 0 ? waitSec : undefined,
+      reason: waitSec > 0 ? `上次失败，${waitSec}s 后重试` : '上次失败，即将重试',
+    };
+  }
+  return {
+    waitSec: waitSec > 0 ? waitSec : undefined,
+    reason: waitSec > 0 ? `约 ${waitSec}s 后可下载` : (input.index === 0 ? '即将领取' : `排队第 ${input.index + 1} 位`),
+  };
+}
+
+export function canBatchParseFiling(row: { announcementId?: string | null; state: PeriodCollectState; downloadedAt?: string | null }) {
+  if (!row.announcementId) return false;
+  if (row.downloadedAt) return true;
+  return row.state === 'downloaded' || row.state === 'parsed' || row.state === 'parsed_partial' || row.state === 'failed';
+}
+
+export function formatQueueLastError(raw: string | null | undefined) {
+  if (!raw) return null;
+  const text = raw.replace(/^Error:\s*/i, '').trim();
+  if (!text) return null;
+  if (/Downloaded object is not a PDF/i.test(text)) return '下载内容不是 PDF';
+  if (/交易所拦截了 PDF/.test(text)) return '交易所拦截了 PDF 下载';
+  const pdfStatus = text.match(/^PDF (\d+)$/i);
+  if (pdfStatus) return `PDF 请求失败（${pdfStatus[1]}）`;
+  return text;
+}
+
 export function verdictStatusLabel(status: 'ready' | 'pending' | 'failed' | null | undefined, fillable: boolean) {
   if (status === 'ready') return '已生成';
   if (status === 'pending') return '生成中';
