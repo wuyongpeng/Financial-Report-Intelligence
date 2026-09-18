@@ -12,7 +12,7 @@ import {
 } from '../lib/verdict-queue';
 
 test('auto verdict budget is slower than one minute and still bounded', () => {
-  assert.equal(VERDICT_CALL_TIMEOUT_MS, 180_000);
+  assert.equal(VERDICT_CALL_TIMEOUT_MS, 300_000);
   assert.equal(VERDICT_LOCK_WAIT_MS, 20_000);
   assert.equal(VERDICT_PAUSE_MS, 15_000);
   assert.ok(VERDICT_CALL_TIMEOUT_MS > 60_000);

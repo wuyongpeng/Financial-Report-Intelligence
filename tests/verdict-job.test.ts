@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractVerdictCompletion, orderVerdictProviders } from '../lib/report-verdict-llm';
+import { extractVerdictCompletion, applyVerdictStreamEvent, emptyVerdictStreamState, orderVerdictProviders, VERDICT_HARD_ABORT_MS, VERDICT_TTFT_MS } from '../lib/report-verdict-llm';
 import { shouldKickVerdictJob, type VerdictPeek } from '../lib/report-verdict-store';
 
 function peek(partial: Partial<VerdictPeek>): VerdictPeek {
@@ -50,4 +50,31 @@ test('orderVerdictProviders prefers MiniMax before GLM for JSON generation', () 
     'thudm/glm-5.2',
     'thudm/glm-5.1',
   ]);
+});
+
+test('verdict aborts at 30s without a first token and at 5 minutes if unfinished', () => {
+  assert.equal(VERDICT_TTFT_MS, 30_000);
+  assert.equal(VERDICT_HARD_ABORT_MS, 300_000);
+  assert.ok(VERDICT_TTFT_MS < VERDICT_HARD_ABORT_MS);
+});
+
+test('applyVerdictStreamEvent treats reasoning as first token and keeps later JSON', () => {
+  let state = emptyVerdictStreamState();
+  state = applyVerdictStreamEvent(state, JSON.stringify({
+    choices: [{ delta: { reasoning_content: '先看利润' } }],
+  }));
+  assert.equal(state.sawToken, true);
+  assert.equal(state.reasoning, '先看利润');
+  const payload = JSON.stringify({
+    verdict: { label: '稳健增长', summary: '经营节奏平稳。' },
+    changes: [],
+    modules: [],
+  });
+  state = applyVerdictStreamEvent(state, JSON.stringify({
+    choices: [{ delta: { content: payload }, finish_reason: 'stop' }],
+  }));
+  assert.equal(state.content, payload);
+  assert.equal(state.finish, 'stop');
+  state = applyVerdictStreamEvent(state, '[DONE]');
+  assert.equal(state.content, payload);
 });

@@ -5,8 +5,9 @@ import { formatLlmCallError, formatLlmHttpError } from './llm-error';
 
 type LockPayload = { pid: number; at: number };
 
-const STALE_MS = 3 * 60 * 1000;
+const STALE_MS = 20 * 60 * 1000;
 const SLOT_WAIT_MS = 4 * 60 * 1000;
+const LOCK_HEARTBEAT_MS = 15_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
 export class LlmSlotBusyError extends Error {
@@ -107,6 +108,17 @@ function releaseFileLock() {
   try { unlinkSync(file); } catch { /* already gone */ }
 }
 
+function touchFileLock() {
+  const file = lockPath();
+  const lock = readLock(file);
+  if (!lock || lock.pid !== process.pid) return;
+  try {
+    writeFileSync(file, `${JSON.stringify({ pid: process.pid, at: Date.now() })}\n`);
+  } catch {
+    /* lock file raced */
+  }
+}
+
 /** Delay before retrying a 429/503. attempt is 0-based. */
 export function llmRetryDelayMs(attempt: number, retryAfterHeader: string | null | undefined, now = Date.now()) {
   const header = retryAfterHeader?.trim() ?? '';
@@ -168,7 +180,7 @@ function providerTimeoutMs(timeoutMs: number, isLast: boolean) {
 async function fetchFromProvider(
   provider: LlmProvider,
   body: unknown,
-  options: { signal?: AbortSignal; timeoutMs: number; maxAttempts?: number },
+  options: { signal?: AbortSignal; timeoutMs: number; maxAttempts?: number; keepAbortAlive?: boolean },
 ): Promise<Response> {
   const url = `${provider.baseUrl}/chat/completions`;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -180,16 +192,29 @@ async function fetchFromProvider(
     if (options.signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
     const controller = new AbortController();
     const onAbort = () => controller.abort();
-    options.signal?.addEventListener('abort', onAbort, { once: true });
+    options.signal?.addEventListener('abort', onAbort);
     const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-    try {
-      last = await fetch(url, { method: 'POST', signal: controller.signal, headers, body: payload });
-    } finally {
+    const release = () => {
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', onAbort);
+    };
+    try {
+      last = await fetch(url, { method: 'POST', signal: controller.signal, headers, body: payload });
+    } catch (error) {
+      release();
+      throw error;
     }
-    if (!shouldRetryLlmStatus(last.status)) return last;
-    if (attempt === maxAttempts - 1) return last;
+    if (!shouldRetryLlmStatus(last.status) || attempt === maxAttempts - 1) {
+      if (options.keepAbortAlive && last.ok) {
+        // Headers arrived; do not kill the body on the fetch timer. Parent signal still aborts TTFT.
+        clearTimeout(timer);
+        options.signal?.addEventListener('abort', release, { once: true });
+        return last;
+      }
+      release();
+      return last;
+    }
+    release();
     const wait = llmRetryDelayMs(attempt, last.headers.get('retry-after')) + Math.floor(Math.random() * 400);
     console.warn('[llm] rate limited, backing off', { provider: provider.id, status: last.status, wait, attempt: attempt + 1 });
     await last.text().catch(() => '');
@@ -201,7 +226,7 @@ async function fetchFromProvider(
 export async function fetchChatCompletionsFrom(
   provider: LlmProvider,
   body: unknown,
-  options: { signal?: AbortSignal; timeoutMs: number; maxAttempts?: number },
+  options: { signal?: AbortSignal; timeoutMs: number; maxAttempts?: number; keepAbortAlive?: boolean },
 ) {
   return fetchFromProvider(provider, body, options);
 }
@@ -216,9 +241,12 @@ export async function withLlmSlot<T>(
   const run = tail.then(async () => {
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
     await acquireFileLock(signal, acquireTimeoutMs);
+    const beat = setInterval(() => touchFileLock(), LOCK_HEARTBEAT_MS);
+    beat.unref?.();
     try {
       return await fn();
     } finally {
+      clearInterval(beat);
       releaseFileLock();
     }
   });

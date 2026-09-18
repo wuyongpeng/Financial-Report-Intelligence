@@ -15,8 +15,8 @@ import {
   type VerdictQueueJob,
 } from './report-verdict-store';
 
-/** Model call once the LLM slot is held. Reasoning models need well over a minute. */
-export const VERDICT_CALL_TIMEOUT_MS = 180_000;
+/** Model call: 30s for first token, 5 minutes to finish. */
+export const VERDICT_CALL_TIMEOUT_MS = 300_000;
 /** Yield quickly if chat/问答 is using the global LLM lock. */
 export const VERDICT_LOCK_WAIT_MS = 20_000;
 /** Rest between reports so Q&A can slip in. */
@@ -154,7 +154,7 @@ export function composeVerdictQueueNote(input: {
   if (input.status === 'waiting_llm') return input.storedNote.trim() || '问答占用模型，稍后继续';
   if (input.status === 'cooldown') return input.storedNote.trim() || '连续失败，冷却后再试';
   if (input.due <= 0) return `待补 ${input.pending} 份，失败后冷却中，稍后自动重试`;
-  const base = input.storedNote.trim() || `待补 ${input.pending} 份，空闲单线程补齐，单份限 3 分钟`;
+  const base = input.storedNote.trim() || `待补 ${input.pending} 份，空闲单线程补齐，首字 30 秒，整段 5 分钟`;
   if (input.last && input.last.ok === false && input.last.reason) {
     return `${base} · 上次：${input.last.name} ${input.last.period} ${input.last.reason}`;
   }

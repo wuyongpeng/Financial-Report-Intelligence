@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     note = `已保存采集参数：下载间隔 ${settings.downloadPauseSec}s · 下载并发 ${settings.downloadLimit} · 解析并发 ${settings.parseLimit} · 采集窗口近 ${settings.lookbackDays} 天 · 轮询间隔 ${settings.pollIntervalMin} 分钟`;
   } else if (typeof patch.autoVerdictEnabled === 'boolean' && !('autoCrawlEnabled' in patch) && !('downloadPaused' in patch)) {
     note = control.autoVerdictEnabled
-      ? '已开启自动智析：空闲时单线程补齐未生成的概览，单份限 3 分钟，失败跳过并冷却'
+      ? '已开启自动智析：空闲时单线程补齐未生成的概览，单份首字 30 秒、整段 5 分钟，失败跳过并冷却'
       : '已关闭自动智析：进行中的一份会结束，队列不再领取新任务';
   } else if (typeof patch.autoCrawlEnabled === 'boolean' || typeof patch.downloadPaused === 'boolean') {
     note = control.autoCrawlEnabled

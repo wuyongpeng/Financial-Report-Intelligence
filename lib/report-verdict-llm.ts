@@ -1,3 +1,4 @@
+import { parseSse } from './answer';
 import type { Citation } from './detail-model';
 import { loadRagContext } from './rag';
 import { parseReportVerdictJson, unwrapModelJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
@@ -45,20 +46,12 @@ JSON Schema：
 ${JSON.stringify(VERDICT_JSON_SCHEMA)}`;
 }
 
-export const VERDICT_PROVIDER_TIMEOUT_MS = 90_000;
-export const VERDICT_TOTAL_TIMEOUT_MS = 180_000;
-
-function timeoutMs() {
-  const setting = Number(process.env.LLM_TIMEOUT_MS ?? VERDICT_TOTAL_TIMEOUT_MS);
-  const raw = Number.isFinite(setting) ? setting : VERDICT_TOTAL_TIMEOUT_MS;
-  return Math.min(Math.max(raw, VERDICT_TOTAL_TIMEOUT_MS), 240_000);
-}
-
-function failoverCapMs() {
-  const raw = Number(process.env.LLM_FAILOVER_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw >= VERDICT_PROVIDER_TIMEOUT_MS) return raw;
-  return VERDICT_PROVIDER_TIMEOUT_MS;
-}
+/** Abort this provider if the first stream token (content or reasoning) has not arrived. */
+export const VERDICT_TTFT_MS = 30_000;
+/** Hard-abort if the answer is still not finished. */
+export const VERDICT_HARD_ABORT_MS = 300_000;
+export const VERDICT_PROVIDER_TIMEOUT_MS = VERDICT_HARD_ABORT_MS;
+export const VERDICT_TOTAL_TIMEOUT_MS = VERDICT_HARD_ABORT_MS;
 
 /** MiniMax returns JSON quickly; GLM-5 often spends the budget on hidden thinking. */
 export function orderVerdictProviders(providers: LlmProvider[]): LlmProvider[] {
@@ -104,6 +97,98 @@ export function extractVerdictCompletion(raw: string): { json: string | null; fi
   }
 }
 
+export type VerdictStreamState = {
+  content: string;
+  reasoning: string;
+  finish?: string;
+  sawToken: boolean;
+};
+
+export function emptyVerdictStreamState(): VerdictStreamState {
+  return { content: '', reasoning: '', sawToken: false };
+}
+
+export function applyVerdictStreamEvent(state: VerdictStreamState, event: string): VerdictStreamState {
+  if (!event || event === '[DONE]') return state;
+  let payload: {
+    choices?: Array<{
+      finish_reason?: string;
+      delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+      message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+    }>;
+  };
+  try {
+    payload = JSON.parse(event) as typeof payload;
+  } catch {
+    return state;
+  }
+  const choice = payload.choices?.[0];
+  if (!choice) return state;
+  const next: VerdictStreamState = {
+    content: state.content,
+    reasoning: state.reasoning,
+    finish: choice.finish_reason || state.finish,
+    sawToken: state.sawToken,
+  };
+  const deltaContent = flattenModelText(choice.delta?.content);
+  const deltaReasoning = flattenModelText(choice.delta?.reasoning_content ?? choice.delta?.reasoning);
+  const messageContent = flattenModelText(choice.message?.content);
+  const messageReasoning = flattenModelText(choice.message?.reasoning_content ?? choice.message?.reasoning);
+  if (deltaContent) next.content += deltaContent;
+  if (deltaReasoning) next.reasoning += deltaReasoning;
+  if (messageContent) next.content = messageContent;
+  if (messageReasoning) next.reasoning = messageReasoning;
+  if (deltaContent || deltaReasoning || messageContent || messageReasoning) next.sawToken = true;
+  return next;
+}
+
+function streamJson(state: VerdictStreamState) {
+  return unwrapModelJson(state.content) ?? unwrapModelJson(state.reasoning) ?? unwrapModelJson(`${state.content}\n${state.reasoning}`);
+}
+
+async function readVerdictStream(response: Response, onFirstToken?: () => void): Promise<VerdictStreamState> {
+  if (!response.body) return emptyVerdictStreamState();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let state = emptyVerdictStreamState();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      const parsed = parseSse(buffer + decoder.decode(value ?? new Uint8Array(), { stream: !done }), done);
+      buffer = parsed.rest;
+      for (const event of parsed.events) {
+        if (event === '[DONE]') return state;
+        const next = applyVerdictStreamEvent(state, event);
+        if (next.sawToken && !state.sawToken) onFirstToken?.();
+        state = next;
+      }
+      if (done) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return state;
+}
+
+async function consumeVerdictResponse(
+  response: Response,
+  onFirstToken?: () => void,
+  asStream = true,
+): Promise<{ json: string | null; finish?: string; sawToken: boolean }> {
+  const ctype = response.headers.get('content-type') ?? '';
+  const isJson = ctype.includes('application/json');
+  const isSse = ctype.includes('text/event-stream') || ctype.includes('text/plain') || (!ctype && Boolean(response.body));
+  if (asStream && !isJson && isSse) {
+    const state = await readVerdictStream(response, onFirstToken);
+    return { json: streamJson(state), finish: state.finish, sawToken: state.sawToken };
+  }
+  const raw = await response.text();
+  const extracted = extractVerdictCompletion(raw);
+  if (extracted.json || raw.trim()) onFirstToken?.();
+  return { ...extracted, sawToken: Boolean(extracted.json || raw.trim()) };
+}
+
 type JsonOk = { ok: true; content: string };
 type JsonFail = { ok: false; error: string; retryLater?: boolean };
 
@@ -113,44 +198,90 @@ export type VerdictGenerateOptions = {
   acquireTimeoutMs?: number;
 };
 
+function providerAbortSignal(user?: AbortSignal) {
+  const hard = new AbortController();
+  let ttftTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => hard.abort(), VERDICT_TTFT_MS);
+  const hardTimer = setTimeout(() => hard.abort(), VERDICT_HARD_ABORT_MS);
+  const signal = user ? AbortSignal.any([user, hard.signal]) : hard.signal;
+  return {
+    signal,
+    releaseOnFirstToken() {
+      if (!ttftTimer) return;
+      clearTimeout(ttftTimer);
+      ttftTimer = null;
+    },
+    dispose() {
+      if (ttftTimer) {
+        clearTimeout(ttftTimer);
+        ttftTimer = null;
+      }
+      clearTimeout(hardTimer);
+    },
+  };
+}
+
 async function completeFromProvider(
   provider: LlmProvider,
   richBody: Record<string, unknown>,
   plainBody: Record<string, unknown>,
-  options: { signal?: AbortSignal; timeoutMs: number },
+  options: { signal?: AbortSignal },
 ): Promise<JsonOk | JsonFail> {
-  let upstream: Response;
+  const abort = providerAbortSignal(options.signal);
+  const fetchOpts = {
+    signal: abort.signal,
+    timeoutMs: VERDICT_HARD_ABORT_MS,
+    maxAttempts: 2 as const,
+    keepAbortAlive: true,
+  };
+  const open = (body: Record<string, unknown>) => fetchChatCompletionsFrom(provider, { ...body, stream: true }, fetchOpts);
   try {
-    upstream = await fetchChatCompletionsFrom(provider, richBody, { ...options, maxAttempts: 2 });
-  } catch (error) {
-    if (options.signal?.aborted) throw error;
-    return { ok: false, error: formatLlmCallError(error) };
-  }
-  if (!upstream.ok) {
-    const failed = await upstream.text().catch(() => '');
-    console.warn('[verdict] json_object request failed', { provider: provider.id, status: upstream.status, body: failed.slice(0, 400) });
-    if (upstream.status >= 400 && upstream.status < 500 && upstream.status !== 429) {
-      try {
-        upstream = await fetchChatCompletionsFrom(provider, plainBody, { ...options, maxAttempts: 2 });
-      } catch (error) {
-        if (options.signal?.aborted) throw error;
-        return { ok: false, error: formatLlmCallError(error) };
+    let usedStream = true;
+    let upstream: Response;
+    try {
+      upstream = await open(richBody);
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      return { ok: false, error: formatLlmCallError(error) };
+    }
+    if (!upstream.ok) {
+      const failed = await upstream.text().catch(() => '');
+      console.warn('[verdict] json_object request failed', { provider: provider.id, status: upstream.status, body: failed.slice(0, 400) });
+      if (upstream.status >= 400 && upstream.status < 500 && upstream.status !== 429) {
+        try {
+          upstream = await open(plainBody);
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
+          return { ok: false, error: formatLlmCallError(error) };
+        }
+        if (!upstream.ok && upstream.status >= 400 && upstream.status < 500 && upstream.status !== 429) {
+          const streamFailed = await upstream.text().catch(() => '');
+          console.warn('[verdict] stream request failed, retrying without stream', { provider: provider.id, status: upstream.status, body: streamFailed.slice(0, 400) });
+          try {
+            usedStream = false;
+            abort.releaseOnFirstToken();
+            upstream = await fetchChatCompletionsFrom(provider, plainBody, fetchOpts);
+          } catch (error) {
+            if (options.signal?.aborted) throw error;
+            return { ok: false, error: formatLlmCallError(error) };
+          }
+        }
+      } else {
+        return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
       }
-    } else {
+    }
+    if (!upstream.ok) {
+      const failed = await upstream.text().catch(() => '');
+      console.warn('[verdict] model http', { provider: provider.id, status: upstream.status });
       return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
     }
+    const extracted = await consumeVerdictResponse(upstream, () => abort.releaseOnFirstToken(), usedStream);
+    if (extracted.json) return { ok: true, content: extracted.json };
+    console.warn('[verdict] empty model content', { provider: provider.id, finish: extracted.finish, sawToken: extracted.sawToken });
+    if (extracted.finish === 'length') return { ok: false, error: '模型输出被截断，已跳过本份。' };
+    return { ok: false, error: 'AI 返回空内容，请稍后再试。' };
+  } finally {
+    abort.dispose();
   }
-  if (!upstream.ok) {
-    const failed = await upstream.text().catch(() => '');
-    console.warn('[verdict] model http', { provider: provider.id, status: upstream.status });
-    return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
-  }
-  const raw = await upstream.text();
-  const extracted = extractVerdictCompletion(raw);
-  if (extracted.json) return { ok: true, content: extracted.json };
-  console.warn('[verdict] empty model content', { provider: provider.id, finish: extracted.finish });
-  if (extracted.finish === 'length') return { ok: false, error: '模型输出被截断，已跳过本份。' };
-  return { ok: false, error: 'AI 返回空内容，请稍后再试。' };
 }
 
 async function completeJson(
@@ -161,7 +292,6 @@ async function completeJson(
   if (!llmConfigured()) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   const tokens = Number(process.env.LLM_MAX_TOKENS ?? 6000);
   const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 6000), 8192) : 6000;
-  const callTimeoutMs = options.timeoutMs ?? timeoutMs();
   const richBody = {
     temperature: 0,
     max_tokens: maxTokens,
@@ -176,17 +306,10 @@ async function completeJson(
   if (!providers.length) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   try {
     return await withLlmSlot(async () => {
-      const started = Date.now();
-      const remaining = () => Math.max(1000, callTimeoutMs - (Date.now() - started));
       let lastError = 'AI 返回空内容，请稍后再试。';
-      for (let index = 0; index < providers.length; index++) {
-        const provider = providers[index];
-        const isLast = index === providers.length - 1;
-        if (!isLast && remaining() < 3_000) continue;
-        const timeoutForProvider = isLast ? remaining() : Math.min(remaining(), failoverCapMs());
+      for (const provider of providers) {
         const content = await completeFromProvider(provider, richBody, plainBody, {
           signal: options.signal,
-          timeoutMs: timeoutForProvider,
         });
         if (!content.ok) {
           lastError = content.error;

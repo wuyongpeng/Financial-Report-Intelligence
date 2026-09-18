@@ -17,8 +17,9 @@ type VerdictRow = {
 };
 
 const inflight = new Map<string, Promise<ReportVerdict | null>>();
-const STALE_MS = 8 * 60 * 1000;
-const WAIT_MS = 8 * 60 * 1000;
+export const VERDICT_PENDING_STALE_MS = 20 * 60 * 1000;
+const WAIT_MS = 20 * 60 * 1000;
+const HEARTBEAT_MS = 20_000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -39,7 +40,24 @@ async function loadRow(reportId: string): Promise<VerdictRow | null> {
 
 function isStale(row: VerdictRow) {
   const updated = Date.parse(row.updated_at);
-  return !Number.isFinite(updated) || Date.now() - updated > STALE_MS;
+  return !Number.isFinite(updated) || Date.now() - updated > VERDICT_PENDING_STALE_MS;
+}
+
+async function heartbeatVerdictPending(reportId: string) {
+  await getDb()`
+    UPDATE report_verdicts SET updated_at=NOW()
+    WHERE announcement_id=${reportId} AND status='pending'
+  `.catch(() => undefined);
+}
+
+async function generateWithHeartbeat(reportId: string, options?: VerdictGenerateOptions) {
+  const beat = setInterval(() => { void heartbeatVerdictPending(reportId); }, HEARTBEAT_MS);
+  beat.unref?.();
+  try {
+    return await generateReportVerdict(reportId, options);
+  } finally {
+    clearInterval(beat);
+  }
 }
 
 async function markReady(reportId: string, payload: ReportVerdict) {
@@ -84,7 +102,7 @@ async function claimGenerate(reportId: string) {
     SET status='pending', error=NULL, updated_at=NOW()
     WHERE announcement_id=${reportId}
       AND status='pending'
-      AND updated_at < NOW() - INTERVAL '8 minutes'
+      AND updated_at < NOW() - INTERVAL '20 minutes'
     RETURNING announcement_id
   `;
   return reclaimed.length > 0;
@@ -118,7 +136,7 @@ async function runGenerate(reportId: string, claimed: boolean): Promise<ReportVe
       WHERE announcement_id=${reportId}
     `;
     try {
-      const generated = await generateReportVerdict(reportId);
+      const generated = await generateWithHeartbeat(reportId);
       if (generated.ok) {
         await markReady(reportId, generated.value);
         return generated.value;
@@ -293,7 +311,7 @@ export async function countDueVerdictJobs(failBackoffMs = 30 * 60_000) {
       AND (
         v.announcement_id IS NULL
         OR (v.status = 'failed' AND v.updated_at < NOW() - ${failBackoffSec} * INTERVAL '1 second')
-        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '8 minutes')
+        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '20 minutes')
       )
   `;
   return row?.n ?? 0;
@@ -312,7 +330,7 @@ export async function listDueVerdictJobs(limit = 12, failBackoffMs = 30 * 60_000
       AND (
         v.announcement_id IS NULL
         OR (v.status = 'failed' AND v.updated_at < NOW() - ${failBackoffSec} * INTERVAL '1 second')
-        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '8 minutes')
+        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '20 minutes')
       )
     ORDER BY a.published_at DESC
     LIMIT ${cap}
@@ -355,7 +373,7 @@ export async function runQueuedVerdict(
     ON CONFLICT (announcement_id) DO UPDATE SET status='pending', error=NULL, updated_at=NOW()
   `;
   try {
-    const generated = await generateReportVerdict(reportId, options);
+    const generated = await generateWithHeartbeat(reportId, options);
     if (generated.ok) {
       await markReady(reportId, generated.value);
       return { outcome: 'ok', error: null };
