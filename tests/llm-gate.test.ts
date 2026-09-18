@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fetchChatCompletions, isLlmSlotBusyError, llmRetryDelayMs, probeLlmProvider, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
+import { fetchChatCompletions, isLlmSlotBusyError, llmRetryDelayMs, probeLlmProvider, probeLlmProviders, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
 
 test('retries only HTTP 429', () => {
   assert.equal(shouldRetryLlmStatus(429), true);
@@ -172,4 +172,32 @@ test('probeLlmProvider reports ok reply and HTTP errors without retrying', async
   } finally {
     globalThis.fetch = orig;
   }
+});
+
+test('probeLlmProviders pings models in parallel', async () => {
+  await withLlmEnv({
+    LLM_BASE_URL: 'http://gw.invalid/v1',
+    LLM_API_KEY: 'k',
+    LLM_MODEL: 'm1',
+    LLM_MODELS: 'm1,m2',
+  }, async () => {
+    const orig = globalThis.fetch;
+    let inflight = 0;
+    let maxInflight = 0;
+    globalThis.fetch = (async () => {
+      inflight += 1;
+      maxInflight = Math.max(maxInflight, inflight);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      inflight -= 1;
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const results = await probeLlmProviders(500);
+      assert.equal(results.length, 2);
+      assert.ok(results.every((item) => item.ok));
+      assert.equal(maxInflight, 2);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
 });

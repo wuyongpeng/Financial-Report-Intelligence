@@ -2,7 +2,8 @@
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { amount, anomaliesConclusion, attributionConclusion, cashConversion, change, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
-import { acceptVerdictPayload, changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
+import { changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
+import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
 import { citeFilingLabel, citeHoverText, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '@/lib/answer-cite';
@@ -407,14 +408,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const toastTimer = window.setTimeout(() => {
       if (!abort.signal.aborted) setQuietToast({ text: '正在生成本期智析', at: Date.now() });
     }, 400);
-    void fetch(`/api/reports/${encodeURIComponent(selected.id)}/verdict`, { signal: abort.signal, cache: 'no-store' })
-      .then(async (r) => {
-        if (!r.ok) {
-          const payload = await r.json().catch(() => ({})) as { error?: string };
-          throw new Error(typeof payload.error === 'string' ? payload.error : '');
-        }
-        const parsedVerdict = acceptVerdictPayload(await r.json());
-        if (!parsedVerdict) throw new Error('AI 返回格式无法解析，请稍后再试。');
+    void requestReportVerdict(selected.id, { signal: abort.signal })
+      .then((parsedVerdict) => {
         if (abort.signal.aborted) return;
         window.clearTimeout(toastTimer);
         setVerdict(parsedVerdict);
@@ -438,16 +433,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setVerdictRefreshing(true);
     setVerdictError('');
     try {
-      const response = await fetch(`/api/reports/${encodeURIComponent(selected.id)}/verdict`, {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ refresh: true }),
-      });
-      const payload = await response.json().catch(() => ({})) as { error?: string } & Record<string, unknown>;
-      if (!response.ok) throw new Error(typeof payload.error === 'string' ? payload.error : '');
-      const parsed = acceptVerdictPayload(payload);
-      if (!parsed) throw new Error('AI 返回格式无法解析，请稍后再试。');
+      const parsed = await requestReportVerdict(selected.id, { refresh: true });
       setVerdict(parsed);
       setVerdictStatus('ready');
       setVerdictError('');

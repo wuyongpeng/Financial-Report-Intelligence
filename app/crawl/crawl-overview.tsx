@@ -19,6 +19,7 @@ import {
   type CrawlStats,
 } from '@/lib/crawl-display';
 import { parseHomeQuery, queryMatchesCompany } from '@/lib/home-search';
+import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { Icon } from '../ui-icons';
 import './crawl-overview.css';
 
@@ -857,13 +858,10 @@ export default function CrawlOverview() {
     try {
       for (const item of jobs) {
         try {
-          const response = mode === 'verdict'
-            ? await fetch(`/api/reports/${encodeURIComponent(item.announcementId!)}/verdict`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ fill: true }),
-            })
-            : await fetch('/api/crawl/trigger', {
+          if (mode === 'verdict') {
+            await requestReportVerdict(item.announcementId!, { fill: true });
+          } else {
+            const response = await fetch('/api/crawl/trigger', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify(mode === 'crawl'
@@ -882,8 +880,9 @@ export default function CrawlOverview() {
                     ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
                   }),
             });
-          const payload = await response.json() as { ok?: boolean; error?: string };
-          if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
+            const payload = await response.json() as { ok?: boolean; error?: string };
+            if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
+          }
           done += 1;
         } catch {
           failed += 1;
@@ -1364,14 +1363,7 @@ export default function CrawlOverview() {
     patchRowBusy(busyId, 'verdict', true);
     setTriggerMsg(`正在智析 ${label}…`);
     try {
-      const response = await fetch(`/api/reports/${encodeURIComponent(chosen.announcementId)}/verdict`, {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(refresh ? { refresh: true } : { fill: true }),
-      });
-      const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? '智析失败');
+      await requestReportVerdict(chosen.announcementId, refresh ? { refresh: true } : { fill: true });
       setTriggerMsg(`已完成智析 ${label}`);
       await refreshCoverage();
       await refreshLive();

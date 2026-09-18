@@ -145,6 +145,32 @@ export async function loadStoredVerdict(reportId: string): Promise<ReportVerdict
   return asVerdict(row.payload);
 }
 
+export type VerdictPeek = {
+  status: 'ready' | 'pending' | 'failed' | 'absent';
+  value: ReportVerdict | null;
+  error: string | null;
+  stale: boolean;
+};
+
+export async function peekReportVerdict(reportId: string): Promise<VerdictPeek> {
+  const row = await loadRow(reportId);
+  if (!row) return { status: 'absent', value: null, error: null, stale: false };
+  if (row.status === 'ready') {
+    const value = asVerdict(row.payload);
+    if (value) return { status: 'ready', value, error: null, stale: false };
+    return { status: 'failed', value: null, error: 'AI 返回格式无法解析，请稍后再试。', stale: false };
+  }
+  if (row.status === 'failed') {
+    return {
+      status: 'failed',
+      value: null,
+      error: publicVerdictError(row.error || 'AI 概览暂时无法生成，请稍后再试。'),
+      stale: false,
+    };
+  }
+  return { status: 'pending', value: null, error: null, stale: isStale(row) };
+}
+
 /** First visit generates once and writes to DB; later visits only read. */
 export async function getOrCreateReportVerdict(reportId: string): Promise<ReportVerdict | null> {
   const row = await loadRow(reportId);

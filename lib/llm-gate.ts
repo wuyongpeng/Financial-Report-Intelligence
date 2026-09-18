@@ -307,10 +307,5 @@ export async function probeLlmProvider(provider: LlmProvider, timeoutMs = 12_000
 }
 
 export async function probeLlmProviders(timeoutMs = 12_000): Promise<LlmProbeResult[]> {
-  const providers = parseLlmProviders();
-  const out: LlmProbeResult[] = [];
-  for (const provider of providers) {
-    out.push(await probeLlmProvider(provider, timeoutMs));
-  }
-  return out;
+  return Promise.all(parseLlmProviders().map((provider) => probeLlmProvider(provider, timeoutMs)));
 }
