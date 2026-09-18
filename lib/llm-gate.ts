@@ -198,6 +198,14 @@ async function fetchFromProvider(
   return last!;
 }
 
+export async function fetchChatCompletionsFrom(
+  provider: LlmProvider,
+  body: unknown,
+  options: { signal?: AbortSignal; timeoutMs: number; maxAttempts?: number },
+) {
+  return fetchFromProvider(provider, body, options);
+}
+
 /** One in-flight LLM call across this process and other local processes sharing the lock file. */
 export async function withLlmSlot<T>(
   fn: () => Promise<T>,
@@ -274,13 +282,51 @@ function providerHost(item: LlmProvider) {
   }
 }
 
+function flattenModelText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(flattenModelText).join('');
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>;
+    if (typeof item.text === 'string') return item.text;
+    if (typeof item.content === 'string') return item.content;
+  }
+  return '';
+}
+
+function visibleAssistantText(text: string) {
+  const stripped = text.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, ' ');
+  if (/<think\b/i.test(stripped)) return '';
+  return stripped.replace(/\s+/g, ' ').trim();
+}
+
+/** Visible reply for a connectivity ping. Reasoning/think-only still counts as connected. */
+export function extractProbeReply(raw: string): { connected: boolean; reply: string } {
+  try {
+    const payload = JSON.parse(raw) as {
+      choices?: Array<{
+        text?: unknown;
+        message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+      }>;
+    };
+    const choice = payload.choices?.[0];
+    const message = choice?.message;
+    const content = flattenModelText(message?.content ?? choice?.text);
+    const reasoning = flattenModelText(message?.reasoning_content ?? message?.reasoning);
+    const connected = Boolean(content.replace(/\s+/g, '').trim() || reasoning.replace(/\s+/g, '').trim());
+    return { connected, reply: visibleAssistantText(content) };
+  } catch {
+    const reply = visibleAssistantText(raw);
+    return { connected: Boolean(reply), reply };
+  }
+}
+
 /** Direct per-provider ping. Does not take the global LLM slot so it can diagnose a stuck queue. */
 export async function probeLlmProvider(provider: LlmProvider, timeoutMs = 12_000): Promise<LlmProbeResult> {
   const meta = { id: provider.id, model: provider.model, host: providerHost(provider) };
   const started = Date.now();
   const body = {
     temperature: 0,
-    max_tokens: 16,
+    max_tokens: 64,
     messages: [{ role: 'user', content: '直接回复ok' }],
   };
   try {
@@ -290,17 +336,11 @@ export async function probeLlmProvider(provider: LlmProvider, timeoutMs = 12_000
     if (!response.ok) {
       return { ...meta, ok: false, latencyMs, status: response.status, error: formatLlmHttpError(response.status, raw) };
     }
-    let reply = '';
-    try {
-      const payload = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string } }> };
-      reply = (payload.choices?.[0]?.message?.content ?? '').replace(/\s+/g, ' ').trim();
-    } catch {
-      reply = raw.replace(/\s+/g, ' ').trim();
-    }
-    if (!reply) {
+    const extracted = extractProbeReply(raw);
+    if (!extracted.connected) {
       return { ...meta, ok: false, latencyMs, status: response.status, error: '模型返回空内容' };
     }
-    return { ...meta, ok: true, latencyMs, status: response.status, reply: reply.slice(0, 80) };
+    return { ...meta, ok: true, latencyMs, status: response.status, reply: extracted.reply.slice(0, 80) || undefined };
   } catch (error) {
     return { ...meta, ok: false, latencyMs: Date.now() - started, error: formatLlmCallError(error) };
   }

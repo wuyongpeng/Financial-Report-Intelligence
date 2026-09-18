@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acceptVerdictPayload, followupFromTitle, followupQuestions, parseReportVerdict, parseReportVerdictJson, targetedFollowups, verdictTone, type ReportVerdict } from '../lib/report-verdict';
+import { acceptVerdictPayload, followupFromTitle, followupQuestions, parseReportVerdict, parseReportVerdictJson, targetedFollowups, unwrapModelJson, verdictTone, type ReportVerdict } from '../lib/report-verdict';
 import type { Citation } from '../lib/detail-model';
 
 const evidence: Citation[] = [
@@ -69,6 +69,13 @@ test('JSON parser does not repair fenced or partial model output', () => {
   assert.equal(parseReportVerdictJson(`\`\`\`json\n${ok}\n\`\`\``, evidence), null);
   assert.equal(parseReportVerdictJson(`${ok.slice(0, 40)}`, evidence), null);
   assert.equal(parseReportVerdictJson('undefined', evidence), null);
+});
+
+test('unwrapModelJson strips think tags and fences then keeps the JSON object', () => {
+  const ok = JSON.stringify(valid());
+  assert.equal(unwrapModelJson(`<think>先推理</think>\n${ok}`), ok);
+  assert.equal(unwrapModelJson(`\`\`\`json\n${ok}\n\`\`\``), ok);
+  assert.equal(unwrapModelJson('<think>还在想'), null);
 });
 
 test('accepts API payloads whose sourceRef is already hydrated citations', () => {

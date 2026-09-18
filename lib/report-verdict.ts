@@ -201,6 +201,33 @@ export function parseReportVerdict(raw: unknown, evidence: Citation[]): ReportVe
   return { verdict: { label: label as VerdictLabel, summary }, changes, modules };
 }
 
+/** Pull a JSON object out of think-tags / fences. Stored payloads still use parseReportVerdictJson. */
+export function unwrapModelJson(text: string): string | null {
+  const stripped = text
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '\n')
+    .replace(/<think\b[^>]*>[\s\S]*$/gi, '\n')
+    .trim();
+  if (!stripped) return null;
+  const unfenced = stripped.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const slices: string[] = [];
+  if (unfenced.startsWith('{')) slices.push(unfenced);
+  const start = unfenced.indexOf('{');
+  const end = unfenced.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    const inner = unfenced.slice(start, end + 1);
+    if (inner !== slices[0]) slices.push(inner);
+  }
+  for (const item of slices) {
+    try {
+      const parsed = JSON.parse(item) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return item;
+    } catch {
+      /* next candidate */
+    }
+  }
+  return null;
+}
+
 /** Parse model output as JSON only. No fence stripping or free-text repair. */
 export function parseReportVerdictJson(text: string, evidence: Citation[]): ReportVerdict | null {
   const trimmed = text.trim();

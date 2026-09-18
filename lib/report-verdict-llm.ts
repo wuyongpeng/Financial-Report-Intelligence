@@ -1,7 +1,8 @@
+import type { Citation } from './detail-model';
 import { loadRagContext } from './rag';
-import { parseReportVerdictJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
-import { fetchChatCompletions, isLlmSlotBusyError, withLlmSlot } from './llm-gate';
-import { llmConfigured } from './llm-providers';
+import { parseReportVerdictJson, unwrapModelJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
+import { fetchChatCompletionsFrom, isLlmSlotBusyError, withLlmSlot } from './llm-gate';
+import { llmConfigured, parseLlmProviders, type LlmProvider } from './llm-providers';
 import { formatLlmCallError, formatLlmHttpError } from './llm-error';
 
 export const VERDICT_QUESTION = '本期财报整体怎么看？营业收入、净利润、每股收益、净资产收益率、营业成本、毛利率、经营现金流、资产负债有哪些真正值得关注的同比变化？主营业务在产品、地区或分部上的收入结构有哪些原文明确写出的变化？管理层讨论与分析是否写了净利润变动原因？请结合原文中的具体数字。';
@@ -49,6 +50,44 @@ function timeoutMs() {
   return Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 180_000) : 90_000;
 }
 
+function failoverCapMs() {
+  const raw = Number(process.env.LLM_FAILOVER_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw > 0) return Math.max(raw, 1000);
+  return 45_000;
+}
+
+function flattenModelText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(flattenModelText).join('');
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>;
+    if (typeof item.text === 'string') return item.text;
+    if (typeof item.content === 'string') return item.content;
+  }
+  return '';
+}
+
+/** Visible JSON from a chat.completions body. Empty content must not hide a later JSON object. */
+export function extractVerdictCompletion(raw: string): { json: string | null; finish?: string } {
+  try {
+    const payload = JSON.parse(raw) as {
+      choices?: Array<{
+        finish_reason?: string;
+        text?: unknown;
+        message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown };
+      }>;
+    };
+    const choice = payload.choices?.[0];
+    const message = choice?.message;
+    const content = flattenModelText(message?.content ?? choice?.text);
+    const reasoning = flattenModelText(message?.reasoning_content ?? message?.reasoning);
+    const json = unwrapModelJson(content) ?? unwrapModelJson(reasoning) ?? unwrapModelJson(`${content}\n${reasoning}`);
+    return { json, finish: choice?.finish_reason };
+  } catch {
+    return { json: unwrapModelJson(raw) };
+  }
+}
+
 type JsonOk = { ok: true; content: string };
 type JsonFail = { ok: false; error: string; retryLater?: boolean };
 
@@ -58,53 +97,93 @@ export type VerdictGenerateOptions = {
   acquireTimeoutMs?: number;
 };
 
+async function completeFromProvider(
+  provider: LlmProvider,
+  richBody: Record<string, unknown>,
+  plainBody: Record<string, unknown>,
+  options: { signal?: AbortSignal; timeoutMs: number },
+): Promise<JsonOk | JsonFail> {
+  let upstream: Response;
+  try {
+    upstream = await fetchChatCompletionsFrom(provider, richBody, { ...options, maxAttempts: 2 });
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    return { ok: false, error: formatLlmCallError(error) };
+  }
+  if (!upstream.ok) {
+    const failed = await upstream.text().catch(() => '');
+    console.warn('[verdict] json_object request failed', { provider: provider.id, status: upstream.status, body: failed.slice(0, 400) });
+    if (upstream.status >= 400 && upstream.status < 500 && upstream.status !== 429) {
+      try {
+        upstream = await fetchChatCompletionsFrom(provider, plainBody, { ...options, maxAttempts: 2 });
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        return { ok: false, error: formatLlmCallError(error) };
+      }
+    } else {
+      return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
+    }
+  }
+  if (!upstream.ok) {
+    const failed = await upstream.text().catch(() => '');
+    console.warn('[verdict] model http', { provider: provider.id, status: upstream.status });
+    return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
+  }
+  const raw = await upstream.text();
+  const extracted = extractVerdictCompletion(raw);
+  if (extracted.json) return { ok: true, content: extracted.json };
+  console.warn('[verdict] empty model content', { provider: provider.id, finish: extracted.finish });
+  if (extracted.finish === 'length') return { ok: false, error: '模型输出被截断，已跳过本份。' };
+  return { ok: false, error: 'AI 返回空内容，请稍后再试。' };
+}
+
 async function completeJson(
   messages: Array<{ role: string; content: string }>,
+  evidence: Citation[],
   options: VerdictGenerateOptions = {},
-): Promise<JsonOk | JsonFail> {
+): Promise<VerdictGenerateResult> {
   if (!llmConfigured()) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   const tokens = Number(process.env.LLM_MAX_TOKENS ?? 6000);
   const maxTokens = Number.isFinite(tokens) ? Math.min(Math.max(tokens, 6000), 8192) : 6000;
   const callTimeoutMs = options.timeoutMs ?? timeoutMs();
-  const body = {
+  const richBody = {
     temperature: 0,
     max_tokens: maxTokens,
-    response_format: { type: 'json_object' },
+    response_format: { type: 'json_object' as const },
     enable_thinking: false,
+    thinking: { type: 'disabled' },
+    chat_template_kwargs: { enable_thinking: false },
     messages,
   };
+  const plainBody = { temperature: 0, max_tokens: maxTokens, messages };
+  const providers = parseLlmProviders();
+  if (!providers.length) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   try {
     return await withLlmSlot(async () => {
       const started = Date.now();
       const remaining = () => Math.max(1000, callTimeoutMs - (Date.now() - started));
-      let upstream = await fetchChatCompletions(body, { signal: options.signal, timeoutMs: remaining() });
-      if (!upstream.ok) {
-        const failed = await upstream.text().catch(() => '');
-        console.warn('[verdict] json_object request failed', { status: upstream.status, body: failed.slice(0, 400) });
-        if (upstream.status >= 400 && upstream.status < 500 && upstream.status !== 429) {
-          const fallback = { temperature: body.temperature, max_tokens: body.max_tokens, messages: body.messages };
-          upstream = await fetchChatCompletions(fallback, { signal: options.signal, timeoutMs: remaining() });
-        } else {
-          return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
+      let lastError = 'AI 返回空内容，请稍后再试。';
+      for (let index = 0; index < providers.length; index++) {
+        const provider = providers[index];
+        const isLast = index === providers.length - 1;
+        if (!isLast && remaining() < 3_000) continue;
+        const timeoutForProvider = isLast ? remaining() : Math.min(remaining(), failoverCapMs());
+        const content = await completeFromProvider(provider, richBody, plainBody, {
+          signal: options.signal,
+          timeoutMs: timeoutForProvider,
+        });
+        if (!content.ok) {
+          lastError = content.error;
+          if (content.retryLater) return content;
+          console.warn('[verdict] provider unusable', { provider: provider.id, model: provider.model, error: content.error });
+          continue;
         }
+        const parsed = parseReportVerdictJson(content.content, evidence);
+        if (parsed) return { ok: true, value: parsed };
+        lastError = 'AI 返回格式无法解析，请稍后再试。';
+        console.warn('[verdict] schema rejected', { provider: provider.id, preview: content.content.slice(0, 240) });
       }
-      if (!upstream.ok) {
-        const failed = await upstream.text().catch(() => '');
-        console.warn('[verdict] model http', upstream.status);
-        return { ok: false, error: formatLlmHttpError(upstream.status, failed) };
-      }
-      const payload = await upstream.json() as {
-        choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
-      };
-      const message = payload.choices?.[0]?.message;
-      const finish = payload.choices?.[0]?.finish_reason;
-      const content = (message?.content ?? message?.reasoning_content ?? '').trim();
-      if (!content) {
-        console.warn('[verdict] empty model content', { finish, keys: message ? Object.keys(message) : [] });
-        if (finish === 'length') return { ok: false, error: '模型输出被截断，已跳过本份。' };
-        return { ok: false, error: 'AI 返回空内容，请稍后再试。' };
-      }
-      return { ok: true, content };
+      return { ok: false, error: lastError };
     }, options.signal, options.acquireTimeoutMs);
   } catch (error) {
     if (isLlmSlotBusyError(error)) return { ok: false, error: 'LLM 正被占用，稍后重试。', retryLater: true };
@@ -126,15 +205,8 @@ export async function generateReportVerdict(
   if (!context.metrics.length && !context.passages.length) {
     return { ok: false, error: '本期缺少可分析的指标和原文，未调用 AI。' };
   }
-  const content = await completeJson([
+  return completeJson([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: verdictUserPrompt(context.structuredContext, context.passages, context.evidence.map((item) => item.id)) },
-  ], options);
-  if (!content.ok) return content;
-  const parsed = parseReportVerdictJson(content.content, context.evidence);
-  if (!parsed) {
-    console.warn('[verdict] schema rejected', { preview: content.content.slice(0, 240) });
-    return { ok: false, error: 'AI 返回格式无法解析，请稍后再试。' };
-  }
-  return { ok: true, value: parsed };
+  ], context.evidence, options);
 }

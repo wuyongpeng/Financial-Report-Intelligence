@@ -6,7 +6,7 @@ import {
   markVerdictPending,
   executeReportVerdict,
   refreshReportVerdict,
-  hasInflightVerdict,
+  shouldKickVerdictJob,
 } from '@/lib/report-verdict-store';
 
 export const dynamic = 'force-dynamic';
@@ -25,14 +25,11 @@ function pending() {
 
 function startVerdict(id: string, refresh: boolean) {
   enqueuePriorityVerdict(id);
-  after(async () => {
-    try {
-      if (refresh) await refreshReportVerdict(id);
-      else await executeReportVerdict(id);
-    } catch (error) {
+  const work = (refresh ? refreshReportVerdict(id) : executeReportVerdict(id))
+    .catch((error) => {
       console.error('[verdict] background generate failed', error);
-    }
-  });
+    });
+  after(() => work);
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -41,12 +38,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const peek = await peekReportVerdict(id);
     if (peek.status === 'ready' && peek.value) return json(peek.value);
     if (peek.status === 'failed') return unavailable(peek.error);
-    const needsStart = peek.status === 'absent' || peek.stale || peek.ageMs > 8_000 || !hasInflightVerdict(id);
-    if (needsStart) {
-      if (peek.status !== 'pending' || peek.stale) {
-        const claimed = await markVerdictPending(id);
-        if (!claimed) return unavailable('报告不存在');
-      }
+    if (shouldKickVerdictJob(peek)) {
+      const claimed = await markVerdictPending(id);
+      if (!claimed) return unavailable('报告不存在');
       startVerdict(id, false);
     }
     return pending();

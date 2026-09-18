@@ -312,7 +312,7 @@ export async function tickVerdictQueue(): Promise<number> {
   let forceId: string | null = null;
   if (priorityId) {
     const peek = await peekReportVerdict(priorityId);
-    if (peek.status === 'pending' && !peek.stale && peek.ageMs < 12_000) {
+    if (peek.status === 'pending' && !peek.stale) {
       enqueuePriorityVerdict(priorityId);
       if (!jobs.length) return VERDICT_BUSY_MS;
     } else if (peek.status !== 'ready') {

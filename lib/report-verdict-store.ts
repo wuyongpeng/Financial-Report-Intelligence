@@ -60,6 +60,7 @@ async function markFailed(reportId: string, error: string) {
     VALUES (${reportId}, NULL, ${llmModelName()}, 'failed', ${error.slice(0, 300)}, NOW(), NOW())
     ON CONFLICT (announcement_id) DO UPDATE SET
       status='failed', error=EXCLUDED.error, model=EXCLUDED.model, updated_at=EXCLUDED.updated_at
+    WHERE report_verdicts.status IS DISTINCT FROM 'ready'
   `;
 }
 
@@ -135,6 +136,13 @@ async function runGenerate(reportId: string, claimed: boolean): Promise<ReportVe
 
 export function hasInflightVerdict(reportId: string) {
   return inflight.has(reportId);
+}
+
+/** Polling GET must not spawn a second job while pending is still owned by POST/after(). */
+export function shouldKickVerdictJob(peek: VerdictPeek) {
+  if (peek.status === 'ready' || peek.status === 'failed') return false;
+  if (peek.status === 'pending' && !peek.stale) return false;
+  return peek.status === 'absent' || peek.stale;
 }
 
 /** Claim a row as pending so GET polling sees 202 instead of a stale failed/absent state. */
@@ -336,6 +344,7 @@ export async function runQueuedVerdict(
 ): Promise<{ outcome: QueuedVerdictOutcome; error: string | null }> {
   const previous = await loadRow(reportId);
   if (previous?.status === 'ready') return { outcome: 'skip', error: null };
+  if (inflight.has(reportId)) return { outcome: 'busy', error: 'LLM 正被占用，稍后重试。' };
   if (!options.force && previous?.status === 'pending' && !isStale(previous)) return { outcome: 'skip', error: null };
   if (!(await reportExists(reportId))) return { outcome: 'skip', error: null };
 
@@ -361,8 +370,6 @@ export async function runQueuedVerdict(
     const message = publicVerdictError(error instanceof Error ? error.message : String(error));
     await markFailed(reportId, message);
     return { outcome: 'fail', error: message };
-  } finally {
-    inflight.delete(reportId);
   }
 }
 

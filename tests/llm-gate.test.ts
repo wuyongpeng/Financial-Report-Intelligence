@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fetchChatCompletions, isLlmSlotBusyError, llmRetryDelayMs, probeLlmProvider, probeLlmProviders, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
+import { extractProbeReply, fetchChatCompletions, isLlmSlotBusyError, llmRetryDelayMs, probeLlmProvider, probeLlmProviders, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
 
 test('retries only HTTP 429', () => {
   assert.equal(shouldRetryLlmStatus(429), true);
@@ -132,6 +132,24 @@ test('fetchChatCompletions does not failover on HTTP 400', async () => {
   });
 });
 
+test('extractProbeReply treats reasoning and think-only payloads as connected', () => {
+  assert.deepEqual(extractProbeReply(JSON.stringify({
+    choices: [{ message: { content: '', reasoning_content: '用户只要 ok' } }],
+  })), { connected: true, reply: '' });
+  assert.deepEqual(extractProbeReply(JSON.stringify({
+    choices: [{ message: { content: '<think>先想一下</think>\nok' } }],
+  })), { connected: true, reply: 'ok' });
+  assert.deepEqual(extractProbeReply(JSON.stringify({
+    choices: [{ message: { content: '<think> 用户只是说直接回复ok' } }],
+  })), { connected: true, reply: '' });
+  assert.deepEqual(extractProbeReply(JSON.stringify({
+    choices: [{ message: { content: [{ type: 'text', text: 'ok' }] } }],
+  })), { connected: true, reply: 'ok' });
+  assert.deepEqual(extractProbeReply(JSON.stringify({
+    choices: [{ message: { content: '' } }],
+  })), { connected: false, reply: '' });
+});
+
 test('probeLlmProvider reports ok reply and HTTP errors without retrying', async () => {
   const orig = globalThis.fetch;
   let calls = 0;
@@ -150,6 +168,26 @@ test('probeLlmProvider reports ok reply and HTTP errors without retrying', async
     assert.equal(ok.ok, true);
     assert.equal(ok.reply, 'ok');
     assert.equal(ok.host, 'ok.invalid');
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = orig;
+  }
+
+  calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: '', reasoning_content: '先分析指令' } }],
+    }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const reasoned = await probeLlmProvider({
+      id: 'primary',
+      baseUrl: 'http://ok.invalid/v1',
+      model: 'm1',
+    }, 2_000);
+    assert.equal(reasoned.ok, true);
+    assert.equal(reasoned.reply, undefined);
     assert.equal(calls, 1);
   } finally {
     globalThis.fetch = orig;
