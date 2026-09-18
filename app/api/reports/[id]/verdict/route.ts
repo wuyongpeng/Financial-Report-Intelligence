@@ -25,11 +25,18 @@ function pending() {
 
 function startVerdict(id: string, refresh: boolean) {
   enqueuePriorityVerdict(id);
-  const work = (refresh ? refreshReportVerdict(id) : executeReportVerdict(id))
-    .catch((error) => {
+  // after() cannot take a union of Promise result types; keep this Promise<void>.
+  const work: Promise<void> = (async () => {
+    try {
+      if (refresh) await refreshReportVerdict(id);
+      else await executeReportVerdict(id);
+    } catch (error) {
       console.error('[verdict] background generate failed', error);
-    });
-  after(() => work);
+    }
+  })();
+  after(async (): Promise<void> => {
+    await work;
+  });
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
