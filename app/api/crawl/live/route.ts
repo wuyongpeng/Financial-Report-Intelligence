@@ -5,8 +5,7 @@ import { getIngestControl } from '@/lib/ingest-control';
 import { buildCoveredPeriodKeys, pendingDownloadSkipReason, periodFromTitle } from '@/lib/ingest-period';
 import { getDownloadGate, getGapScanState, listIngestProgress } from '@/lib/ingest-progress';
 import { getIngestSettings, ingestPollIntervalMs } from '@/lib/ingest-settings';
-import { getVerdictQueueState } from '@/lib/verdict-queue';
-import { countReportsNeedingVerdict } from '@/lib/report-verdict-store';
+import { loadVerdictQueueView } from '@/lib/verdict-queue';
 
 export const dynamic = 'force-dynamic';
 
@@ -318,36 +317,8 @@ export async function GET() {
     const activeParseItems = [...activeParseFromDb, ...activeParseFromMem];
 
     const coverageBootstrap = getGapScanState();
-    const storedQueue = getVerdictQueueState();
-    const pendingVerdict = await countReportsNeedingVerdict().catch(() => storedQueue.pending);
-    const verdictQueue = { ...storedQueue, pending: pendingVerdict };
-    const verdictQueueItems = [
-      ...(verdictQueue.current
-        ? [{
-            code: verdictQueue.current.code,
-            name: verdictQueue.current.name,
-            label: `${verdictQueue.current.name} ${verdictQueue.current.period}`,
-            period: verdictQueue.current.period,
-            status: 'running',
-            stage: 'verdict' as const,
-            position: 1,
-            title: verdictQueue.current.title,
-            progress: verdictQueue.note || '正在智析',
-            startedAt: verdictQueue.current.startedAt,
-          }]
-        : []),
-      ...verdictQueue.upcoming.map((row, i) => ({
-        code: row.code,
-        name: row.name,
-        label: `${row.name} ${row.period}`,
-        period: row.period,
-        status: 'queued',
-        stage: 'verdict' as const,
-        position: (verdictQueue.current ? 2 : 1) + i,
-        title: row.title,
-        reason: '等待自动智析',
-      })),
-    ];
+    const verdictView = await loadVerdictQueueView(control.autoVerdictEnabled);
+    const { items: verdictQueueItems, ...verdictQueue } = verdictView;
     return Response.json({
       mode: 'live',
       running,

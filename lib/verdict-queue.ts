@@ -4,8 +4,10 @@ import { getIngestControl } from './ingest-control';
 import { llmConfigured } from './llm-providers';
 import { periodFromTitle } from './ingest-period';
 import {
+  countDueVerdictJobs,
   countReportsNeedingVerdict,
   listDueVerdictJobs,
+  listReportsNeedingVerdict,
   runQueuedVerdict,
   type VerdictQueueJob,
 } from './report-verdict-store';
@@ -133,6 +135,109 @@ export function verdictQueueDelay(outcome: VerdictQueueOutcome, cooldownRemainMs
   if (outcome === 'busy') return VERDICT_BUSY_MS;
   if (outcome === 'empty' || outcome === 'skip') return VERDICT_IDLE_MS;
   return VERDICT_PAUSE_MS;
+}
+
+export function composeVerdictQueueNote(input: {
+  enabled: boolean;
+  pending: number;
+  due: number;
+  status: string;
+  storedNote: string;
+  last?: VerdictQueueItem | null;
+}) {
+  if (!input.enabled) return '自动智析已关';
+  if (input.pending <= 0) return '队列已清空';
+  if (input.status === 'running' && input.storedNote.trim()) return input.storedNote.trim();
+  if (input.status === 'waiting_llm') return input.storedNote.trim() || '问答占用模型，稍后继续';
+  if (input.status === 'cooldown') return input.storedNote.trim() || '连续失败，冷却后再试';
+  if (input.due <= 0) return `待补 ${input.pending} 份，失败后冷却中，稍后自动重试`;
+  const base = input.storedNote.trim() || `待补 ${input.pending} 份，空闲单线程补齐，单份限 90 秒`;
+  if (input.last && input.last.ok === false && input.last.reason) {
+    return `${base} · 上次：${input.last.name} ${input.last.period} ${input.last.reason}`;
+  }
+  return base;
+}
+
+function jobReason(job: VerdictQueueJob, dueIds: Set<string>) {
+  if (job.verdict_status === 'pending') return '生成中';
+  if (job.verdict_status === 'failed') return job.verdict_error?.trim() || '失败冷却中';
+  if (dueIds.has(job.id)) return '等待自动智析';
+  return '尚未生成';
+}
+
+export type VerdictQueueViewItem = {
+  id: string;
+  code: string;
+  name: string;
+  label: string;
+  period: string;
+  status: string;
+  stage: 'verdict';
+  position: number;
+  title: string;
+  reason?: string;
+  progress?: string;
+  startedAt?: string;
+};
+
+export async function loadVerdictQueueView(enabled: boolean) {
+  const stored = getVerdictQueueState();
+  const pending = await countReportsNeedingVerdict().catch(() => stored.pending);
+  const due = await countDueVerdictJobs(VERDICT_FAIL_BACKOFF_MS).catch(() => 0);
+  const preview = await listReportsNeedingVerdict(16).catch(() => [] as VerdictQueueJob[]);
+  const dueJobs = await listDueVerdictJobs(16, VERDICT_FAIL_BACKOFF_MS).catch(() => [] as VerdictQueueJob[]);
+  const dueIds = new Set(dueJobs.map((job) => job.id));
+  const items: VerdictQueueViewItem[] = [];
+  const seen = new Set<string>();
+  if (stored.current) {
+    seen.add(stored.current.id);
+    items.push({
+      id: stored.current.id,
+      code: stored.current.code,
+      name: stored.current.name,
+      label: `${stored.current.name} ${stored.current.period}`,
+      period: stored.current.period,
+      status: 'running',
+      stage: 'verdict',
+      position: 1,
+      title: stored.current.title,
+      progress: stored.note || '正在智析',
+      startedAt: stored.current.startedAt,
+    });
+  }
+  for (const job of preview) {
+    if (seen.has(job.id)) continue;
+    seen.add(job.id);
+    const item = asItem(job);
+    items.push({
+      id: job.id,
+      code: job.code,
+      name: job.company_name,
+      label: `${item.name} ${item.period}`,
+      period: item.period,
+      status: job.verdict_status === 'failed' ? 'retry' : (dueIds.has(job.id) ? 'queued' : 'queued'),
+      stage: 'verdict',
+      position: items.length + 1,
+      title: job.title,
+      reason: jobReason(job, dueIds),
+    });
+  }
+  const note = composeVerdictQueueNote({
+    enabled,
+    pending,
+    due,
+    status: stored.status,
+    storedNote: stored.note,
+    last: stored.last,
+  });
+  return {
+    ...stored,
+    enabled,
+    pending,
+    due,
+    note,
+    items,
+  };
 }
 
 function nextIso(ms: number) {

@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fetchChatCompletions, isLlmSlotBusyError, llmRetryDelayMs, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
+import { fetchChatCompletions, isLlmSlotBusyError, llmRetryDelayMs, probeLlmProvider, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
 
 test('retries only HTTP 429', () => {
   assert.equal(shouldRetryLlmStatus(429), true);
@@ -130,4 +130,46 @@ test('fetchChatCompletions does not failover on HTTP 400', async () => {
       globalThis.fetch = orig;
     }
   });
+});
+
+test('probeLlmProvider reports ok reply and HTTP errors without retrying', async () => {
+  const orig = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: 'ok' } }],
+    }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const ok = await probeLlmProvider({
+      id: 'primary',
+      baseUrl: 'http://ok.invalid/v1',
+      model: 'm1',
+    }, 2_000);
+    assert.equal(ok.ok, true);
+    assert.equal(ok.reply, 'ok');
+    assert.equal(ok.host, 'ok.invalid');
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = orig;
+  }
+
+  calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response('{"error":{"message":"no quota"}}', { status: 429 });
+  }) as typeof fetch;
+  try {
+    const bad = await probeLlmProvider({
+      id: 'fallback',
+      baseUrl: 'http://fail.invalid/v1',
+      model: 'm2',
+    }, 2_000);
+    assert.equal(bad.ok, false);
+    assert.match(bad.error ?? '', /429/);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = orig;
+  }
 });

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseLlmProviders, type LlmProvider } from './llm-providers';
+import { formatLlmCallError, formatLlmHttpError } from './llm-error';
 
 type LockPayload = { pid: number; at: number };
 
@@ -167,13 +168,13 @@ function providerTimeoutMs(timeoutMs: number, isLast: boolean) {
 async function fetchFromProvider(
   provider: LlmProvider,
   body: unknown,
-  options: { signal?: AbortSignal; timeoutMs: number },
+  options: { signal?: AbortSignal; timeoutMs: number; maxAttempts?: number },
 ): Promise<Response> {
   const url = `${provider.baseUrl}/chat/completions`;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;
   const payload = JSON.stringify(payloadFor(provider, body));
-  const maxAttempts = 5;
+  const maxAttempts = Math.min(Math.max(options.maxAttempts ?? 5, 1), 5);
   let last: Response | undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (options.signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
@@ -252,4 +253,64 @@ export async function fetchChatCompletions(
   }
   if (last) return last;
   throw lastError ?? new Error('LLM_BASE_URL is not configured');
+}
+
+export type LlmProbeResult = {
+  id: string;
+  model: string;
+  host: string;
+  ok: boolean;
+  latencyMs: number;
+  status?: number;
+  reply?: string;
+  error?: string;
+};
+
+function providerHost(item: LlmProvider) {
+  try {
+    return new URL(item.baseUrl).host;
+  } catch {
+    return item.baseUrl;
+  }
+}
+
+/** Direct per-provider ping. Does not take the global LLM slot so it can diagnose a stuck queue. */
+export async function probeLlmProvider(provider: LlmProvider, timeoutMs = 12_000): Promise<LlmProbeResult> {
+  const meta = { id: provider.id, model: provider.model, host: providerHost(provider) };
+  const started = Date.now();
+  const body = {
+    temperature: 0,
+    max_tokens: 16,
+    messages: [{ role: 'user', content: '直接回复ok' }],
+  };
+  try {
+    const response = await fetchFromProvider(provider, body, { timeoutMs, maxAttempts: 1 });
+    const latencyMs = Date.now() - started;
+    const raw = await response.text();
+    if (!response.ok) {
+      return { ...meta, ok: false, latencyMs, status: response.status, error: formatLlmHttpError(response.status, raw) };
+    }
+    let reply = '';
+    try {
+      const payload = JSON.parse(raw) as { choices?: Array<{ message?: { content?: string } }> };
+      reply = (payload.choices?.[0]?.message?.content ?? '').replace(/\s+/g, ' ').trim();
+    } catch {
+      reply = raw.replace(/\s+/g, ' ').trim();
+    }
+    if (!reply) {
+      return { ...meta, ok: false, latencyMs, status: response.status, error: '模型返回空内容' };
+    }
+    return { ...meta, ok: true, latencyMs, status: response.status, reply: reply.slice(0, 80) };
+  } catch (error) {
+    return { ...meta, ok: false, latencyMs: Date.now() - started, error: formatLlmCallError(error) };
+  }
+}
+
+export async function probeLlmProviders(timeoutMs = 12_000): Promise<LlmProbeResult[]> {
+  const providers = parseLlmProviders();
+  const out: LlmProbeResult[] = [];
+  for (const provider of providers) {
+    out.push(await probeLlmProvider(provider, timeoutMs));
+  }
+  return out;
 }

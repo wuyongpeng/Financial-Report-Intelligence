@@ -45,8 +45,8 @@ ${JSON.stringify(VERDICT_JSON_SCHEMA)}`;
 }
 
 function timeoutMs() {
-  const setting = Number(process.env.LLM_TIMEOUT_MS ?? 60_000);
-  return Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 120_000) : 60_000;
+  const setting = Number(process.env.LLM_TIMEOUT_MS ?? 90_000);
+  return Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 180_000) : 90_000;
 }
 
 type JsonOk = { ok: true; content: string };

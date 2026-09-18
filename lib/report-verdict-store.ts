@@ -162,11 +162,22 @@ export async function fillReportVerdict(reportId: string): Promise<ReportVerdict
   return runGenerate(reportId, false);
 }
 
+export type VerdictQueueJob = {
+  id: string;
+  code: string;
+  company_name: string;
+  title: string;
+  published_at: string;
+  verdict_status?: string | null;
+  verdict_error?: string | null;
+};
+
 export async function listReportsNeedingVerdict(limit = 5000) {
   await ensureBackendSchema();
   const cap = Math.min(Math.max(1, Math.floor(limit)), 5000);
-  return getDb()<Array<{ id: string; code: string; company_name: string; title: string }>>`
-    SELECT a.id, a.code, a.company_name, a.title
+  return getDb()<VerdictQueueJob[]>`
+    SELECT a.id, a.code, a.company_name, a.title, a.published_at,
+      v.status AS verdict_status, v.error AS verdict_error
     FROM announcements a
     JOIN companies c ON c.code=a.code AND c.enabled=true
     LEFT JOIN report_verdicts v ON v.announcement_id=a.id
@@ -177,14 +188,6 @@ export async function listReportsNeedingVerdict(limit = 5000) {
   `;
 }
 
-export type VerdictQueueJob = {
-  id: string;
-  code: string;
-  company_name: string;
-  title: string;
-  published_at: string;
-};
-
 export async function countReportsNeedingVerdict() {
   await ensureBackendSchema();
   const [row] = await getDb()<Array<{ n: number }>>`
@@ -194,6 +197,24 @@ export async function countReportsNeedingVerdict() {
     LEFT JOIN report_verdicts v ON v.announcement_id=a.id
     WHERE a.status IN ('review', 'online', 'parse_partial')
       AND (v.announcement_id IS NULL OR v.status <> 'ready')
+  `;
+  return row?.n ?? 0;
+}
+
+export async function countDueVerdictJobs(failBackoffMs = 30 * 60_000) {
+  await ensureBackendSchema();
+  const failBackoffSec = Math.max(60, Math.floor(failBackoffMs / 1000));
+  const [row] = await getDb()<Array<{ n: number }>>`
+    SELECT COUNT(*)::int AS n
+    FROM announcements a
+    JOIN companies c ON c.code=a.code AND c.enabled=true
+    LEFT JOIN report_verdicts v ON v.announcement_id=a.id
+    WHERE a.status IN ('review', 'online', 'parse_partial')
+      AND (
+        v.announcement_id IS NULL
+        OR (v.status = 'failed' AND v.updated_at < NOW() - ${failBackoffSec} * INTERVAL '1 second')
+        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '3 minutes')
+      )
   `;
   return row?.n ?? 0;
 }

@@ -78,3 +78,13 @@ export function llmConfigured(env: NodeJS.ProcessEnv = process.env) {
 export function llmModelName(env: NodeJS.ProcessEnv = process.env) {
   return parseLlmProviders(env)[0]?.model ?? env.LLM_MODEL?.trim() ?? null;
 }
+
+export function llmProviderPublicMeta(item: LlmProvider) {
+  let host = item.baseUrl;
+  try {
+    host = new URL(item.baseUrl).host;
+  } catch {
+    /* keep raw */
+  }
+  return { id: item.id, model: item.model, host };
+}

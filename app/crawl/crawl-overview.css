@@ -356,7 +356,7 @@
   color:#657185;display:grid;place-items:center;
 }
 .co-settings-close:hover{background:#e4eaf3;color:#334155}
-.co-settings-body{flex:1;overflow:visible;padding:18px;display:grid;gap:14px;align-content:start}
+.co-settings-body{flex:1;overflow:auto;padding:18px;display:grid;gap:14px;align-content:start}
 .co-settings-field{display:grid;grid-template-columns:minmax(0,1fr) 2.5em 118px;align-items:center;column-gap:8px;min-width:0}
 .co-settings-label{position:relative;display:inline-flex;align-items:center;min-width:0;font-size:13px;font-weight:600;color:#203047;cursor:pointer;width:fit-content}
 .co-settings-tip{
@@ -381,6 +381,30 @@
   display:flex;justify-content:flex-end;gap:10px;
   padding:14px 18px;border-top:1px solid var(--line);background:#fff;
 }
+.co-llm-probe{
+  margin-top:6px;padding-top:14px;border-top:1px solid var(--line);
+  display:grid;gap:8px;
+}
+.co-llm-probe-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.co-llm-probe-head strong{font-size:13px;font-weight:600;color:#203047}
+.co-llm-probe-run{
+  border:1px solid #d0d9e8;background:#f7f9fc;border-radius:8px;
+  height:28px;padding:0 10px;font-size:12px;color:#35506f;cursor:pointer;
+}
+.co-llm-probe-run:hover{background:#eef3fb;border-color:#93b0e8;color:var(--blue)}
+.co-llm-probe-run:disabled{opacity:.55;cursor:wait}
+.co-llm-probe-lead{margin:0;font-size:12px;color:#6b7a8d;line-height:1.5}
+.co-llm-probe-error{margin:0;font-size:12px;color:#dc2626}
+.co-llm-probe-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.co-llm-probe-list li{
+  display:grid;gap:2px;padding:8px 10px;border-radius:8px;border:1px solid #e4eaf3;background:#f7f9fc;
+}
+.co-llm-probe-list li.ok{background:#eef8f4;border-color:#d5eee5}
+.co-llm-probe-list li.bad{background:#fef2f2;border-color:#fecaca}
+.co-llm-probe-list b{font-size:12px;font-weight:600;color:#203047}
+.co-llm-probe-host{font-size:11px;color:#6b7a8d}
+.co-llm-probe-list em{font-style:normal;font-size:12px;color:#35506f;line-height:1.4}
+.co-llm-probe-list li.bad em{color:#dc2626}
 
 
 

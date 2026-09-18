@@ -85,6 +85,7 @@ type LivePayload = {
     enabled: boolean;
     status: string;
     pending: number;
+    due?: number;
     note: string;
     nextAt: string | null;
     current: { code: string; name: string; period: string; title: string; startedAt?: string } | null;
@@ -585,6 +586,17 @@ export default function CrawlOverview() {
   const [settingsClosing, setSettingsClosing] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft>(() => settingsDraftFromLive(null));
+  const [llmProbeBusy, setLlmProbeBusy] = useState(false);
+  const [llmProbeResults, setLlmProbeResults] = useState<Array<{
+    id: string;
+    model: string;
+    host: string;
+    ok: boolean;
+    latencyMs: number;
+    reply?: string;
+    error?: string;
+  }> | null>(null);
+  const [llmProbeError, setLlmProbeError] = useState('');
   const settingsOpenGen = useRef(0);
 
   const refreshCoverage = useCallback(async () => {
@@ -1054,6 +1066,43 @@ export default function CrawlOverview() {
     } finally {
       setAutoVerdictSaving(false);
       window.setTimeout(() => setTriggerMsg(''), 4000);
+    }
+  }
+
+  async function probeLlm() {
+    setLlmProbeBusy(true);
+    setLlmProbeError('');
+    try {
+      const response = await fetch('/api/crawl/llm-probe', { method: 'POST', cache: 'no-store' });
+      const payload = await response.json() as {
+        ok?: boolean;
+        error?: string;
+        results?: Array<{
+          id: string;
+          model: string;
+          host: string;
+          ok: boolean;
+          latencyMs: number;
+          reply?: string;
+          error?: string;
+        }>;
+      };
+      if (!response.ok) {
+        setLlmProbeError(payload.error ?? '检测失败');
+        setLlmProbeResults(null);
+        return;
+      }
+      if (payload.error && !payload.results?.length) {
+        setLlmProbeError(payload.error);
+        setLlmProbeResults([]);
+        return;
+      }
+      setLlmProbeResults(payload.results ?? []);
+    } catch (err) {
+      setLlmProbeError(`网络异常：${String(err)}`);
+      setLlmProbeResults(null);
+    } finally {
+      setLlmProbeBusy(false);
     }
   }
 
@@ -1632,21 +1681,15 @@ export default function CrawlOverview() {
                 title="点击查看自动智析队列"
                 onClick={() => setQueuePopover((v) => (v === 'verdict' ? null : 'verdict'))}
               >
-                <PulseDot on={Boolean(live?.verdictQueue?.current) || live?.verdictQueue?.status === 'running'} />
+                <PulseDot on={autoVerdictEnabled && (Boolean(live?.verdictQueue?.current) || live?.verdictQueue?.status === 'running' || (live?.verdictQueue?.pending ?? 0) > 0)} />
                 自动智析(<b>{live?.verdictQueue?.pending ?? 0}</b>)
               </button>
               <QueuePopover
                 open={queuePopover === 'verdict'}
                 title="自动智析"
                 items={live?.verdictQueueItems ?? []}
-                empty={autoVerdictEnabled ? '暂无待智析任务' : '自动智析已关'}
-                note={
-                  !autoVerdictEnabled
-                    ? '已关闭：详情页打开或批量智析仍可手动生成。'
-                    : (live?.verdictQueue?.last
-                      ? `${live.verdictQueue.note || ''}${live.verdictQueue.last.reason ? ` · 上次：${live.verdictQueue.last.name} ${live.verdictQueue.last.period} ${live.verdictQueue.last.ok ? '成功' : live.verdictQueue.last.reason}` : ''}`
-                      : (live?.verdictQueue?.note || '空闲时单线程补齐，单份限 90 秒。'))
-                }
+                empty={autoVerdictEnabled ? ((live?.verdictQueue?.pending ?? 0) > 0 ? '待补项正在冷却或等待 Worker' : '暂无待智析任务') : '自动智析已关'}
+                note={live?.verdictQueue?.note || (autoVerdictEnabled ? '空闲时单线程补齐，单份限 90 秒。' : '已关闭：详情页打开或批量智析仍可手动生成。')}
                 onClose={() => setQueuePopover(null)}
                 anchorRef={verdictBtnRef}
               />
@@ -1962,6 +2005,27 @@ export default function CrawlOverview() {
                   </div>
                 );
               })}
+              <section className="co-llm-probe" aria-label="AI 连接性">
+                <div className="co-llm-probe-head">
+                  <strong>AI 连接性</strong>
+                  <button type="button" className="co-llm-probe-run" onClick={() => void probeLlm()} disabled={llmProbeBusy}>
+                    {llmProbeBusy ? '检测中…' : '检测连接'}
+                  </button>
+                </div>
+                <p className="co-llm-probe-lead">向已配置模型发送「直接回复ok」，逐个检查连通性。</p>
+                {llmProbeError ? <p className="co-llm-probe-error" role="status">{llmProbeError}</p> : null}
+                {llmProbeResults ? (
+                  <ul className="co-llm-probe-list">
+                    {llmProbeResults.length ? llmProbeResults.map((item) => (
+                      <li key={`${item.id}-${item.model}`} className={item.ok ? 'ok' : 'bad'}>
+                        <b>{item.model}</b>
+                        <span className="co-llm-probe-host">{item.host}</span>
+                        <em>{item.ok ? `正常 · ${item.latencyMs}ms${item.reply ? ` · ${item.reply}` : ''}` : (item.error || '异常')}</em>
+                      </li>
+                    )) : <li className="bad">未配置可用模型</li>}
+                  </ul>
+                ) : null}
+              </section>
             </div>
             <footer className="co-settings-foot">
               <button type="button" className="co-confirm-cancel" onClick={closeSettings} disabled={settingsSaving}>取消</button>
