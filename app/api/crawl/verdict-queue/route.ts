@@ -102,10 +102,19 @@ export async function POST(request: Request) {
   const abortedNow = abortVerdictRun(id);
   requestVerdictAbort(id);
   // Persist the skip immediately so the queue view stops counting it even before the worker reacts.
-  markVerdictSkipped(id, {
+  const recorded = markVerdictSkipped(id, {
     reason: '用户手动中止',
     ...(running?.startedAt ? { elapsedMs: Date.now() - Date.parse(running.startedAt) } : {}),
   });
+  if (!recorded) {
+    return Response.json(
+      {
+        ok: false,
+        error: '「已跳过」列表已满，请先在采集页恢复或清理部分记录后再中止。',
+      },
+      { status: 409, headers: { 'cache-control': 'no-store' } },
+    );
+  }
 
   return Response.json(
     {
@@ -115,8 +124,9 @@ export async function POST(request: Request) {
       id,
       abortedNow,
       wasRunning: Boolean(running),
+      // worker 是独立进程，靠轮询中止请求生效，所以是「约 2 秒」而不是瞬时。
       note: running
-        ? `已中止 ${running.name} ${running.period}，已从待办中扣除；排队队首任务补位。需要时可在「已跳过」里重新智析。`
+        ? `已中止 ${running.name} ${running.period}（约 2 秒内停止模型调用），已从待办中扣除；排队队首任务补位。需要时可在「已跳过」里重新智析。`
         : '已标记跳过，该份不再自动智析；可在「已跳过」里重新智析。',
     },
     { headers: { 'cache-control': 'no-store' } },

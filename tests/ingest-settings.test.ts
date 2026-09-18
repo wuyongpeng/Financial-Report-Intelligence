@@ -13,17 +13,22 @@ test('normalizeIngestSettings treats missing or blank fields as product defaults
   assert.deepEqual(normalizeIngestSettings({ downloadPauseSec: '' as unknown as number }), DEFAULT_INGEST_SETTINGS);
 });
 
-test('智析并发默认 3，问答另有独立槽位（总槽位 = 并发 + 1）', () => {
-  assert.equal(DEFAULT_INGEST_SETTINGS.verdictLimit, 3);
-  assert.equal(llmTotalSlots(DEFAULT_INGEST_SETTINGS), 4);
-  assert.equal(llmTotalSlots({ ...DEFAULT_INGEST_SETTINGS, verdictLimit: 1 }), 2);
+test('智析并发默认 1：并发是显式开关，不是发布默认值', () => {
+  assert.equal(DEFAULT_INGEST_SETTINGS.verdictLimit, 1);
+  // 已有 ingest-settings.json 里没有 verdictLimit 时也必须落到 1，不能一部署就并发跑
+  assert.equal(normalizeIngestSettings({}).verdictLimit, 1);
+  assert.equal(normalizeIngestSettings({ downloadLimit: 2 }).verdictLimit, 1);
+});
+
+test('总槽位 = 智析并发 + 1 个问答保留槽', () => {
+  assert.equal(llmTotalSlots(DEFAULT_INGEST_SETTINGS), 2);
+  assert.equal(llmTotalSlots({ ...DEFAULT_INGEST_SETTINGS, verdictLimit: 3 }), 4);
 });
 
 test('verdictLimit 夹到 1~3，避免单个供应商被限流', () => {
   assert.equal(normalizeIngestSettings({ verdictLimit: 0 }).verdictLimit, 1);
   assert.equal(normalizeIngestSettings({ verdictLimit: 9 }).verdictLimit, 3);
   assert.equal(normalizeIngestSettings({ verdictLimit: 2 }).verdictLimit, 2);
-  assert.equal(normalizeIngestSettings({}).verdictLimit, 3);
 });
 
 test('normalizeIngestSettings clamps each field to the documented range', () => {

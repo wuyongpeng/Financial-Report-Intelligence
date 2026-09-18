@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -11,6 +11,8 @@ function freshRuntime() {
 
 const {
   ABORT_REQUEST_TTL_MS,
+  SKIP_CAP,
+  verdictSkipsFull,
   abortVerdictRun,
   clearAllVerdictSkips,
   clearVerdictSkip,
@@ -93,4 +95,30 @@ test('全部重新智析返回恢复份数', () => {
   markVerdictSkipped('s5');
   assert.equal(clearAllVerdictSkips(), 2);
   assert.equal(countVerdictSkips(), 0);
+});
+
+test('markVerdictSkipped 返回是否真的落盘', () => {
+  freshRuntime();
+  assert.equal(markVerdictSkipped('s6'), true);
+  assert.equal(markVerdictSkipped('  '), false, '空 id 不该记录');
+  assert.equal(verdictSkipsFull(), false);
+});
+
+test('跳过上限到顶时拒绝新增，绝不静默丢标记让它回自动队列', () => {
+  freshRuntime();
+  // 直接写满，避免逐条写 SKIP_CAP 次
+  const items = Array.from({ length: SKIP_CAP }, (_, i) => ({
+    id: `full-${i}`,
+    at: new Date().toISOString(),
+    reason: '用户手动中止',
+  }));
+  writeFileSync(join(process.env.RUNTIME_DIR!, 'verdict-skips.json'), `${JSON.stringify({ items })}\n`);
+
+  assert.equal(verdictSkipsFull(), true);
+  assert.equal(markVerdictSkipped('overflow-new'), false, '到顶应拒绝而非挤掉别人');
+  assert.equal(isVerdictSkipped('full-0'), true, '最旧的标记不能被丢弃');
+  assert.equal(isVerdictSkipped('overflow-new'), false);
+  // 覆盖已有记录永远允许，不受上限限制
+  assert.equal(markVerdictSkipped('full-0', { reason: '再次中止' }), true);
+  assert.equal(countVerdictSkips(), SKIP_CAP);
 });

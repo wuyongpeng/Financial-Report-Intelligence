@@ -37,6 +37,14 @@ test('verdictQueueDelay rests after work and yields quickly when the LLM slot is
   assert.equal(verdictQueueDelay('cooldown', 12_000), 12_000);
 });
 
+test('槽位繁忙的提示不再一概怪问答（问答已有独立槽）', () => {
+  const note = composeVerdictQueueNote({
+    enabled: true, pending: 5, due: 5, status: 'waiting_llm', storedNote: '',
+  });
+  assert.match(note, /模型槽位繁忙/);
+  assert.ok(!note.includes('问答占用'), '有独立问答槽后，busy 多是智析槽满或供应商限流');
+});
+
 test('中止后立刻补位，不等 15 秒的常规间隔', () => {
   assert.equal(verdictQueueDelay('aborted'), 1_000);
   assert.ok(verdictQueueDelay('aborted') < VERDICT_PAUSE_MS);
@@ -64,6 +72,10 @@ test('note 里带上并发数和已跳过份数，让中止有确定性反馈', 
   assert.match(composeVerdictQueueNote({
     enabled: true, pending: 473, due: 12, status: 'idle', storedNote: '', limit: 3,
   }), /并发 3 补齐/);
+  // 默认并发 1 时不能自称「并发 1」，那会让人以为开了并发
+  assert.match(composeVerdictQueueNote({
+    enabled: true, pending: 473, due: 12, status: 'idle', storedNote: '', limit: 1,
+  }), /单线程补齐/);
   assert.match(composeVerdictQueueNote({
     enabled: true, pending: 473, due: 12, status: 'idle', storedNote: '', limit: 3, skipped: 2,
   }), /已跳过 2 份可重新智析/);

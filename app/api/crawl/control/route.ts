@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     note = `已保存采集参数：下载间隔 ${settings.downloadPauseSec}s · 下载并发 ${settings.downloadLimit} · 解析并发 ${settings.parseLimit} · 智析并发 ${settings.verdictLimit} · 采集窗口近 ${settings.lookbackDays} 天 · 轮询间隔 ${settings.pollIntervalMin} 分钟`;
   } else if (typeof patch.autoVerdictEnabled === 'boolean' && !('autoCrawlEnabled' in patch) && !('downloadPaused' in patch)) {
     note = control.autoVerdictEnabled
-      ? `已开启自动智析：并发 ${settings.verdictLimit} 补齐未生成的概览（问答另有独立槽位不受影响），单份首字 30 秒、整段 5 分钟，可随时中止`
+      ? `已开启自动智析：${settings.verdictLimit > 1 ? `并发 ${settings.verdictLimit}` : '单线程'}补齐未生成的概览（问答有独立槽位，不会被智析占满），单份首字 30 秒、整段 5 分钟，可随时中止`
       : '已关闭自动智析：进行中的任务会结束，队列不再领取新任务';
   } else if (typeof patch.autoCrawlEnabled === 'boolean' || typeof patch.downloadPaused === 'boolean') {
     note = control.autoCrawlEnabled

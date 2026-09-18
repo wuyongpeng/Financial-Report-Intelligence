@@ -182,7 +182,7 @@ const SETTINGS_FIELDS: Array<{
   { key: 'parseLimit', label: '并发解析数量', unit: '个', hint: '闲时自动解析的并发上限，默认 1（单队列）。采集页手动解析会插到队首；详情页打开会额外并发解析，不占这支队列。' },
   { key: 'lookbackDays', label: '采集窗口', unit: '天', prefix: '最近', hint: '初始化完成后，增量扫描只看最近这些天的公告。' },
   { key: 'pollIntervalMin', label: '抓取轮询间隔', unit: '分钟', hint: '扫描新公告和财报缺口的时间间隔。保存后 Worker 会按新间隔执行。' },
-  { key: 'verdictLimit', label: '并发智析数量', unit: '个', hint: '自动智析同时进行的任务数。问答另有独立模型槽位，调高不会拖慢问答。出现大量限流时降回 1。' },
+  { key: 'verdictLimit', label: '并发智析数量', unit: '个', hint: '自动智析同时进行的任务数，默认 1。问答有独立槽位不会被智析占满，但调高会让同一家模型供应商承受更多并发请求，可能触发限流反而更慢。建议先调到 2 观察失败率，出现大量限流立即降回 1。' },
 ];
 
 function clampSetting(key: keyof SettingsDraft, raw: string): number {
@@ -1745,7 +1745,7 @@ export default function CrawlOverview() {
                 <span className="co-switch-knob" aria-hidden="true" />
               </button>
             </label>
-            <label className={`co-auto-toggle ${!autoVerdictEnabled ? 'paused' : ''}`} title={autoVerdictEnabled ? `已开启：并发 ${verdictMax} 补齐未智析财报，问答另有独立模型槽位不受影响。单份首字 30 秒、整段 5 分钟，可随时中止；失败率过高会冷却 10 分钟。` : '已关闭：不再自动领取未智析财报。详情页和批量智析仍可手动生成。'}>
+            <label className={`co-auto-toggle ${!autoVerdictEnabled ? 'paused' : ''}`} title={autoVerdictEnabled ? `已开启：${verdictMax > 1 ? `并发 ${verdictMax}` : '单线程'}补齐未智析财报，问答有独立模型槽位不会被智析占满。单份首字 30 秒、整段 5 分钟，可随时中止（约 2 秒生效）；失败率过高会冷却 10 分钟。` : '已关闭：不再自动领取未智析财报。详情页和批量智析仍可手动生成。'}>
               <span>自动智析</span>
               <button
                 type="button"
@@ -1773,7 +1773,7 @@ export default function CrawlOverview() {
                   <li><em>覆盖状态</em><span>{coverageReady ? '已初始化' : '全量补齐中'}</span></li>
                   <li><em>下载并发</em><span>{downloadMax}</span></li>
                   <li><em>解析并发</em><span>{parseMax}（闲时单队列；详情页可额外并发）</span></li>
-                  <li><em>智析并发</em><span>{verdictMax}（问答另有独立槽位；可随时中止单份）</span></li>
+                  <li><em>智析并发</em><span>{verdictMax}（问答有独立槽位；可随时中止单份）</span></li>
                   <li><em>下载间隔</em><span>{downloadPauseSec} 秒</span></li>
                   <li><em>轮询间隔</em><span>{pollIntervalMin} 分钟</span></li>
                   <li><em>超时</em><span>下载/解析各 5 分钟 · 智析首字 30 秒 / 整段 5 分钟</span></li>
@@ -1905,7 +1905,7 @@ export default function CrawlOverview() {
                 title="排队智析"
                 items={verdictQueuedItems}
                 empty={autoVerdictEnabled ? (verdictPending > 0 ? '待补项正在冷却或等待 Worker' : '暂无待智析任务') : '自动智析已关'}
-                note={live?.verdictQueue?.note || (autoVerdictEnabled ? `并发 ${verdictMax} 补齐，首字 30 秒，整段 5 分钟。问答另有独立槽位，不受影响。` : '已关闭：详情页打开或批量智析仍可手动生成。')}
+                note={live?.verdictQueue?.note || (autoVerdictEnabled ? `${verdictMax > 1 ? `并发 ${verdictMax}` : '单线程'}补齐，首字 30 秒，整段 5 分钟。问答有独立槽位，不会被智析占满。` : '已关闭：详情页打开或批量智析仍可手动生成。')}
                 onClose={() => setQueuePopover(null)}
                 anchorRef={verdictBtnRef}
               />
@@ -1929,7 +1929,7 @@ export default function CrawlOverview() {
                 items={verdictActiveItems}
                 empty={verdictPending > 0 ? '智析槽空闲，排队等待 Worker 领取' : '当前无智析任务'}
                 note={verdictActiveItems.length
-                  ? '点「中止」可立即停止该份 AI 解析：它会标记为已跳过并从待补数扣除，排队队首任务补位。'
+                  ? '点「中止」停止该份 AI 解析（约 2 秒生效）：它会标记为已跳过并从待补数扣除，排队队首任务补位。'
                   : (autoVerdictEnabled ? undefined : '自动智析已关：进行中的任务会跑完，不再领取新任务。')}
                 onAbort={(id, label) => void abortVerdict(id, label)}
                 abortingId={verdictAbortingId}

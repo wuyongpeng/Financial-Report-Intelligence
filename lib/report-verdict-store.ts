@@ -2,6 +2,7 @@ import { getDb } from './db';
 import { ensureBackendSchema } from './backend-schema';
 import { acceptVerdictPayload, type ReportVerdict } from './report-verdict';
 import { generateReportVerdict, type VerdictGenerateOptions } from './report-verdict-llm';
+import { llmTotalSlots } from './ingest-settings';
 import { llmModelName } from './llm-providers';
 import { publicVerdictError } from './llm-error';
 
@@ -50,11 +51,24 @@ async function heartbeatVerdictPending(reportId: string) {
   `.catch(() => undefined);
 }
 
+/**
+ * 智析（含详情页 after()、批量 fill-verdicts、自动队列）一律走 background 车道。
+ * 否则手动智析仍会占用 slot 0，把问答堵住 —— 那就等于没做「问答保留槽」。
+ * 调用方已显式指定 lane/slots 时不覆盖。
+ */
+function withBackgroundLane(options?: VerdictGenerateOptions): VerdictGenerateOptions {
+  return {
+    ...options,
+    slots: options?.slots ?? llmTotalSlots(),
+    lane: options?.lane ?? 'background',
+  };
+}
+
 async function generateWithHeartbeat(reportId: string, options?: VerdictGenerateOptions) {
   const beat = setInterval(() => { void heartbeatVerdictPending(reportId); }, HEARTBEAT_MS);
   beat.unref?.();
   try {
-    return await generateReportVerdict(reportId, options);
+    return await generateReportVerdict(reportId, withBackgroundLane(options));
   } finally {
     clearInterval(beat);
   }

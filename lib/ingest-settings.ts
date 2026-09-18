@@ -11,8 +11,11 @@ export type IngestSettings = {
   /** Minutes between announcement / gap discovery ticks. */
   pollIntervalMin: number;
   /**
-   * Concurrent 自动智析 jobs. 问答 always keeps its own dedicated LLM slot on top of this,
-   * so raising it never blocks chat. Keep ≤3 so a single provider is not rate limited.
+   * Concurrent 自动智析 jobs.
+   *
+   * Defaults to 1 on purpose: 并发是显式开关，不是发布默认值。
+   * 3 路智析 + 问答最多 4 个并发请求打同一家供应商，很容易 429/超时，
+   * 反而比单并发更慢更乱。先在采集设置里调到 2/3 观察限流，再决定长期值。
    */
   verdictLimit: number;
 };
@@ -23,7 +26,7 @@ export const INGEST_SETTING_BOUNDS = {
   parseLimit: { min: 1, max: 9, fallback: 1 },
   lookbackDays: { min: 1, max: 99, fallback: 2 },
   pollIntervalMin: { min: 1, max: 60, fallback: 2 },
-  verdictLimit: { min: 1, max: 3, fallback: 3 },
+  verdictLimit: { min: 1, max: 3, fallback: 1 },
 } as const;
 
 export const DEFAULT_INGEST_SETTINGS: IngestSettings = {

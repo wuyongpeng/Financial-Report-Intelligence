@@ -222,12 +222,15 @@ export function composeVerdictQueueNote(input: {
   const skipTail = input.skipped && input.skipped > 0 ? ` · 已跳过 ${input.skipped} 份可重新智析` : '';
   if (input.pending <= 0) return `队列已清空${skipTail}`;
   if (input.status === 'running' && input.storedNote.trim()) return `${input.storedNote.trim()}${skipTail}`;
-  if (input.status === 'waiting_llm') return `${input.storedNote.trim() || '问答占用模型，稍后继续'}${skipTail}`;
+  // 有了独立问答槽之后，busy 更可能是智析槽本身满了或供应商限流，不能一概怪问答。
+  if (input.status === 'waiting_llm') return `${input.storedNote.trim() || '模型槽位繁忙，稍后继续'}${skipTail}`;
   if (input.status === 'cooldown') return `${input.storedNote.trim() || '失败率过高，冷却后再试'}${skipTail}`;
   if (input.due <= 0) return `待补 ${input.pending} 份，失败后冷却中，稍后自动重试${skipTail}`;
   const limit = input.limit ?? 1;
   const base = input.storedNote.trim()
-    || `待补 ${input.pending} 份，并发 ${limit} 补齐，首字 30 秒，整段 5 分钟`;
+    || (limit > 1
+      ? `待补 ${input.pending} 份，并发 ${limit} 补齐，首字 30 秒，整段 5 分钟`
+      : `待补 ${input.pending} 份，单线程补齐，首字 30 秒，整段 5 分钟`);
   if (input.last && input.last.ok === false && input.last.reason) {
     return `${base} · 上次：${input.last.name} ${input.last.period} ${input.last.reason}${skipTail}`;
   }
@@ -452,7 +455,7 @@ export async function runVerdictJob(job: VerdictQueueJob, options: { force?: boo
       status: outcome === 'busy' ? 'waiting_llm' : 'idle',
       last,
       nextAt: nextIso(delay),
-      note: outcome === 'busy' ? '问答占用模型，稍后继续' : '本份已跳过',
+      note: outcome === 'busy' ? '模型槽位繁忙，稍后继续' : '本份已跳过',
     });
     return { outcome, delay, error };
   }

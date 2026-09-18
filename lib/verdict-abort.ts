@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 /**
@@ -18,7 +18,12 @@ export type VerdictSkip = {
   reason: string;
 };
 
-const SKIP_CAP = 500;
+/**
+ * 跳过标记上限。超过后**保留最旧、丢弃最新写入**是错的，丢弃最旧也是错的：
+ * 被丢掉的 id 会静默回到自动队列，用户会看到「我明明跳过了它又在跑」。
+ * 因此这里到顶后拒绝新增并告警，由用户先清理「已跳过」列表。
+ */
+export const SKIP_CAP = 2000;
 const ABORT_REQUEST_CAP = 100;
 /** 中止请求超过这个时长仍未被 worker 消费就作废，避免僵尸请求误杀后来的任务。 */
 export const ABORT_REQUEST_TTL_MS = 5 * 60_000;
@@ -35,9 +40,12 @@ function readJson<T>(file: string, fallback: T): T {
   }
 }
 
+/** 原子写：app 与 worker 两个进程都会写这些文件，直接覆盖会丢记录。 */
 function writeJson(file: string, value: unknown) {
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(value)}\n`);
+  const temporary = `${file}.${process.pid}.part`;
+  writeFileSync(temporary, `${JSON.stringify(value)}\n`);
+  renameSync(temporary, file);
 }
 
 /* ------------------------------------------------------------------ *
@@ -145,18 +153,32 @@ export function countVerdictSkips() {
   return listVerdictSkips().length;
 }
 
-/** 中止后落标记：该份不再被自动队列领取，也从「排队智析」计数里扣除。 */
-export function markVerdictSkipped(id: string, input: { reason?: string; elapsedMs?: number } = {}) {
+/**
+ * 中止后落标记：该份不再被自动队列领取，也从「排队智析」计数里扣除。
+ * 返回 false 表示已达上限、未记录 —— 调用方应提示用户先清理「已跳过」。
+ */
+export function markVerdictSkipped(id: string, input: { reason?: string; elapsedMs?: number } = {}): boolean {
   const key = id.trim();
-  if (!key) return;
-  const rest = listVerdictSkips().filter((item) => item.id !== key);
+  if (!key) return false;
+  const existing = listVerdictSkips();
+  const rest = existing.filter((item) => item.id !== key);
+  // 只有「新增」才受上限约束；覆盖已有记录永远允许。
+  if (rest.length === existing.length && rest.length >= SKIP_CAP) {
+    console.warn('[verdict-abort] skip list full, refusing to record', { id: key, cap: SKIP_CAP });
+    return false;
+  }
   const entry: VerdictSkip = {
     id: key,
     at: new Date().toISOString(),
     reason: input.reason?.trim() || '用户手动中止',
     ...(Number.isFinite(input.elapsedMs) ? { elapsedMs: Math.max(0, Math.round(input.elapsedMs as number)) } : {}),
   };
-  writeJson(skipPath(), { items: [entry, ...rest].slice(0, SKIP_CAP) });
+  writeJson(skipPath(), { items: [entry, ...rest] });
+  return true;
+}
+
+export function verdictSkipsFull() {
+  return listVerdictSkips().length >= SKIP_CAP;
 }
 
 /** 「重新智析」：撤销跳过标记，让它重新进入自动队列。 */
