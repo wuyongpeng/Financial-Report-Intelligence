@@ -124,20 +124,23 @@ async function seedCompanies(now: string) {
 }
 
 async function seedSnapshotAnnouncements(now: string) {
-  const db = getDb();
   let seeded = 0;
-  await db.begin(async (tx) => {
-    for (const item of seedReports) {
-      const result = await tx`
-        INSERT INTO announcements
-          (id, source, source_id, code, company_name, title, report_type, published_at, discovered_at, pdf_url, status, created_at, updated_at)
-        VALUES (${item.id}, ${item.source}, ${item.source_id}, ${item.code}, ${item.company_name}, ${item.title}, ${item.report_type},
-          ${item.published_at}, ${item.discovered_at || now}, ${item.pdf_url}, 'discovered', ${now}, ${now})
-        ON CONFLICT (id) DO NOTHING
-      `;
-      seeded += result.count;
-    }
-  });
+  for (const item of seedReports) {
+    // Live ingest uses hashed ids; seed JSON uses CNINFO:<source_id>. Same (source, source_id)
+    // must not abort startup when the row already exists under a different id.
+    seeded += await insertDiscoveredAnnouncement({
+      id: item.id,
+      source: item.source,
+      sourceId: item.source_id,
+      code: item.code,
+      companyName: item.company_name,
+      title: item.title,
+      reportType: item.report_type,
+      publishedAt: item.published_at,
+      discoveredAt: item.discovered_at || now,
+      pdfUrl: item.pdf_url,
+    });
+  }
   return seeded;
 }
 

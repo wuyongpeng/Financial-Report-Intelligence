@@ -12,6 +12,7 @@ export function getDb() {
     max: Number(process.env.DATABASE_POOL_SIZE ?? 10),
     idle_timeout: 20,
     connect_timeout: 10,
+    onnotice: () => undefined,
   });
   return client;
 }

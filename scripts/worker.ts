@@ -179,4 +179,7 @@ async function main() {
 
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
-void main();
+void main().catch((error) => {
+  console.error('[worker] fatal startup', error);
+  process.exit(1);
+});
