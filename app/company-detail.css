@@ -186,6 +186,7 @@
 .cd-followups{margin:6px 0 0}
 .cd-followups>small{display:none}
 .cd-followup-list{display:grid;gap:4px}
+.cd-followup-busy{padding:5px 8px;font-size:11px;line-height:1.4;color:#8a9bb3}
 .cd-followup-list button{border:1px dashed #d8e2f2;background:#fbfcff;border-radius:6px;padding:5px 8px;font-size:11px;line-height:1.4;text-align:left;color:#657997}
 .cd-followup-list button:hover{background:#f1f5ff;border-style:solid;border-color:#c3d6f5;color:#3064db}
 .cd-followup-list button .ui-icon{color:#a0b1ca}

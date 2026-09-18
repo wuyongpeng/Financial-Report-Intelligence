@@ -939,31 +939,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const cardId = card.getAttribute('data-focus-id') || undefined;
     placeCardPick(e, { quote, kind, title, page: Number.isFinite(page) ? page : undefined, cardId });
   }
-  // Suggest the next question instead of making the reader compose one; the list is
-  // advisory, so any failure simply leaves the answer without buttons.
-  function defaultFollowups(answer: string, asked: string[]) {
-    const pool = [
-      '本期营业收入同比怎么变化？',
-      '归母净利润变化的主要原因是什么？',
-      '和上年同期比，哪些指标最值得关注？',
-      '同行公司在同一报告期表现如何？',
-      '请给出支持上述结论的原文页码。',
-    ];
-    const lowerAsked = asked.map(q => q.replace(/\s+/g, ''));
-    const picked = pool.filter(q => !lowerAsked.some(a => a.includes(q.replace(/\s+/g, '')) || q.replace(/\s+/g, '').includes(a))).slice(0, 3);
-    if (picked.length) return picked;
-    return pool.slice(0, 3);
-  }
   async function loadFollowups(reportId: string, slot: number, question: string, answer: string, asked: string[]) {
     const patch = (value: Partial<Message>) => setMessages(m => activeId.current === reportId && m[slot]?.role === 'assistant' ? m.map((item,i) => i === slot ? { ...item, ...value } : item) : m);
-    const fallback = defaultFollowups(answer, asked);
-    patch({ followups: fallback, followupBusy: true });
+    patch({ followups: undefined, followupBusy: true });
     try {
       const response = await fetch('/api/chat/followups', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ reportId, question, answer, asked }) });
       if (!response.ok) throw new Error();
       const payload = await response.json() as { questions?: string[] };
-      patch({ followups: payload.questions?.slice(0,3) ?? fallback, followupBusy: false });
-    } catch { patch({ followups: fallback, followupBusy: false }); }
+      patch({ followups: payload.questions?.slice(0, 3) ?? [], followupBusy: false });
+    } catch { patch({ followups: [], followupBusy: false }); }
   }
 
   useEffect(() => {
@@ -1636,6 +1620,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                   submitted={m.feedbackDone}
                   onSubmit={()=>submitAnswerFeedback(i)}
                 />
+                {m.followupBusy && !(m.followups && m.followups.length) && (
+                  <div className="cd-followups" aria-label="正在生成追问">
+                    <div className="cd-followup-list cd-followup-busy">正在根据本轮问答生成追问…</div>
+                  </div>
+                )}
                 {m.followups && m.followups.length > 0 && (
                   <div className="cd-followups" aria-label="继续追问">
                     <div className="cd-followup-list">

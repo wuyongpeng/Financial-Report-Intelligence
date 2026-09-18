@@ -1,64 +1,68 @@
 import { getDb } from '@/lib/db';
-import { fetchChatCompletions } from '@/lib/llm-gate';
-import { llmConfigured } from '@/lib/llm-providers';
+import { contextualFollowups, mergeFollowups, parseFollowupQuestions } from '@/lib/chat-followups';
+import { fetchChatCompletionsFrom } from '@/lib/llm-gate';
+import { llmConfigured, parseLlmProviders } from '@/lib/llm-providers';
+import { orderVerdictProviders } from '@/lib/report-verdict-llm';
 
-// Follow-up questions are a navigation aid, never an answer: they must stay short,
-// answerable from this single report, and must degrade to a static list when the
-// model is unavailable, so the reading flow never depends on the LLM.
-const fallbackPool = [
-  '本期营业收入是多少？',
-  '本期归母净利润是多少？',
-  '净利润变化的主要原因是什么？',
-  '本期有哪些异常指标？',
-  '和同行比处于什么水位？',
-  '本期现金流情况如何？',
-];
+const FOLLOWUP_TIMEOUT_MS = Number(process.env.LLM_FOLLOWUP_TIMEOUT_MS ?? 12_000);
 
-function normalise(question: string) { return question.replace(/\s+/g, '').replace(/[？?]$/, ''); }
+function followupPrompt(input: {
+  company: string;
+  code: string;
+  industry: string;
+  coverage: string;
+  question: string;
+  answer: string;
+  asked: string[];
+}) {
+  return `公司：${input.company}（${input.code}）；行业：${input.industry}
+本报告已入库指标：${input.coverage}
+用户刚问：${input.question}
+助手的回答（可能被截断）：${input.answer.slice(0, 900) || '无'}
+用户此前已问过：${input.asked.slice(1).join(' / ') || '无'}
 
-function pickFallback(asked: string[]) {
-  const seen = new Set(asked.map(normalise));
-  return fallbackPool.filter((q) => !seen.has(normalise(q))).slice(0, 3);
+请围绕「用户刚问」和「助手回答」里出现的具体指标、业务或原因，给出 3 个下一步追问。
+要求：每行一个中文问题，以问号结尾，不超过 24 个汉字；三个问题角度不同（原因/对比/原文证据或结构）；禁止重复已问过的问题；禁止输出「本期营业收入是多少」「本期归母净利润是多少」这类与本轮无关的套话。`;
 }
 
-function parseQuestions(raw: string, asked: string[]) {
-  const seen = new Set(asked.map(normalise));
-  const out: string[] = [];
-  for (const line of raw.split('\n')) {
-    const text = line.replace(/^[\s\-*•\d.、)）]+/, '').trim();
-    if (text.length < 5 || text.length > 40 || !/[？?]$/.test(text)) continue;
-    if (seen.has(normalise(text))) continue;
-    seen.add(normalise(text));
-    out.push(text);
-    if (out.length === 3) break;
-  }
-  return out;
-}
-
-async function generate(prompt: string) {
+async function generate(prompt: string, asked: string[]) {
   if (!llmConfigured()) return null;
-  const controller = new AbortController();
-  // Follow-ups are secondary content; a short budget keeps them from blocking the reader.
-  const timer = setTimeout(() => controller.abort(), Number(process.env.LLM_FOLLOWUP_TIMEOUT_MS ?? 15_000));
-  try {
-    const response = await fetchChatCompletions(
-      {
-        temperature: 0.3,
-        max_tokens: 200,
-        messages: [
-          { role: 'system', content: '你为财报阅读者生成追问建议。只输出3行，每行一个不超过24个汉字的中文问题，必须以问号结尾，不要编号、不要解释、不要投资建议。问题必须能依据同一份财报（已入库指标或原文）继续回答，且不得重复用户已问过的问题。' },
-          { role: 'user', content: prompt },
-        ],
-      },
-      { signal: controller.signal, timeoutMs: Number(process.env.LLM_FOLLOWUP_TIMEOUT_MS ?? 15_000) },
-    );
-    if (!response.ok) return null;
-    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return payload.choices?.[0]?.message?.content?.trim() ?? null;
-  } catch (error) {
-    console.warn('[chat] follow-up generation failed', { message: String(error) });
-    return null;
-  } finally { clearTimeout(timer); }
+  const providers = orderVerdictProviders(parseLlmProviders()).slice(0, 2);
+  const body = {
+    temperature: 0.4,
+    max_tokens: 220,
+    enable_thinking: false,
+    thinking: { type: 'disabled' },
+    chat_template_kwargs: { enable_thinking: false },
+    messages: [
+      { role: 'system', content: '你为财报阅读者生成个性化追问。只输出 3 行问题，不要编号、不要解释、不要投资建议。问题必须能依据同一份已入库财报继续回答。' },
+      { role: 'user', content: prompt },
+    ],
+  };
+  let best: string[] = [];
+  for (const provider of providers) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FOLLOWUP_TIMEOUT_MS);
+    try {
+      const response = await fetchChatCompletionsFrom(provider, body, {
+        signal: controller.signal,
+        timeoutMs: FOLLOWUP_TIMEOUT_MS,
+        maxAttempts: 1,
+      });
+      if (!response.ok) {
+        await response.text().catch(() => '');
+        continue;
+      }
+      const parsed = parseFollowupQuestions(await response.text(), asked);
+      if (parsed.length > best.length) best = parsed;
+      if (best.length >= 3) return best;
+    } catch (error) {
+      console.warn('[chat] follow-up generation failed', { provider: provider.id, message: String(error) });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return best.length ? best : null;
 }
 
 export async function POST(request: Request) {
@@ -74,9 +78,18 @@ export async function POST(request: Request) {
     SELECT metric, value, unit FROM financial_metrics WHERE announcement_id=${body.reportId}
   `;
   const coverage = metrics.length ? metrics.map((m) => `${m.metric}=${m.value}${m.unit}`).join('；') : '暂无已入库指标';
-  const prompt = `公司：${report.company_name}（${report.code}）；行业：${report.industry}\n本报告已入库指标：${coverage}\n用户刚问：${body.question}\n助手的回答（可能被截断）：${(body.answer ?? '').slice(0, 900) || '无'}\n用户此前已问过：${asked.slice(1).join(' / ') || '无'}\n请给出3个与上面问题相关、可继续深入的追问。`;
-  const raw = await generate(prompt);
-  const questions = raw ? parseQuestions(raw, asked) : [];
-  const result = questions.length ? questions : pickFallback(asked);
-  return Response.json({ questions: result, mode: questions.length ? 'llm' : 'fallback' }, { headers: { 'cache-control': 'no-store' } });
+  const generated = await generate(followupPrompt({
+    company: report.company_name,
+    code: report.code,
+    industry: report.industry,
+    coverage,
+    question: body.question,
+    answer: body.answer ?? '',
+    asked,
+  }), asked);
+  const questions = mergeFollowups(generated ?? [], contextualFollowups(body.question, body.answer ?? '', asked));
+  return Response.json(
+    { questions, mode: generated?.length ? 'llm' : 'contextual' },
+    { headers: { 'cache-control': 'no-store' } },
+  );
 }
