@@ -46,6 +46,10 @@ type QueueItem = {
   ageMs?: number;
   waitSec?: number;
   lastError?: string | null;
+  /** announcements.id，中止/重新智析需要 */
+  id?: string;
+  /** 仅智析中的任务可中止 */
+  abortable?: boolean;
 };
 
 type LivePayload = {
@@ -78,6 +82,7 @@ type LivePayload = {
   };
   downloadSlots: { used: number; max: number };
   parseSlots: { used: number; max: number };
+  verdictSlots?: { used: number; max: number };
   queueItems?: QueueItem[];
   activeItems?: QueueItem[];
   activeParseItems?: QueueItem[];
@@ -91,7 +96,11 @@ type LivePayload = {
     note: string;
     nextAt: string | null;
     current: { code: string; name: string; period: string; title: string; startedAt?: string } | null;
+    running?: Array<{ id: string; code: string; name: string; period: string; title: string; startedAt?: string }>;
     last: { code: string; name: string; period: string; ok?: boolean; reason?: string; at?: string; elapsedMs?: number } | null;
+    slots?: { used: number; max: number };
+    skippedCount?: number;
+    failRate?: number;
   };
   recentDownloads?: QueueItem[];
   queueTotal?: number;
@@ -112,6 +121,7 @@ type LivePayload = {
     downloadPauseMs: number;
     lookbackDays?: number;
     pollIntervalMin?: number;
+    verdictLimit?: number;
     maxPages?: number;
     downloadTimeoutMs?: number;
     parseTimeoutMs?: number;
@@ -148,6 +158,7 @@ type SettingsDraft = {
   parseLimit: string;
   lookbackDays: string;
   pollIntervalMin: string;
+  verdictLimit: string;
 };
 
 const SETTINGS_BOUNDS = {
@@ -156,6 +167,7 @@ const SETTINGS_BOUNDS = {
   parseLimit: { min: 1, max: 9, fallback: 2 },
   lookbackDays: { min: 1, max: 99, fallback: 2 },
   pollIntervalMin: { min: 1, max: 60, fallback: 2 },
+  verdictLimit: { min: 1, max: 3, fallback: 3 },
 } as const;
 
 const SETTINGS_FIELDS: Array<{
@@ -170,6 +182,7 @@ const SETTINGS_FIELDS: Array<{
   { key: 'parseLimit', label: '并发解析数量', unit: '个', hint: '闲时自动解析的并发上限，默认 1（单队列）。采集页手动解析会插到队首；详情页打开会额外并发解析，不占这支队列。' },
   { key: 'lookbackDays', label: '采集窗口', unit: '天', prefix: '最近', hint: '初始化完成后，增量扫描只看最近这些天的公告。' },
   { key: 'pollIntervalMin', label: '抓取轮询间隔', unit: '分钟', hint: '扫描新公告和财报缺口的时间间隔。保存后 Worker 会按新间隔执行。' },
+  { key: 'verdictLimit', label: '并发智析数量', unit: '个', hint: '自动智析同时进行的任务数。问答另有独立模型槽位，调高不会拖慢问答。出现大量限流时降回 1。' },
 ];
 
 function clampSetting(key: keyof SettingsDraft, raw: string): number {
@@ -196,6 +209,7 @@ function settingsDraftFromLive(live: LivePayload | null): SettingsDraft {
     parseLimit: String(live?.limits.parseLimit ?? live?.parseSlots.max ?? 2),
     lookbackDays: String(live?.limits.lookbackDays ?? 2),
     pollIntervalMin: String(live?.limits.pollIntervalMin ?? Math.max(1, Math.round((live?.limits.intervalMs ?? 120_000) / 60_000))),
+    verdictLimit: String(live?.limits.verdictLimit ?? live?.verdictSlots?.max ?? 3),
   };
 }
 
@@ -205,12 +219,14 @@ type ControlSettingsPayload = {
   parseLimit?: number;
     lookbackDays?: number;
     pollIntervalMin?: number;
+    verdictLimit?: number;
     settings?: {
       downloadPauseSec?: number;
       downloadLimit?: number;
       parseLimit?: number;
       lookbackDays?: number;
       pollIntervalMin?: number;
+      verdictLimit?: number;
     };
   };
 
@@ -223,6 +239,7 @@ function settingsDraftFromControl(payload: ControlSettingsPayload | null, live: 
       parseLimit: String(source.parseLimit ?? 2),
       lookbackDays: String(source.lookbackDays ?? 2),
       pollIntervalMin: String(source.pollIntervalMin ?? 2),
+      verdictLimit: String(source.verdictLimit ?? 3),
     };
   }
   return settingsDraftFromLive(live);
@@ -348,6 +365,12 @@ function QueuePopover({
   onClose,
   anchorRef,
   note,
+  onAbort,
+  abortingId,
+  actionLabel,
+  actionBusyLabel,
+  actionTitle,
+  footer,
 }: {
   open: boolean;
   title: string;
@@ -363,11 +386,21 @@ function QueuePopover({
     progress?: string;
     waitSec?: number;
     lastError?: string | null;
+    id?: string;
+    abortable?: boolean;
   }>;
   empty: string;
   onClose: () => void;
   anchorRef: RefObject<HTMLElement | null>;
   note?: string;
+  /** 智析中：中止本份；已跳过：重新智析。行内动作按钮。 */
+  onAbort?: (id: string, label: string) => void;
+  abortingId?: string | null;
+  /** 行内动作按钮文案，默认「中止」 */
+  actionLabel?: string;
+  actionBusyLabel?: string;
+  actionTitle?: string;
+  footer?: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -446,11 +479,25 @@ function QueuePopover({
                 {renderQueueReason(item.progress || item.reason || '', item.lastError)}
               </div>
             ) : null}
+            {onAbort && item.abortable && item.id ? (
+              <div className="co-sb-pop-acts">
+                <button
+                  type="button"
+                  className="co-sb-pop-abort"
+                  disabled={abortingId === item.id}
+                  title={actionTitle ?? '中止本份：立即停止 AI 解析并跳过，从待补数中扣除；排队队首任务补位。可在「已跳过」里重新智析。'}
+                  onClick={() => onAbort(item.id!, item.label || item.name)}
+                >
+                  {abortingId === item.id ? (actionBusyLabel ?? '中止中…') : (actionLabel ?? '中止')}
+                </button>
+              </div>
+            ) : null}
           </li>
         )) : (
           <li className="co-sb-pop-empty">{empty}</li>
         )}
       </ul>
+      {footer ? <div className="co-sb-pop-foot">{footer}</div> : null}
     </div>
   );
 }
@@ -555,7 +602,7 @@ export default function CrawlOverview() {
   const [onlyParsing, setOnlyParsing] = useState(false);
   const [timeCol, setTimeCol] = useState<TimeCol | null>(null);
   const [timeSort, setTimeSort] = useState<SortState>('default');
-  const [queuePopover, setQueuePopover] = useState<null | 'download' | 'parse' | 'downloading' | 'parsing' | 'verdict'>(null);
+  const [queuePopover, setQueuePopover] = useState<null | 'download' | 'parse' | 'downloading' | 'parsing' | 'verdict' | 'verdicting' | 'verdictSkipped'>(null);
   const [queueWaitTick, setQueueWaitTick] = useState(0);
   const [parseElapsedTick, setParseElapsedTick] = useState(0);
   const dlQueueBtnRef = useRef<HTMLButtonElement>(null);
@@ -563,6 +610,19 @@ export default function CrawlOverview() {
   const parseQueueBtnRef = useRef<HTMLButtonElement>(null);
   const parseActiveBtnRef = useRef<HTMLButtonElement>(null);
   const verdictBtnRef = useRef<HTMLButtonElement>(null);
+  const verdictActiveBtnRef = useRef<HTMLButtonElement>(null);
+  const verdictSkipBtnRef = useRef<HTMLButtonElement>(null);
+  const [verdictAbortingId, setVerdictAbortingId] = useState<string | null>(null);
+  const [verdictElapsedTick, setVerdictElapsedTick] = useState(0);
+  const [verdictSkips, setVerdictSkips] = useState<Array<{
+    id: string;
+    label: string;
+    code: string | null;
+    period: string;
+    reason: string;
+    at: string;
+    elapsedMs: number | null;
+  }>>([]);
   const [autoCrawlEnabled, setAutoCrawlEnabled] = useState(true);
   const [autoCrawlSaving, setAutoCrawlSaving] = useState(false);
   const [autoVerdictEnabled, setAutoVerdictEnabled] = useState(true);
@@ -727,6 +787,7 @@ export default function CrawlOverview() {
     || (live?.counts.pending_parse ?? 0) > 0
     || (live?.downloadSlots.used ?? 0) > 0
     || (live?.parseSlots.used ?? 0) > 0
+    || (live?.verdictSlots?.used ?? 0) > 0
     || optimisticJobs.length > 0
     || Object.keys(rowBusy).length > 0,
   );
@@ -996,6 +1057,7 @@ export default function CrawlOverview() {
       parseLimit: clampSetting('parseLimit', settingsDraft.parseLimit),
       lookbackDays: clampSetting('lookbackDays', settingsDraft.lookbackDays),
       pollIntervalMin: clampSetting('pollIntervalMin', settingsDraft.pollIntervalMin),
+      verdictLimit: clampSetting('verdictLimit', settingsDraft.verdictLimit),
     };
     setSettingsDraft({
       downloadPauseSec: String(next.downloadPauseSec),
@@ -1003,6 +1065,7 @@ export default function CrawlOverview() {
       parseLimit: String(next.parseLimit),
       lookbackDays: String(next.lookbackDays),
       pollIntervalMin: String(next.pollIntervalMin),
+      verdictLimit: String(next.verdictLimit),
     });
     setSettingsSaving(true);
     setTriggerMsg('');
@@ -1515,6 +1578,136 @@ export default function CrawlOverview() {
     return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
   }, [optimisticJobs, live?.activeParseItems, live?.activeItems, parseElapsedTick]);
 
+  /** 智析中：可中止的任务；「排队智析」只保留未开始的。 */
+  const verdictActiveItems = useMemo(() => {
+    void verdictElapsedTick;
+    return (live?.verdictQueueItems ?? [])
+      .filter((q) => q.status === 'running')
+      .map((q, i) => {
+        const ageMs = q.startedAt ? Math.max(0, Date.now() - Date.parse(q.startedAt)) : (q.ageMs ?? 0);
+        return {
+          id: q.id,
+          code: q.code,
+          name: q.name,
+          label: queueDisplayName(q),
+          period: q.period,
+          position: i + 1,
+          status: q.status,
+          progress: q.startedAt ? `正在智析 · 已 ${formatParseElapsed(ageMs)} / 限 5分钟` : q.progress,
+          abortable: true,
+        };
+      });
+  }, [live?.verdictQueueItems, verdictElapsedTick]);
+
+  const verdictQueuedItems = useMemo(
+    () => (live?.verdictQueueItems ?? [])
+      .filter((q) => q.status !== 'running')
+      .map((q, i) => ({
+        id: q.id,
+        code: q.code,
+        name: q.name,
+        label: queueDisplayName(q),
+        period: q.period,
+        position: i + 1,
+        status: q.status,
+        reason: q.reason,
+        abortable: false,
+      })),
+    [live?.verdictQueueItems],
+  );
+
+  const refreshVerdictSkips = useCallback(async () => {
+    try {
+      const response = await fetch('/api/crawl/verdict-queue', { cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json() as {
+        items?: Array<{
+          id: string; label: string; code: string | null; period: string;
+          reason: string; at: string; elapsedMs: number | null;
+        }>;
+      };
+      setVerdictSkips(payload.items ?? []);
+    } catch {
+      /* 已跳过列表是次要信息，失败保持上一份快照 */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (queuePopover !== 'verdictSkipped') return;
+    // 与本页其它拉取一致：延后一拍再 setState，避免级联渲染
+    const kick = window.setTimeout(() => { void refreshVerdictSkips(); }, 0);
+    return () => window.clearTimeout(kick);
+  }, [queuePopover, refreshVerdictSkips]);
+
+  // 只在「智析中」浮层打开时走秒表，避免 verdictActiveItems 重算触发级联渲染
+  useEffect(() => {
+    if (queuePopover !== 'verdicting') return;
+    const id = window.setInterval(() => setVerdictElapsedTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [queuePopover]);
+
+  async function abortVerdict(id: string, label: string) {
+    if (!window.confirm(`中止「${label}」的 AI 智析？\n\n该份会立即停止并标记为已跳过，从待补数中扣除；排队队首的任务会补位。需要时可在「已跳过」里重新智析。`)) return;
+    setVerdictAbortingId(id);
+    setTriggerMsg('');
+    try {
+      const response = await fetch('/api/crawl/verdict-queue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'abort', id }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; note?: string };
+      setTriggerMsg(!response.ok ? (payload.error ?? '中止失败') : (payload.note ?? `已中止 ${label}`));
+      await refreshLive();
+      await refreshVerdictSkips();
+    } catch (err) {
+      setTriggerMsg(`网络异常：${String(err)}`);
+    } finally {
+      setVerdictAbortingId(null);
+      window.setTimeout(() => setTriggerMsg(''), 6000);
+    }
+  }
+
+  async function retryVerdictSkip(id: string, label: string) {
+    setVerdictAbortingId(id);
+    try {
+      const response = await fetch('/api/crawl/verdict-queue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'retry', id }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; note?: string };
+      setTriggerMsg(!response.ok ? (payload.error ?? '恢复失败') : (payload.note ?? `已恢复 ${label}`));
+      await refreshVerdictSkips();
+      await refreshLive();
+    } catch (err) {
+      setTriggerMsg(`网络异常：${String(err)}`);
+    } finally {
+      setVerdictAbortingId(null);
+      window.setTimeout(() => setTriggerMsg(''), 6000);
+    }
+  }
+
+  async function retryAllVerdictSkips() {
+    if (!verdictSkips.length) return;
+    if (!window.confirm(`将 ${verdictSkips.length} 份已跳过的财报恢复到排队智析？`)) return;
+    try {
+      const response = await fetch('/api/crawl/verdict-queue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'retryAll' }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; note?: string };
+      setTriggerMsg(!response.ok ? (payload.error ?? '恢复失败') : (payload.note ?? '已全部恢复'));
+      await refreshVerdictSkips();
+      await refreshLive();
+    } catch (err) {
+      setTriggerMsg(`网络异常：${String(err)}`);
+    } finally {
+      window.setTimeout(() => setTriggerMsg(''), 6000);
+    }
+  }
+
   const queueCount = Math.max(live?.counts.pending_download ?? 0, downloadQueueItems.length);
   const downloadUsed = Math.max(live?.downloadSlots.used ?? 0, downloadingItems.length);
   const parseUsed = Math.max(
@@ -1523,6 +1716,10 @@ export default function CrawlOverview() {
     all.filter((c) => c.parseStatus === 'parsing').length,
   );
   const parseQueueCount = Math.max(live?.counts.pending_parse ?? 0, parseQueueItems.length);
+  const verdictMax = live?.verdictSlots?.max ?? live?.limits.verdictLimit ?? 3;
+  const verdictUsed = Math.max(live?.verdictSlots?.used ?? 0, verdictActiveItems.length);
+  const verdictPending = Math.max(0, (live?.verdictQueue?.pending ?? 0) - verdictUsed);
+  const verdictSkippedCount = Math.max(live?.verdictQueue?.skippedCount ?? 0, verdictSkips.length);
 
   return (
     <main className="app-shell co-shell">
@@ -1548,7 +1745,7 @@ export default function CrawlOverview() {
                 <span className="co-switch-knob" aria-hidden="true" />
               </button>
             </label>
-            <label className={`co-auto-toggle ${!autoVerdictEnabled ? 'paused' : ''}`} title={autoVerdictEnabled ? '已开启：空闲时单线程补齐未智析财报。单份首字 30 秒、整段 5 分钟；抢不到模型则让路；失败跳过，连续失败会冷却。' : '已关闭：不再自动领取未智析财报。详情页和批量智析仍可手动生成。'}>
+            <label className={`co-auto-toggle ${!autoVerdictEnabled ? 'paused' : ''}`} title={autoVerdictEnabled ? `已开启：并发 ${verdictMax} 补齐未智析财报，问答另有独立模型槽位不受影响。单份首字 30 秒、整段 5 分钟，可随时中止；失败率过高会冷却 10 分钟。` : '已关闭：不再自动领取未智析财报。详情页和批量智析仍可手动生成。'}>
               <span>自动智析</span>
               <button
                 type="button"
@@ -1576,6 +1773,7 @@ export default function CrawlOverview() {
                   <li><em>覆盖状态</em><span>{coverageReady ? '已初始化' : '全量补齐中'}</span></li>
                   <li><em>下载并发</em><span>{downloadMax}</span></li>
                   <li><em>解析并发</em><span>{parseMax}（闲时单队列；详情页可额外并发）</span></li>
+                  <li><em>智析并发</em><span>{verdictMax}（问答另有独立槽位；可随时中止单份）</span></li>
                   <li><em>下载间隔</em><span>{downloadPauseSec} 秒</span></li>
                   <li><em>轮询间隔</em><span>{pollIntervalMin} 分钟</span></li>
                   <li><em>超时</em><span>下载/解析各 5 分钟 · 智析首字 30 秒 / 整段 5 分钟</span></li>
@@ -1696,22 +1894,99 @@ export default function CrawlOverview() {
                 ref={verdictBtnRef}
                 className={`co-sb-node clickable ${queuePopover === 'verdict' ? 'open' : ''}`}
                 aria-expanded={queuePopover === 'verdict'}
-                title="点击查看自动智析队列"
+                title="点击查看排队智析队列"
                 onClick={() => setQueuePopover((v) => (v === 'verdict' ? null : 'verdict'))}
               >
-                <PulseDot on={autoVerdictEnabled && (Boolean(live?.verdictQueue?.current) || live?.verdictQueue?.status === 'running' || (live?.verdictQueue?.pending ?? 0) > 0)} />
-                自动智析(<b>{live?.verdictQueue?.pending ?? 0}</b>)
+                <PulseDot on={autoVerdictEnabled && verdictPending > 0} />
+                排队智析(<b>{verdictPending}</b>)
               </button>
               <QueuePopover
                 open={queuePopover === 'verdict'}
-                title="自动智析"
-                items={live?.verdictQueueItems ?? []}
-                empty={autoVerdictEnabled ? ((live?.verdictQueue?.pending ?? 0) > 0 ? '待补项正在冷却或等待 Worker' : '暂无待智析任务') : '自动智析已关'}
-                note={live?.verdictQueue?.note || (autoVerdictEnabled ? '空闲时单线程补齐，首字 30 秒，整段 5 分钟。' : '已关闭：详情页打开或批量智析仍可手动生成。')}
+                title="排队智析"
+                items={verdictQueuedItems}
+                empty={autoVerdictEnabled ? (verdictPending > 0 ? '待补项正在冷却或等待 Worker' : '暂无待智析任务') : '自动智析已关'}
+                note={live?.verdictQueue?.note || (autoVerdictEnabled ? `并发 ${verdictMax} 补齐，首字 30 秒，整段 5 分钟。问答另有独立槽位，不受影响。` : '已关闭：详情页打开或批量智析仍可手动生成。')}
                 onClose={() => setQueuePopover(null)}
                 anchorRef={verdictBtnRef}
               />
             </span>
+            <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
+            <span className="co-sb-node-wrap">
+              <button
+                type="button"
+                ref={verdictActiveBtnRef}
+                className={`co-sb-node clickable ${queuePopover === 'verdicting' ? 'open' : ''}`}
+                aria-expanded={queuePopover === 'verdicting'}
+                title="点击查看智析中任务，可随时中止"
+                onClick={() => setQueuePopover((v) => (v === 'verdicting' ? null : 'verdicting'))}
+              >
+                <PulseDot on={verdictUsed > 0} />
+                智析中(<b>{verdictUsed}/{verdictMax}</b>)
+              </button>
+              <QueuePopover
+                open={queuePopover === 'verdicting'}
+                title="智析中"
+                items={verdictActiveItems}
+                empty={verdictPending > 0 ? '智析槽空闲，排队等待 Worker 领取' : '当前无智析任务'}
+                note={verdictActiveItems.length
+                  ? '点「中止」可立即停止该份 AI 解析：它会标记为已跳过并从待补数扣除，排队队首任务补位。'
+                  : (autoVerdictEnabled ? undefined : '自动智析已关：进行中的任务会跑完，不再领取新任务。')}
+                onAbort={(id, label) => void abortVerdict(id, label)}
+                abortingId={verdictAbortingId}
+                onClose={() => setQueuePopover(null)}
+                anchorRef={verdictActiveBtnRef}
+              />
+            </span>
+            {verdictSkippedCount > 0 ? (
+              <>
+                <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
+                <span className="co-sb-node-wrap">
+                  <button
+                    type="button"
+                    ref={verdictSkipBtnRef}
+                    className={`co-sb-node clickable ${queuePopover === 'verdictSkipped' ? 'open' : ''}`}
+                    aria-expanded={queuePopover === 'verdictSkipped'}
+                    title="手动中止后跳过的财报；可重新智析"
+                    onClick={() => setQueuePopover((v) => (v === 'verdictSkipped' ? null : 'verdictSkipped'))}
+                  >
+                    已跳过(<b>{verdictSkippedCount}</b>)
+                  </button>
+                  <QueuePopover
+                    open={queuePopover === 'verdictSkipped'}
+                    title="已跳过智析"
+                    items={verdictSkips.map((row, i) => ({
+                      code: row.code ?? '—',
+                      name: row.label,
+                      label: row.label,
+                      period: row.period,
+                      position: i + 1,
+                      status: 'skipped',
+                      reason: `${row.reason} · ${formatCrawlTime(row.at)}${row.elapsedMs ? ` · 已跑 ${formatParseElapsed(row.elapsedMs)}` : ''}`,
+                      id: row.id,
+                      abortable: true,
+                    }))}
+                    empty="暂无已跳过的财报"
+                    note="这些财报不再被自动智析领取，也不计入待补数。点「重新智析」会恢复并插到队首。"
+                    onAbort={(id, label) => void retryVerdictSkip(id, label)}
+                    abortingId={verdictAbortingId}
+                    actionLabel="重新智析"
+                    actionBusyLabel="恢复中…"
+                    actionTitle="撤销跳过标记并插到队首，重新调用 AI 生成智析。"
+                    footer={
+                      <button
+                        type="button"
+                        className="co-sb-pop-retry-all"
+                        onClick={() => void retryAllVerdictSkips()}
+                      >
+                        全部重新智析
+                      </button>
+                    }
+                    onClose={() => setQueuePopover(null)}
+                    anchorRef={verdictSkipBtnRef}
+                  />
+                </span>
+              </>
+            ) : null}
           </div>
           <button
             type="button"

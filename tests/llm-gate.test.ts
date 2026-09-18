@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { extractProbeReply, fetchChatCompletions, isLlmSlotBusyError, llmRetryDelayMs, probeLlmProvider, probeLlmProviders, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
+import { extractProbeReply, fetchChatCompletions, isLlmSlotBusyError, laneSlots, LLM_INTERACTIVE_SLOT, llmRetryDelayMs, probeLlmProvider, probeLlmProviders, resetLlmProviderState, shouldFailoverLlmStatus, shouldRetryLlmStatus, withLlmSlot } from '../lib/llm-gate';
 
 test('retries only HTTP 429', () => {
   assert.equal(shouldRetryLlmStatus(429), true);
@@ -28,6 +28,46 @@ test('backoff honors Retry-After seconds and exponential fallback', () => {
   const until = Date.parse('2026-09-17T00:00:10.000Z');
   assert.equal(llmRetryDelayMs(0, 'Thu, 17 Sep 2026 00:00:10 GMT', Date.parse('2026-09-17T00:00:00.000Z')), 10_000);
   assert.ok(until > 0);
+});
+
+test('问答永远独占 slot 0，不会被背景智析饿死', () => {
+  assert.deepEqual(laneSlots('interactive', 4), [LLM_INTERACTIVE_SLOT]);
+  assert.deepEqual(laneSlots('interactive', 1), [LLM_INTERACTIVE_SLOT]);
+  // 并发 3 智析 => 总槽 4 => 背景占 1..3，绝不碰 slot 0
+  assert.deepEqual(laneSlots('background', 4), [1, 2, 3]);
+  assert.ok(!laneSlots('background', 4).includes(LLM_INTERACTIVE_SLOT));
+});
+
+test('单槽配置下 background 退回 slot 0，保持存量单并发语义', () => {
+  assert.deepEqual(laneSlots('background', 1), [LLM_INTERACTIVE_SLOT]);
+  assert.deepEqual(laneSlots('background'), [LLM_INTERACTIVE_SLOT]);
+});
+
+test('background 车道可真正并发，不被串行链抵消', async () => {
+  process.env.LLM_GATE_FILE = join(mkdtempSync(join(tmpdir(), 'llm-gate-conc-')), 'gate.lock');
+  let peak = 0;
+  let active = 0;
+  const run = () => withLlmSlot(async () => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    active -= 1;
+  }, undefined, undefined, { slots: 4, lane: 'background' });
+  await Promise.all([run(), run(), run()]);
+  assert.equal(peak, 3, '并发 3 应真正同时在跑');
+});
+
+test('background 并发不会占满问答的保留槽', async () => {
+  process.env.LLM_GATE_FILE = join(mkdtempSync(join(tmpdir(), 'llm-gate-reserve-')), 'gate.lock');
+  let chatRan = false;
+  const holds = [0, 1, 2].map(() => withLlmSlot(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }, undefined, undefined, { slots: 4, lane: 'background' }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  // 3 个背景任务跑满 slot 1..3 时，问答仍能立刻拿到 slot 0
+  await withLlmSlot(async () => { chatRan = true; }, undefined, 300);
+  assert.equal(chatRan, true, '智析跑满时问答必须仍能立即执行');
+  await Promise.all(holds);
 });
 
 test('withLlmSlot runs overlapping work one at a time', async () => {

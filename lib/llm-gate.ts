@@ -23,8 +23,32 @@ export function isLlmSlotBusyError(error: unknown) {
 
 let tail: Promise<unknown> = Promise.resolve();
 
-function lockPath() {
+/**
+ * Lane model (keeps 问答 real-time while 智析 runs concurrently):
+ * - `interactive` (chat/问答) only ever uses slot 0, so it can never be starved by背景智析.
+ * - `background` (自动智析) uses slots 1..totalSlots-1. Pass `slots = verdictLimit + 1`.
+ * Default `slots = 1` keeps the historical single-in-flight behaviour for every existing caller.
+ */
+export type LlmLane = 'interactive' | 'background';
+export type LlmSlotOptions = { slots?: number; lane?: LlmLane };
+
+export const LLM_INTERACTIVE_SLOT = 0;
+
+function baseLockPath() {
   return process.env.LLM_GATE_FILE || join(process.cwd(), '.data', 'llm-gate.lock');
+}
+
+function lockPath(slot = LLM_INTERACTIVE_SLOT) {
+  const base = baseLockPath();
+  return slot <= 0 ? base : `${base}.${slot}`;
+}
+
+/** Slot indexes a lane may occupy, in acquire order. */
+export function laneSlots(lane: LlmLane, slots = 1): number[] {
+  const total = Math.max(1, Math.floor(slots));
+  if (lane === 'interactive') return [LLM_INTERACTIVE_SLOT];
+  if (total <= 1) return [LLM_INTERACTIVE_SLOT];
+  return Array.from({ length: total - 1 }, (_, i) => i + 1);
 }
 
 function sleep(ms: number, signal?: AbortSignal) {
@@ -78,38 +102,55 @@ function tryCreateLock(file: string) {
   writeFileSync(file, `${JSON.stringify({ pid: process.pid, at: Date.now() })}\n`, { flag: 'wx' });
 }
 
-async function acquireFileLock(signal?: AbortSignal, maxWaitMs = SLOT_WAIT_MS) {
-  const file = lockPath();
-  const started = Date.now();
-  const budget = Number.isFinite(maxWaitMs) && maxWaitMs > 0 ? maxWaitMs : SLOT_WAIT_MS;
-  while (Date.now() - started < budget) {
-    if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+/** Try every slot this lane owns once; returns the acquired slot index or null. */
+function tryAcquireAnySlot(slots: number[]): number | null {
+  for (const slot of slots) {
+    const file = lockPath(slot);
     try {
       tryCreateLock(file);
-      return;
+      return slot;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST') throw error;
       if (lockIsStale(file)) {
         try { unlinkSync(file); } catch { /* raced */ }
-        continue;
+        try {
+          tryCreateLock(file);
+          return slot;
+        } catch { /* someone else took the reclaimed slot */ }
       }
-      await sleep(120 + Math.floor(Math.random() * 80), signal);
     }
+  }
+  return null;
+}
+
+async function acquireFileLock(
+  signal?: AbortSignal,
+  maxWaitMs = SLOT_WAIT_MS,
+  options: LlmSlotOptions = {},
+): Promise<number> {
+  const slots = laneSlots(options.lane ?? 'interactive', options.slots);
+  const started = Date.now();
+  const budget = Number.isFinite(maxWaitMs) && maxWaitMs > 0 ? maxWaitMs : SLOT_WAIT_MS;
+  while (Date.now() - started < budget) {
+    if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    const slot = tryAcquireAnySlot(slots);
+    if (slot !== null) return slot;
+    await sleep(120 + Math.floor(Math.random() * 80), signal);
   }
   if (budget < SLOT_WAIT_MS) throw new LlmSlotBusyError();
   throw new Error('LLM 排队超时');
 }
 
-function releaseFileLock() {
-  const file = lockPath();
+function releaseFileLock(slot = LLM_INTERACTIVE_SLOT) {
+  const file = lockPath(slot);
   const lock = readLock(file);
   if (lock && lock.pid !== process.pid) return;
   try { unlinkSync(file); } catch { /* already gone */ }
 }
 
-function touchFileLock() {
-  const file = lockPath();
+function touchFileLock(slot = LLM_INTERACTIVE_SLOT) {
+  const file = lockPath(slot);
   const lock = readLock(file);
   if (!lock || lock.pid !== process.pid) return;
   try {
@@ -231,25 +272,34 @@ export async function fetchChatCompletionsFrom(
   return fetchFromProvider(provider, body, options);
 }
 
-/** One in-flight LLM call across this process and other local processes sharing the lock file. */
+/**
+ * Hold one LLM slot across this process and other local processes sharing the lock files.
+ * `interactive` keeps the historical single-file, in-order behaviour; `background` fans out
+ * over the extra slots so 自动智析 can run N-way concurrent without blocking 问答.
+ */
 export async function withLlmSlot<T>(
   fn: () => Promise<T>,
   signal?: AbortSignal,
   acquireTimeoutMs?: number,
+  options: LlmSlotOptions = {},
 ): Promise<T> {
   if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
-  const run = tail.then(async () => {
+  const lane = options.lane ?? 'interactive';
+  const body = async () => {
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
-    await acquireFileLock(signal, acquireTimeoutMs);
-    const beat = setInterval(() => touchFileLock(), LOCK_HEARTBEAT_MS);
+    const slot = await acquireFileLock(signal, acquireTimeoutMs, options);
+    const beat = setInterval(() => touchFileLock(slot), LOCK_HEARTBEAT_MS);
     beat.unref?.();
     try {
       return await fn();
     } finally {
       clearInterval(beat);
-      releaseFileLock();
+      releaseFileLock(slot);
     }
-  });
+  };
+  // Background lanes must not serialize behind each other, otherwise concurrency is a no-op.
+  if (lane === 'background') return body();
+  const run = tail.then(body);
   tail = run.then(() => undefined, () => undefined);
   return run;
 }

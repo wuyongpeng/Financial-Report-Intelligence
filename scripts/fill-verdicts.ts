@@ -1,6 +1,7 @@
 import { closeDb } from '../lib/db';
 import { llmConfigured } from '../lib/llm-providers';
 import { fillReportVerdict, listReportsNeedingVerdict } from '../lib/report-verdict-store';
+import { skippedVerdictIds } from '../lib/verdict-abort';
 
 function arg(name: string, fallback: number) {
   const raw = process.argv.find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1);
@@ -27,7 +28,8 @@ async function main() {
   }
   const limit = arg('--limit', 5000);
   const concurrency = Math.min(arg('--concurrency', 2), 4);
-  const rows = await listReportsNeedingVerdict(limit);
+  // 尊重采集页的「中止/已跳过」标记，避免手动批量又把用户明确跳过的份数拉回来
+  const rows = await listReportsNeedingVerdict(limit, skippedVerdictIds());
   console.info(`[fill-verdicts] ${rows.length} reports need overview, concurrency=${concurrency}`);
   let ok = 0;
   let failed = 0;

@@ -328,6 +328,7 @@ export async function GET() {
     const coverageBootstrap = getGapScanState();
     const verdictView = await loadVerdictQueueView(control.autoVerdictEnabled);
     const { items: verdictQueueItems, ...verdictQueue } = verdictView;
+    const verdictSlots = verdictQueue.slots;
     return Response.json({
       mode: 'live',
       running,
@@ -347,6 +348,7 @@ export async function GET() {
       counts,
       downloadSlots,
       parseSlots,
+      verdictSlots,
       queueItems,
       activeItems,
       recentDownloads: recentDownloads.map((row, i) => {
@@ -393,6 +395,7 @@ export async function GET() {
         downloadPauseMs: settings.downloadPauseSec * 1000,
         lookbackDays: settings.lookbackDays,
         pollIntervalMin: settings.pollIntervalMin,
+        verdictLimit: settings.verdictLimit,
         maxPages: Number(process.env.INGEST_MAX_PAGES ?? 8),
         downloadTimeoutMs: 5 * 60 * 1000,
         parseTimeoutMs: 5 * 60 * 1000,

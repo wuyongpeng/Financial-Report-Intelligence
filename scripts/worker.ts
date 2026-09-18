@@ -5,8 +5,8 @@ import { ensureSchema } from '../lib/migrate';
 import { sendAlert } from '../lib/alerts';
 import { getIngestControl } from '../lib/ingest-control';
 import { getGapScanState, setDownloadGate } from '../lib/ingest-progress';
-import { getIngestSettings, ingestPollIntervalMs } from '../lib/ingest-settings';
-import { tickVerdictQueue } from '../lib/verdict-queue';
+import { getIngestSettings, ingestPollIntervalMs, llmTotalSlots } from '../lib/ingest-settings';
+import { claimVerdictJobs, runVerdictJob } from '../lib/verdict-queue';
 
 const DISCOVER_WATCH_MS = 15_000;
 const bootstrapGapMs = Number(process.env.INGEST_BOOTSTRAP_GAP_MS ?? 90_000);
@@ -22,7 +22,9 @@ let backlogTimer: NodeJS.Timeout | undefined;
 let universeTimer: NodeJS.Timeout | undefined;
 let verdictTimer: NodeJS.Timeout | undefined;
 let lastUniverseDay = '';
-let verdictBusy = false;
+let verdictScheduling = false;
+/** Jobs this process currently has in flight; size is capped by settings.verdictLimit. */
+const verdictInflight = new Map<string, Promise<unknown>>();
 
 async function withLock(
   label: string,
@@ -128,21 +130,52 @@ function scheduleVerdict(delayMs: number) {
   verdictTimer = setTimeout(() => void verdictTick(), Math.max(1_000, delayMs));
 }
 
+/**
+ * Concurrent 智析 scheduler.
+ * Each tick tops the in-flight set back up to settings.verdictLimit, so a 中止 (or any finish)
+ * immediately frees a slot and the head of 排队智析 moves in on the next short tick.
+ */
 async function verdictTick() {
-  if (verdictBusy) {
-    scheduleVerdict(5_000);
+  if (verdictScheduling) {
+    scheduleVerdict(2_000);
     return;
   }
-  verdictBusy = true;
+  verdictScheduling = true;
   try {
-    const delay = await tickVerdictQueue();
-    scheduleVerdict(delay);
+    const settings = getIngestSettings();
+    const slots = llmTotalSlots(settings);
+    const free = Math.max(0, settings.verdictLimit - verdictInflight.size);
+    if (free <= 0) {
+      scheduleVerdict(2_000);
+      return;
+    }
+    const picked = await claimVerdictJobs(free, verdictInflight.keys());
+    if (!picked.claims.length) {
+      scheduleVerdict(verdictInflight.size ? 3_000 : picked.delay);
+      return;
+    }
+    for (const claim of picked.claims) {
+      const task = runVerdictJob(claim.job, { force: claim.force, slots })
+        .catch(async (error) => {
+          console.error('[worker] verdict job failed', error);
+          await sendAlert('自动智析任务失败', { id: claim.job.id, error: String(error) });
+          return null;
+        })
+        .finally(() => {
+          verdictInflight.delete(claim.job.id);
+          // A finished/aborted job frees a slot: refill promptly instead of idling.
+          scheduleVerdict(1_000);
+        });
+      verdictInflight.set(claim.job.id, task);
+    }
+    // Keep filling remaining slots without waiting for the current batch to finish.
+    scheduleVerdict(verdictInflight.size < settings.verdictLimit ? 1_000 : 3_000);
   } catch (error) {
     console.error('[worker] verdict-queue failed', error);
     await sendAlert('自动智析队列失败', { error: String(error) });
     scheduleVerdict(30_000);
   } finally {
-    verdictBusy = false;
+    verdictScheduling = false;
   }
 }
 
@@ -173,7 +206,7 @@ async function main() {
   const settings = getIngestSettings();
   const intervalMs = ingestPollIntervalMs(settings);
   console.info(
-    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms, coverage-bootstrap every ${bootstrapGapMs}ms (until steady); days=${settings.lookbackDays} downloadLimit=${settings.downloadLimit} parseLimit=${settings.parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${settings.downloadPauseSec * 1000} pollIntervalMin=${settings.pollIntervalMin} maxPages=${maxPages}; coverageMode=${coverage.mode}; ashare-universe daily after 01:00; auto-verdict queue on`,
+    `[worker] started; backlog every ${backlogIntervalMs}ms, discover every ${intervalMs}ms, coverage-bootstrap every ${bootstrapGapMs}ms (until steady); days=${settings.lookbackDays} downloadLimit=${settings.downloadLimit} parseLimit=${settings.parseLimit} pagePauseMs=${pagePauseMs} downloadPauseMs=${settings.downloadPauseSec * 1000} pollIntervalMin=${settings.pollIntervalMin} maxPages=${maxPages}; coverageMode=${coverage.mode}; ashare-universe daily after 01:00; auto-verdict concurrency=${settings.verdictLimit} (+1 reserved chat slot)`,
   );
 }
 

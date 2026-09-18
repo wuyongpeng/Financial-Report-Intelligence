@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_INGEST_SETTINGS, ingestPollIntervalMs, normalizeIngestSettings } from '../lib/ingest-settings';
+import { DEFAULT_INGEST_SETTINGS, ingestPollIntervalMs, llmTotalSlots, normalizeIngestSettings } from '../lib/ingest-settings';
 
 test('product defaults match the documented gentle ingest limits', () => {
   assert.equal(DEFAULT_INGEST_SETTINGS.downloadLimit, 2);
@@ -11,6 +11,19 @@ test('product defaults match the documented gentle ingest limits', () => {
 test('normalizeIngestSettings treats missing or blank fields as product defaults', () => {
   assert.deepEqual(normalizeIngestSettings({ downloadPauseSec: undefined as unknown as number }), DEFAULT_INGEST_SETTINGS);
   assert.deepEqual(normalizeIngestSettings({ downloadPauseSec: '' as unknown as number }), DEFAULT_INGEST_SETTINGS);
+});
+
+test('智析并发默认 3，问答另有独立槽位（总槽位 = 并发 + 1）', () => {
+  assert.equal(DEFAULT_INGEST_SETTINGS.verdictLimit, 3);
+  assert.equal(llmTotalSlots(DEFAULT_INGEST_SETTINGS), 4);
+  assert.equal(llmTotalSlots({ ...DEFAULT_INGEST_SETTINGS, verdictLimit: 1 }), 2);
+});
+
+test('verdictLimit 夹到 1~3，避免单个供应商被限流', () => {
+  assert.equal(normalizeIngestSettings({ verdictLimit: 0 }).verdictLimit, 1);
+  assert.equal(normalizeIngestSettings({ verdictLimit: 9 }).verdictLimit, 3);
+  assert.equal(normalizeIngestSettings({ verdictLimit: 2 }).verdictLimit, 2);
+  assert.equal(normalizeIngestSettings({}).verdictLimit, 3);
 });
 
 test('normalizeIngestSettings clamps each field to the documented range', () => {
@@ -33,6 +46,7 @@ test('normalizeIngestSettings keeps in-range values and rounds', () => {
     parseLimit: 2,
     lookbackDays: 2,
     pollIntervalMin: 2,
+    verdictLimit: 2,
   });
   assert.deepEqual(next, {
     downloadPauseSec: 20,
@@ -40,6 +54,7 @@ test('normalizeIngestSettings keeps in-range values and rounds', () => {
     parseLimit: 2,
     lookbackDays: 2,
     pollIntervalMin: 2,
+    verdictLimit: 2,
   });
 });
 

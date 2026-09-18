@@ -2,7 +2,7 @@ import { parseSse } from './answer';
 import type { Citation } from './detail-model';
 import { loadRagContext } from './rag';
 import { parseReportVerdictJson, unwrapModelJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
-import { fetchChatCompletionsFrom, isLlmSlotBusyError, withLlmSlot } from './llm-gate';
+import { fetchChatCompletionsFrom, isLlmSlotBusyError, withLlmSlot, type LlmLane } from './llm-gate';
 import { llmConfigured, parseLlmProviders, type LlmProvider } from './llm-providers';
 import { formatLlmCallError, formatLlmHttpError } from './llm-error';
 
@@ -196,6 +196,10 @@ export type VerdictGenerateOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
   acquireTimeoutMs?: number;
+  /** Total LLM slots (智析并发 + 1 个问答保留槽). Omit to keep the legacy single-slot behaviour. */
+  slots?: number;
+  /** `background` lets N 智析 run concurrently while 问答 keeps its own reserved slot. */
+  lane?: LlmLane;
 };
 
 function providerAbortSignal(user?: AbortSignal) {
@@ -323,7 +327,7 @@ async function completeJson(
         console.warn('[verdict] schema rejected', { provider: provider.id, preview: content.content.slice(0, 240) });
       }
       return { ok: false, error: lastError };
-    }, options.signal, options.acquireTimeoutMs);
+    }, options.signal, options.acquireTimeoutMs, { slots: options.slots, lane: options.lane });
   } catch (error) {
     if (isLlmSlotBusyError(error)) return { ok: false, error: 'LLM 正被占用，稍后重试。', retryLater: true };
     console.warn('[verdict] model call failed', { message: String(error) });

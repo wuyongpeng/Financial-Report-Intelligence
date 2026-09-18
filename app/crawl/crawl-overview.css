@@ -119,6 +119,20 @@
 .co-sb-pop-fail:hover .co-sb-pop-fail-tip,.co-sb-pop-fail:focus .co-sb-pop-fail-tip,.co-sb-pop-fail:focus-visible .co-sb-pop-fail-tip{opacity:1;visibility:visible}
 .co-sb-pop-note{margin:0 0 8px;padding:8px 10px;border-radius:8px;background:#f5f7fb;border:1px solid #e4eaf3;font-size:11.5px;line-height:1.5;color:#5d7190}
 .co-sb-pop-empty{color:#91a0b4 !important;border:0 !important}
+.co-sb-pop-acts{display:flex;justify-content:flex-end;margin-top:4px}
+.co-sb-pop-abort{
+  border:1px solid #f0c3c3;background:#fff6f6;color:#c0392b;
+  border-radius:6px;padding:2px 9px;font-size:11px;line-height:1.6;cursor:pointer;
+  transition:background .15s ease,border-color .15s ease;
+}
+.co-sb-pop-abort:hover:not(:disabled){background:#fdecea;border-color:#e59a9a}
+.co-sb-pop-abort:disabled{opacity:.55;cursor:default}
+.co-sb-pop-foot{margin-top:8px;padding-top:8px;border-top:1px solid #eef1f6;display:flex;justify-content:flex-end}
+.co-sb-pop-retry-all{
+  border:1px solid #cddcf5;background:#f2f7ff;color:#3064db;
+  border-radius:6px;padding:3px 10px;font-size:11.5px;cursor:pointer;
+}
+.co-sb-pop-retry-all:hover{background:#e6efff;border-color:#a9c5ef}
 .co-stage-msg{
   margin:0 0 10px;
   min-height:1.5em;

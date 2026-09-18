@@ -40,6 +40,7 @@ export async function POST(request: Request) {
     parseLimit?: unknown;
     lookbackDays?: unknown;
     pollIntervalMin?: unknown;
+    verdictLimit?: unknown;
   } = {};
   try {
     body = await request.json();
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
   if (body.parseLimit !== undefined) settingsPatch.parseLimit = Number(body.parseLimit);
   if (body.lookbackDays !== undefined) settingsPatch.lookbackDays = Number(body.lookbackDays);
   if (body.pollIntervalMin !== undefined) settingsPatch.pollIntervalMin = Number(body.pollIntervalMin);
+  if (body.verdictLimit !== undefined) settingsPatch.verdictLimit = Number(body.verdictLimit);
   const hasSettings = Object.keys(settingsPatch).length > 0;
   if (!('autoCrawlEnabled' in patch) && !('downloadPaused' in patch) && !('autoVerdictEnabled' in patch) && !hasSettings) {
     return Response.json({ error: '需要自动抓取开关、自动智析开关或采集参数' }, { status: 400 });
@@ -74,11 +76,11 @@ export async function POST(request: Request) {
 
   let note = '已更新';
   if (hasSettings && !('autoCrawlEnabled' in patch) && !('downloadPaused' in patch) && !('autoVerdictEnabled' in patch)) {
-    note = `已保存采集参数：下载间隔 ${settings.downloadPauseSec}s · 下载并发 ${settings.downloadLimit} · 解析并发 ${settings.parseLimit} · 采集窗口近 ${settings.lookbackDays} 天 · 轮询间隔 ${settings.pollIntervalMin} 分钟`;
+    note = `已保存采集参数：下载间隔 ${settings.downloadPauseSec}s · 下载并发 ${settings.downloadLimit} · 解析并发 ${settings.parseLimit} · 智析并发 ${settings.verdictLimit} · 采集窗口近 ${settings.lookbackDays} 天 · 轮询间隔 ${settings.pollIntervalMin} 分钟`;
   } else if (typeof patch.autoVerdictEnabled === 'boolean' && !('autoCrawlEnabled' in patch) && !('downloadPaused' in patch)) {
     note = control.autoVerdictEnabled
-      ? '已开启自动智析：空闲时单线程补齐未生成的概览，单份首字 30 秒、整段 5 分钟，失败跳过并冷却'
-      : '已关闭自动智析：进行中的一份会结束，队列不再领取新任务';
+      ? `已开启自动智析：并发 ${settings.verdictLimit} 补齐未生成的概览（问答另有独立槽位不受影响），单份首字 30 秒、整段 5 分钟，可随时中止`
+      : '已关闭自动智析：进行中的任务会结束，队列不再领取新任务';
   } else if (typeof patch.autoCrawlEnabled === 'boolean' || typeof patch.downloadPaused === 'boolean') {
     note = control.autoCrawlEnabled
       ? '已开启自动抓取：识别 PDF 地址并并发下载'

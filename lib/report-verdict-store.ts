@@ -270,9 +270,16 @@ export async function getVerdictQueueJob(reportId: string): Promise<VerdictQueue
   return row ?? null;
 }
 
-export async function listReportsNeedingVerdict(limit = 5000) {
+/** Manually skipped (中止) ids never come back until the user asks for a retry. */
+function excluded(ids?: Iterable<string> | null): string[] {
+  if (!ids) return [];
+  return [...new Set([...ids].map((id) => String(id ?? '').trim()).filter(Boolean))];
+}
+
+export async function listReportsNeedingVerdict(limit = 5000, excludeIds?: Iterable<string> | null) {
   await ensureBackendSchema();
   const cap = Math.min(Math.max(1, Math.floor(limit)), 5000);
+  const skip = excluded(excludeIds);
   return getDb()<VerdictQueueJob[]>`
     SELECT a.id, a.code, a.company_name, a.title, a.published_at,
       v.status AS verdict_status, v.error AS verdict_error
@@ -281,13 +288,15 @@ export async function listReportsNeedingVerdict(limit = 5000) {
     LEFT JOIN report_verdicts v ON v.announcement_id=a.id
     WHERE a.status IN ('review', 'online', 'parse_partial')
       AND (v.announcement_id IS NULL OR v.status <> 'ready')
+      AND NOT (a.id = ANY(${skip}::text[]))
     ORDER BY a.published_at DESC
     LIMIT ${cap}
   `;
 }
 
-export async function countReportsNeedingVerdict() {
+export async function countReportsNeedingVerdict(excludeIds?: Iterable<string> | null) {
   await ensureBackendSchema();
+  const skip = excluded(excludeIds);
   const [row] = await getDb()<Array<{ n: number }>>`
     SELECT COUNT(*)::int AS n
     FROM announcements a
@@ -295,19 +304,22 @@ export async function countReportsNeedingVerdict() {
     LEFT JOIN report_verdicts v ON v.announcement_id=a.id
     WHERE a.status IN ('review', 'online', 'parse_partial')
       AND (v.announcement_id IS NULL OR v.status <> 'ready')
+      AND NOT (a.id = ANY(${skip}::text[]))
   `;
   return row?.n ?? 0;
 }
 
-export async function countDueVerdictJobs(failBackoffMs = 30 * 60_000) {
+export async function countDueVerdictJobs(failBackoffMs = 30 * 60_000, excludeIds?: Iterable<string> | null) {
   await ensureBackendSchema();
   const failBackoffSec = Math.max(60, Math.floor(failBackoffMs / 1000));
+  const skip = excluded(excludeIds);
   const [row] = await getDb()<Array<{ n: number }>>`
     SELECT COUNT(*)::int AS n
     FROM announcements a
     JOIN companies c ON c.code=a.code AND c.enabled=true
     LEFT JOIN report_verdicts v ON v.announcement_id=a.id
     WHERE a.status IN ('review', 'online', 'parse_partial')
+      AND NOT (a.id = ANY(${skip}::text[]))
       AND (
         v.announcement_id IS NULL
         OR (v.status = 'failed' AND v.updated_at < NOW() - ${failBackoffSec} * INTERVAL '1 second')
@@ -317,16 +329,18 @@ export async function countDueVerdictJobs(failBackoffMs = 30 * 60_000) {
   return row?.n ?? 0;
 }
 
-export async function listDueVerdictJobs(limit = 12, failBackoffMs = 30 * 60_000) {
+export async function listDueVerdictJobs(limit = 12, failBackoffMs = 30 * 60_000, excludeIds?: Iterable<string> | null) {
   await ensureBackendSchema();
   const cap = Math.min(Math.max(1, Math.floor(limit)), 80);
   const failBackoffSec = Math.max(60, Math.floor(failBackoffMs / 1000));
+  const skip = excluded(excludeIds);
   return getDb()<VerdictQueueJob[]>`
     SELECT a.id, a.code, a.company_name, a.title, a.published_at
     FROM announcements a
     JOIN companies c ON c.code=a.code AND c.enabled=true
     LEFT JOIN report_verdicts v ON v.announcement_id=a.id
     WHERE a.status IN ('review', 'online', 'parse_partial')
+      AND NOT (a.id = ANY(${skip}::text[]))
       AND (
         v.announcement_id IS NULL
         OR (v.status = 'failed' AND v.updated_at < NOW() - ${failBackoffSec} * INTERVAL '1 second')
@@ -334,6 +348,21 @@ export async function listDueVerdictJobs(limit = 12, failBackoffMs = 30 * 60_000
       )
     ORDER BY a.published_at DESC
     LIMIT ${cap}
+  `;
+}
+
+/** Rows behind the 「已跳过」entry point, newest first. */
+export async function listVerdictJobsByIds(ids: Iterable<string>): Promise<VerdictQueueJob[]> {
+  const wanted = excluded(ids);
+  if (!wanted.length) return [];
+  await ensureBackendSchema();
+  return getDb()<VerdictQueueJob[]>`
+    SELECT a.id, a.code, a.company_name, a.title, a.published_at,
+      v.status AS verdict_status, v.error AS verdict_error
+    FROM announcements a
+    LEFT JOIN report_verdicts v ON v.announcement_id=a.id
+    WHERE a.id = ANY(${wanted}::text[])
+    ORDER BY a.published_at DESC
   `;
 }
 
@@ -353,7 +382,11 @@ async function releaseQueueClaim(reportId: string, previous: VerdictRow | null) 
   `;
 }
 
-export type QueuedVerdictOutcome = 'ok' | 'fail' | 'busy' | 'skip';
+export type QueuedVerdictOutcome = 'ok' | 'fail' | 'busy' | 'skip' | 'aborted';
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && (error.name === 'AbortError' || /aborted/i.test(error.message));
+}
 
 /** One background job: never wait 4 minutes for another worker; yield if the LLM slot is taken. */
 export async function runQueuedVerdict(
@@ -374,6 +407,11 @@ export async function runQueuedVerdict(
   `;
   try {
     const generated = await generateWithHeartbeat(reportId, options);
+    // 用户中止：不写 failed（那会污染失败率与熔断），只释放 pending 占位，由调用方落 skip 标记。
+    if (options.signal?.aborted) {
+      await releaseQueueClaim(reportId, previous);
+      return { outcome: 'aborted', error: '已手动中止' };
+    }
     if (generated.ok) {
       await markReady(reportId, generated.value);
       return { outcome: 'ok', error: null };
@@ -385,6 +423,10 @@ export async function runQueuedVerdict(
     await markFailed(reportId, publicVerdictError(generated.error));
     return { outcome: 'fail', error: publicVerdictError(generated.error) };
   } catch (error) {
+    if (options.signal?.aborted || isAbortError(error)) {
+      await releaseQueueClaim(reportId, previous);
+      return { outcome: 'aborted', error: '已手动中止' };
+    }
     const message = publicVerdictError(error instanceof Error ? error.message : String(error));
     await markFailed(reportId, message);
     return { outcome: 'fail', error: message };
