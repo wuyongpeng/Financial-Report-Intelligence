@@ -1548,7 +1548,7 @@ export default function CrawlOverview() {
                 <span className="co-switch-knob" aria-hidden="true" />
               </button>
             </label>
-            <label className={`co-auto-toggle ${!autoVerdictEnabled ? 'paused' : ''}`} title={autoVerdictEnabled ? '已开启：空闲时单线程补齐未智析财报。单份模型调用限 90 秒，抢不到模型则让路；失败跳过，连续失败会冷却。' : '已关闭：不再自动领取未智析财报。详情页和批量智析仍可手动生成。'}>
+            <label className={`co-auto-toggle ${!autoVerdictEnabled ? 'paused' : ''}`} title={autoVerdictEnabled ? '已开启：空闲时单线程补齐未智析财报。单份模型调用限 3 分钟，抢不到模型则让路；失败跳过，连续失败会冷却。' : '已关闭：不再自动领取未智析财报。详情页和批量智析仍可手动生成。'}>
               <span>自动智析</span>
               <button
                 type="button"
@@ -1578,7 +1578,7 @@ export default function CrawlOverview() {
                   <li><em>解析并发</em><span>{parseMax}（闲时单队列；详情页可额外并发）</span></li>
                   <li><em>下载间隔</em><span>{downloadPauseSec} 秒</span></li>
                   <li><em>轮询间隔</em><span>{pollIntervalMin} 分钟</span></li>
-                  <li><em>超时</em><span>下载/解析各 5 分钟 · 智析 90 秒</span></li>
+                  <li><em>超时</em><span>下载/解析各 5 分钟 · 智析 3 分钟</span></li>
                   <li><em>采集窗口</em><span>{coverageReady ? `近 ${lookbackDays} 天公告` : '最早 2025Q1'}</span></li>
                 </ul>
               </span>
@@ -1707,7 +1707,7 @@ export default function CrawlOverview() {
                 title="自动智析"
                 items={live?.verdictQueueItems ?? []}
                 empty={autoVerdictEnabled ? ((live?.verdictQueue?.pending ?? 0) > 0 ? '待补项正在冷却或等待 Worker' : '暂无待智析任务') : '自动智析已关'}
-                note={live?.verdictQueue?.note || (autoVerdictEnabled ? '空闲时单线程补齐，单份限 90 秒。' : '已关闭：详情页打开或批量智析仍可手动生成。')}
+                note={live?.verdictQueue?.note || (autoVerdictEnabled ? '空闲时单线程补齐，单份限 3 分钟。' : '已关闭：详情页打开或批量智析仍可手动生成。')}
                 onClose={() => setQueuePopover(null)}
                 anchorRef={verdictBtnRef}
               />

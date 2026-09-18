@@ -45,15 +45,31 @@ JSON Schema：
 ${JSON.stringify(VERDICT_JSON_SCHEMA)}`;
 }
 
+export const VERDICT_PROVIDER_TIMEOUT_MS = 90_000;
+export const VERDICT_TOTAL_TIMEOUT_MS = 180_000;
+
 function timeoutMs() {
-  const setting = Number(process.env.LLM_TIMEOUT_MS ?? 90_000);
-  return Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 180_000) : 90_000;
+  const setting = Number(process.env.LLM_TIMEOUT_MS ?? VERDICT_TOTAL_TIMEOUT_MS);
+  const raw = Number.isFinite(setting) ? setting : VERDICT_TOTAL_TIMEOUT_MS;
+  return Math.min(Math.max(raw, VERDICT_TOTAL_TIMEOUT_MS), 240_000);
 }
 
 function failoverCapMs() {
   const raw = Number(process.env.LLM_FAILOVER_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw > 0) return Math.max(raw, 1000);
-  return 45_000;
+  if (Number.isFinite(raw) && raw >= VERDICT_PROVIDER_TIMEOUT_MS) return raw;
+  return VERDICT_PROVIDER_TIMEOUT_MS;
+}
+
+/** MiniMax returns JSON quickly; GLM-5 often spends the budget on hidden thinking. */
+export function orderVerdictProviders(providers: LlmProvider[]): LlmProvider[] {
+  const rank = (model: string) => {
+    const name = model.toLowerCase();
+    if (name.includes('minimax')) return 0;
+    if (name.includes('glm-5.2')) return 1;
+    if (name.includes('glm-5.1')) return 2;
+    return 3;
+  };
+  return [...providers].sort((a, b) => rank(a.model) - rank(b.model));
 }
 
 function flattenModelText(value: unknown): string {
@@ -156,7 +172,7 @@ async function completeJson(
     messages,
   };
   const plainBody = { temperature: 0, max_tokens: maxTokens, messages };
-  const providers = parseLlmProviders();
+  const providers = orderVerdictProviders(parseLlmProviders());
   if (!providers.length) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
   try {
     return await withLlmSlot(async () => {

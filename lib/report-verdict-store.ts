@@ -17,8 +17,8 @@ type VerdictRow = {
 };
 
 const inflight = new Map<string, Promise<ReportVerdict | null>>();
-const STALE_MS = 3 * 60 * 1000;
-const WAIT_MS = 4 * 60 * 1000;
+const STALE_MS = 8 * 60 * 1000;
+const WAIT_MS = 8 * 60 * 1000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -84,7 +84,7 @@ async function claimGenerate(reportId: string) {
     SET status='pending', error=NULL, updated_at=NOW()
     WHERE announcement_id=${reportId}
       AND status='pending'
-      AND updated_at < NOW() - INTERVAL '3 minutes'
+      AND updated_at < NOW() - INTERVAL '8 minutes'
     RETURNING announcement_id
   `;
   return reclaimed.length > 0;
@@ -293,7 +293,7 @@ export async function countDueVerdictJobs(failBackoffMs = 30 * 60_000) {
       AND (
         v.announcement_id IS NULL
         OR (v.status = 'failed' AND v.updated_at < NOW() - ${failBackoffSec} * INTERVAL '1 second')
-        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '3 minutes')
+        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '8 minutes')
       )
   `;
   return row?.n ?? 0;
@@ -312,7 +312,7 @@ export async function listDueVerdictJobs(limit = 12, failBackoffMs = 30 * 60_000
       AND (
         v.announcement_id IS NULL
         OR (v.status = 'failed' AND v.updated_at < NOW() - ${failBackoffSec} * INTERVAL '1 second')
-        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '3 minutes')
+        OR (v.status = 'pending' AND v.updated_at < NOW() - INTERVAL '8 minutes')
       )
     ORDER BY a.published_at DESC
     LIMIT ${cap}

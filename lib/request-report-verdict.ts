@@ -1,7 +1,7 @@
 import { acceptVerdictPayload, type ReportVerdict } from './report-verdict';
 
 const DEFAULT_POLL_MS = 1500;
-const DEFAULT_TIMEOUT_MS = 180_000;
+const DEFAULT_TIMEOUT_MS = 240_000;
 
 type VerdictRequestOptions = {
   fill?: boolean;

@@ -410,7 +410,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const toastTimer = window.setTimeout(() => {
       if (!abort.signal.aborted) setQuietToast({ text: '正在生成本期智析', at: Date.now() });
     }, 400);
-    void requestReportVerdict(selected.id, { fill: true, signal: abort.signal })
+    void requestReportVerdict(selected.id, { fill: true })
       .then((parsedVerdict) => {
         if (abort.signal.aborted) return;
         window.clearTimeout(toastTimer);
@@ -429,7 +429,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       window.clearTimeout(toastTimer);
       abort.abort();
     };
-  }, [selected.id, selected.parsed_at, selected.metrics.length, canLoadReportData]);
+  }, [selected.id, canLoadReportData]);
   async function refreshVerdict() {
     if (verdictRefreshing || verdictStatus === 'loading') return;
     setVerdictRefreshing(true);

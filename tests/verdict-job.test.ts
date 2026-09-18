@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractVerdictCompletion } from '../lib/report-verdict-llm';
+import { extractVerdictCompletion, orderVerdictProviders } from '../lib/report-verdict-llm';
 import { shouldKickVerdictJob, type VerdictPeek } from '../lib/report-verdict-store';
 
 function peek(partial: Partial<VerdictPeek>): VerdictPeek {
@@ -37,4 +37,17 @@ test('extractVerdictCompletion reads JSON after empty content or think tags', ()
   assert.equal(extractVerdictCompletion(JSON.stringify({
     choices: [{ finish_reason: 'stop', message: { content: '', reasoning_content: payload } }],
   })).json, payload);
+});
+
+test('orderVerdictProviders prefers MiniMax before GLM for JSON generation', () => {
+  const ordered = orderVerdictProviders([
+    { id: 'primary', baseUrl: 'https://gw.example/v1', model: 'thudm/glm-5.2' },
+    { id: 'thudm/glm-5.1', baseUrl: 'https://gw.example/v1', model: 'thudm/glm-5.1' },
+    { id: 'minimax/MiniMax-M2.7-highspeed', baseUrl: 'https://gw.example/v1', model: 'minimax/MiniMax-M2.7-highspeed' },
+  ]);
+  assert.deepEqual(ordered.map((item) => item.model), [
+    'minimax/MiniMax-M2.7-highspeed',
+    'thudm/glm-5.2',
+    'thudm/glm-5.1',
+  ]);
 });
