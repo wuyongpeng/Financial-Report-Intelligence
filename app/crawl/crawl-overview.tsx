@@ -1509,6 +1509,8 @@ export default function CrawlOverview() {
         position: i + 1,
         status: 'parsing',
         reason: '正在解析指定财报…',
+        progress: '正在解析指定财报…',
+        startedAt: undefined as string | undefined,
       }));
     return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
   }, [optimisticJobs, live?.activeParseItems, live?.activeItems, parseElapsedTick]);

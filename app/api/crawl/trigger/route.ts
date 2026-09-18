@@ -61,20 +61,23 @@ export async function POST(request: Request) {
     // Detail auto-parse: highest priority, concurrent, skip idle single queue.
     if (body.immediate === true && announcementIds.length) {
       const ids = announcementIds;
-      after(() => {
-        const run = parseOnly
-          ? Promise.all(ids.map((id) => parseAnnouncementById(id)))
-          : processBacklog({
-              downloadLimit: Math.max(1, ids.length),
-              parseLimit: Math.max(1, ids.length),
-              codes,
-              fullHistory,
-              announcementIds: ids,
-              periods,
-            });
-        return run.catch((error) => {
+      after(async () => {
+        try {
+          if (parseOnly) {
+            await Promise.all(ids.map((id) => parseAnnouncementById(id)));
+            return;
+          }
+          await processBacklog({
+            downloadLimit: Math.max(1, ids.length),
+            parseLimit: Math.max(1, ids.length),
+            codes,
+            fullHistory,
+            announcementIds: ids,
+            periods,
+          });
+        } catch (error) {
           console.error('[parse] immediate failed', ids, error);
-        });
+        }
       });
       return Response.json({
         mode: parseOnly ? 'parse-now' : 'ingest-now',

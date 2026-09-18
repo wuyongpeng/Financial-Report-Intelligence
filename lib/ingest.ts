@@ -31,6 +31,7 @@ import {
 } from './ingest-progress';
 import { getIngestSettings } from './ingest-settings';
 import { PARSE_PRIORITY_MANUAL } from './parse-queue';
+import { isPdfBytes, looksLikeBlockedPdf, pdfUrlCandidates, pickCninfoFallback } from './pdf-download';
 
 const companies = companiesJson as Company[];
 const companyByCode = new Map(companies.map((company) => [company.code, company]));
@@ -354,8 +355,13 @@ async function parseStoredAnnouncement(
     }
     if (payload && filePath && shouldExtractTextExternally(payload.byteLength)) payload = null;
     if (!payload && !(filePath && onDiskBytes)) throw new Error('缺少可解析的 PDF');
+    const parseBytes = !payload
+      ? null
+      : payload instanceof ArrayBuffer
+        ? payload
+        : payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength) as ArrayBuffer;
     const extracted = await Promise.race([
-      parseCoreMetrics(payload, { filePath }),
+      parseCoreMetrics(parseBytes, { filePath }),
       new Promise<never>((_, reject) => {
         parseController.signal.addEventListener('abort', () => {
           reject(new Error('解析超时（5分钟）'));

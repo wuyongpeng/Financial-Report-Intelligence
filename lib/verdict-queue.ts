@@ -306,7 +306,7 @@ export async function tickVerdictQueue(): Promise<number> {
   }
   const streak = Number.isFinite(cooldownUntil) && cooldownUntil <= Date.now() ? 0 : prev.consecutiveFailures;
 
-  let jobs = control.autoVerdictEnabled
+  let jobs: VerdictQueueJob[] = control.autoVerdictEnabled
     ? await listDueVerdictJobs(12, VERDICT_FAIL_BACKOFF_MS)
     : [];
   let forceId: string | null = null;

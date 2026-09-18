@@ -25,11 +25,13 @@ function pending() {
 
 function startVerdict(id: string, refresh: boolean) {
   enqueuePriorityVerdict(id);
-  after(() => {
-    const job = refresh ? refreshReportVerdict(id) : executeReportVerdict(id);
-    return job.catch((error) => {
+  after(async () => {
+    try {
+      if (refresh) await refreshReportVerdict(id);
+      else await executeReportVerdict(id);
+    } catch (error) {
       console.error('[verdict] background generate failed', error);
-    });
+    }
   });
 }
 
