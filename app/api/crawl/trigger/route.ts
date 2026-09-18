@@ -1,7 +1,8 @@
-import { fillCoverageGaps, processBacklog, prioritizeCompanyCrawl, runIngestion } from '@/lib/ingest';
+import { fillCoverageGaps, processBacklog, prioritizeCompanyCrawl, runIngestion, enqueueParseFront, parseAnnouncementById } from '@/lib/ingest';
 import { demoAccessEnabled, isAppUser } from '@/lib/auth';
 import { getIngestControl } from '@/lib/ingest-control';
 import { getIngestSettings } from '@/lib/ingest-settings';
+import { after } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
 
   let body: {
     mode?: string; codes?: string[]; fullHistory?: boolean; lookback?: string; parseOnly?: boolean;
-    periods?: string[]; announcementIds?: string[];
+    periods?: string[]; announcementIds?: string[]; immediate?: boolean;
   } = {};
   try { body = await request.json(); } catch { /* empty body ok */ }
   const discover = body.mode === 'discover' && auth === 'token';
@@ -57,8 +58,51 @@ export async function POST(request: Request) {
     }
 
 
-    // Per-company parse only (local PDFs) — used by 数据采集「解析」.
+    // Detail auto-parse: highest priority, concurrent, skip idle single queue.
+    if (body.immediate === true && announcementIds.length) {
+      const ids = announcementIds;
+      after(() => {
+        const run = parseOnly
+          ? Promise.all(ids.map((id) => parseAnnouncementById(id)))
+          : processBacklog({
+              downloadLimit: Math.max(1, ids.length),
+              parseLimit: Math.max(1, ids.length),
+              codes,
+              fullHistory,
+              announcementIds: ids,
+              periods,
+            });
+        return run.catch((error) => {
+          console.error('[parse] immediate failed', ids, error);
+        });
+      });
+      return Response.json({
+        mode: parseOnly ? 'parse-now' : 'ingest-now',
+        auth,
+        codes,
+        periods,
+        announcementIds,
+        accepted: ids.length,
+        note: parseOnly ? '已立即开始解析，不进入闲时队列' : '已立即开始抓取并解析，不进入闲时队列',
+        ok: true,
+      }, { headers: { 'cache-control': 'no-store' } });
+    }
+
+    // Crawl-page manual parse: jump to the front of the idle single queue.
     if (parseOnly && (codes.length || announcementIds.length)) {
+      if (announcementIds.length) {
+        const queued = await enqueueParseFront(announcementIds);
+        return Response.json({
+          mode: 'parse-queue',
+          auth,
+          codes,
+          periods,
+          announcementIds,
+          queued,
+          note: queued ? `已插到解析队首 ${queued} 份，空闲时优先处理` : '没有可插队的已下载财报',
+          ok: true,
+        }, { headers: { 'cache-control': 'no-store' } });
+      }
       const result = await processBacklog({
         downloadLimit: 0,
         parseLimit: 1,
@@ -67,7 +111,7 @@ export async function POST(request: Request) {
         announcementIds,
         periods,
       });
-      return Response.json({ mode: 'parse', auth, codes, periods, announcementIds, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ mode: 'parse', auth, codes, periods, announcementIds, queued: 0, ...result, ok: true }, { headers: { 'cache-control': 'no-store' } });
     }
     // Per-company crawl. Manual 抓取 still downloads even when auto crawl is off.
     if (codes.length) {

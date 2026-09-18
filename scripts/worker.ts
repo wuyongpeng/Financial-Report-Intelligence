@@ -1,4 +1,4 @@
-import { bootstrapLiveData, fillCoverageGaps, processBacklog, runIngestion } from '../lib/ingest';
+import { bootstrapLiveData, countManualParsePriority, fillCoverageGaps, processBacklog, runIngestion } from '../lib/ingest';
 import { refreshAshareUniverse } from './refresh-ashare-universe';
 import { closeDb } from '../lib/db';
 import { ensureSchema } from '../lib/migrate';
@@ -11,6 +11,7 @@ import { tickVerdictQueue } from '../lib/verdict-queue';
 const DISCOVER_WATCH_MS = 15_000;
 const bootstrapGapMs = Number(process.env.INGEST_BOOTSTRAP_GAP_MS ?? 90_000);
 const backlogIntervalMs = Number(process.env.INGEST_BACKLOG_INTERVAL_MS ?? 45_000);
+const MANUAL_PARSE_BOOST_MS = 8_000;
 const pagePauseMs = Number(process.env.PAGE_PAUSE_MS ?? 1000);
 const maxPages = Number(process.env.INGEST_MAX_PAGES ?? 8);
 let busy = false;
@@ -73,19 +74,39 @@ async function coverageBootstrapTick() {
   await withLock('coverage-bootstrap', () => fillCoverageGaps({ companyLimit: 8, downloadLimit: 0 }));
 }
 
-async function backlogTick() {
-  const control = await getIngestControl();
-  const settings = getIngestSettings();
-  const autoOn = control.autoCrawlEnabled;
-  if (!autoOn) {
-    setDownloadGate({ nextAt: null, pauseMs: settings.downloadPauseSec * 1000, mode: 'paused' });
-    await withLock('backlog-parse-hold-download', () => processBacklog({ downloadLimit: 0, parseLimit: settings.parseLimit }));
-    return;
+function scheduleBacklog(delayMs = backlogIntervalMs) {
+  if (backlogTimer) clearTimeout(backlogTimer);
+  backlogTimer = setTimeout(() => void backlogTick(), Math.max(1_000, delayMs));
+}
+
+async function nextBacklogDelay() {
+  try {
+    if (await countManualParsePriority() > 0) return MANUAL_PARSE_BOOST_MS;
+  } catch (error) {
+    console.error('[worker] count manual parse priority failed', error);
   }
-  await withLock('backlog', async () => {
-    const processed = await processBacklog({ downloadLimit: settings.downloadLimit, parseLimit: settings.parseLimit });
-    return { processed };
-  });
+  return backlogIntervalMs;
+}
+
+async function backlogTick() {
+  try {
+    const control = await getIngestControl();
+    const settings = getIngestSettings();
+    const autoOn = control.autoCrawlEnabled;
+    if (!autoOn) {
+      setDownloadGate({ nextAt: null, pauseMs: settings.downloadPauseSec * 1000, mode: 'paused' });
+      await withLock('backlog-parse-hold-download', () => processBacklog({ downloadLimit: 0, parseLimit: settings.parseLimit }));
+      return;
+    }
+    await withLock('backlog', async () => {
+      const processed = await processBacklog({ downloadLimit: settings.downloadLimit, parseLimit: settings.parseLimit });
+      return { processed };
+    });
+  } catch (error) {
+    console.error('[worker] backlog tick failed', error);
+  } finally {
+    scheduleBacklog(await nextBacklogDelay());
+  }
 }
 
 
@@ -129,7 +150,7 @@ async function shutdown(signal: string) {
   console.info(`[worker] received ${signal}, shutting down`);
   if (discoverTimer) clearInterval(discoverTimer);
   if (bootstrapTimer) clearInterval(bootstrapTimer);
-  if (backlogTimer) clearInterval(backlogTimer);
+  if (backlogTimer) clearTimeout(backlogTimer);
   if (universeTimer) clearInterval(universeTimer);
   if (verdictTimer) clearTimeout(verdictTimer);
   await closeDb();
@@ -144,7 +165,6 @@ async function main() {
   await discoverTick();
   lastDiscoverAt = Date.now();
   void ashareUniverseTick();
-  backlogTimer = setInterval(() => void backlogTick(), backlogIntervalMs);
   discoverTimer = setInterval(() => maybeDiscover(), DISCOVER_WATCH_MS);
   bootstrapTimer = setInterval(() => void coverageBootstrapTick(), bootstrapGapMs);
   universeTimer = setInterval(() => { void ashareUniverseTick(); }, 30 * 60 * 1000);

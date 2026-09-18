@@ -1,10 +1,12 @@
-import { getDb } from '@/lib/db';
+import { ensureBackendSchema } from '@/lib/backend-schema';
 import { apiError } from '@/lib/api';
 import { estimateDownloadQueueWait } from '@/lib/crawl-display';
+import { getDb } from '@/lib/db';
 import { getIngestControl } from '@/lib/ingest-control';
 import { buildCoveredPeriodKeys, pendingDownloadSkipReason, periodFromTitle } from '@/lib/ingest-period';
 import { getDownloadGate, getGapScanState, listIngestProgress } from '@/lib/ingest-progress';
 import { getIngestSettings, ingestPollIntervalMs } from '@/lib/ingest-settings';
+import { formatParseElapsed } from '@/lib/parse-queue';
 import { loadVerdictQueueView } from '@/lib/verdict-queue';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +18,7 @@ function queueLabel(name: string, title: string, publishedAt: string) {
 
 export async function GET() {
   try {
+    await ensureBackendSchema();
     const db = getDb();
     const [counts] = await db<Array<{
       discovered: number; downloaded: number; download_failed: number; parse_partial: number; downloading: number;
@@ -119,14 +122,18 @@ export async function GET() {
     const downloadQueue = visibleDownloadQueue.slice(0, 80);
     if (counts) counts.pending_download = visibleDownloadQueue.length;
     const parseQueue = await db<Array<{
-      code: string; company_name: string; status: string; title: string; published_at: string;
+      id: string; code: string; company_name: string; status: string; title: string; published_at: string;
       parse_error: string | null; pdf_key: string | null; parsed_at: string | null; source: string; updated_at: string;
+      parse_priority: number;
     }>>`
-      SELECT code, company_name, status, title, published_at, parse_error, pdf_key, parsed_at, source, updated_at
+      SELECT id, code, company_name, status, title, published_at, parse_error, pdf_key, parsed_at, source, updated_at,
+        COALESCE(parse_priority, 0)::int AS parse_priority
       FROM announcements ann
       WHERE status='downloaded'
         AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
-      ORDER BY published_at DESC
+      ORDER BY COALESCE(parse_priority, 0) DESC,
+        CASE WHEN parse_error IS NULL OR parse_error = '' THEN 0 ELSE 1 END,
+        published_at DESC
       LIMIT 40
     `;
     const parseParked = await db<Array<{
@@ -214,8 +221,9 @@ export async function GET() {
       ...parseQueue.map((row, i) => {
         const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
         let reason = '';
-        if (!row.pdf_key) reason = '缺少 PDF';
-        else if (row.parse_error) reason = row.parse_error;
+        if (row.parse_priority > 0) reason = '手动插队，空闲时优先';
+        else if (!row.pdf_key) reason = '缺少 PDF';
+        else if (row.parse_error) reason = `失败已排到队尾：${row.parse_error}`;
         else if (row.status === 'parse_partial') reason = '解析不完整，等待重试';
         else if (!control.autoCrawlEnabled || control.downloadPaused) reason = i === 0 ? '自动抓取已关：已下载 PDF 仍会解析' : `排队第 ${i + 1} 位`;
         else if (i === 0) reason = '即将解析';
@@ -225,7 +233,7 @@ export async function GET() {
           name: row.company_name,
           label,
           period,
-          status: row.parse_error ? 'retry' : 'queued',
+          status: row.parse_error ? 'retry' : (row.parse_priority > 0 ? 'priority' : 'queued'),
           stage: 'parse' as const,
           position: i + 1,
           title: row.title,
@@ -234,6 +242,7 @@ export async function GET() {
           reason,
           rawStatus: row.status,
           source: row.source,
+          lastError: row.parse_error,
         };
       }),
       ...parseParked.map((row, i) => {
@@ -290,7 +299,7 @@ export async function GET() {
         position: i + 1,
         title: row.title,
         source: row.source,
-        progress: mem?.detail ?? `解析中 · 已 ${Math.round(ageMs / 1000)}s / 限 5min`,
+        progress: mem?.detail ?? `正在解析 · 已 ${formatParseElapsed(ageMs)} / 限 5分钟`,
         startedAt: mem?.startedAt ?? row.updated_at,
         ageMs,
       };

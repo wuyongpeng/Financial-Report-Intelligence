@@ -37,5 +37,17 @@ async function migrate() {
       generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
+    await tx`CREATE TABLE IF NOT EXISTS metric_feedback (
+      id BIGSERIAL PRIMARY KEY,
+      announcement_id TEXT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      metric TEXT NOT NULL,
+      verdict TEXT NOT NULL,
+      reporter TEXT NOT NULL,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(announcement_id, metric, reporter)
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS metric_feedback_announcement_idx ON metric_feedback (announcement_id, metric)`;
+    await tx`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS parse_priority INTEGER NOT NULL DEFAULT 0`;
   });
 }

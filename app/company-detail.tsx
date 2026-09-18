@@ -181,7 +181,7 @@ async function loadCompanyReports(code: string): Promise<Report[]> {
   return pickCanonicalReports(usable);
 }
 
-async function waitForParsedReport(code: string, id: string, signal: AbortSignal, timeoutMs = 120_000): Promise<Report | null> {
+async function waitForParsedReport(code: string, id: string, signal: AbortSignal, timeoutMs = 360_000): Promise<Report | null> {
   const started = Date.now();
   while (!signal.aborted && Date.now() - started < timeoutMs) {
     const reports = await loadCompanyReports(code).catch(() => [] as Report[]);
@@ -363,6 +363,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 mode: 'manual',
                 codes: [code],
                 fullHistory: false,
+                immediate: true,
                 ...(periods.length ? { periods } : {}),
                 announcementIds: [id],
               }
@@ -370,6 +371,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 mode: 'parse',
                 codes: [code],
                 parseOnly: true,
+                immediate: true,
                 ...(periods.length ? { periods } : {}),
                 announcementIds: [id],
               };
@@ -408,7 +410,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const toastTimer = window.setTimeout(() => {
       if (!abort.signal.aborted) setQuietToast({ text: '正在生成本期智析', at: Date.now() });
     }, 400);
-    void requestReportVerdict(selected.id, { signal: abort.signal })
+    void requestReportVerdict(selected.id, { fill: true, signal: abort.signal })
       .then((parsedVerdict) => {
         if (abort.signal.aborted) return;
         window.clearTimeout(toastTimer);

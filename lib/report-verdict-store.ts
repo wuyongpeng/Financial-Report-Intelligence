@@ -133,6 +133,36 @@ async function runGenerate(reportId: string, claimed: boolean): Promise<ReportVe
   return pending;
 }
 
+export function hasInflightVerdict(reportId: string) {
+  return inflight.has(reportId);
+}
+
+/** Claim a row as pending so GET polling sees 202 instead of a stale failed/absent state. */
+export async function markVerdictPending(reportId: string, overwriteReady = false): Promise<boolean> {
+  if (!(await reportExists(reportId))) return false;
+  const db = getDb();
+  if (overwriteReady) {
+    await db`
+      INSERT INTO report_verdicts (announcement_id, status, generated_at, updated_at)
+      VALUES (${reportId}, 'pending', NOW(), NOW())
+      ON CONFLICT (announcement_id) DO UPDATE SET status='pending', error=NULL, updated_at=NOW()
+    `;
+    return true;
+  }
+  await db`
+    INSERT INTO report_verdicts (announcement_id, status, generated_at, updated_at)
+    VALUES (${reportId}, 'pending', NOW(), NOW())
+    ON CONFLICT (announcement_id) DO UPDATE SET status='pending', error=NULL, updated_at=NOW()
+    WHERE report_verdicts.status <> 'ready'
+  `;
+  return true;
+}
+
+/** Run the model after pending is already claimed. Do not waitForReady. */
+export async function executeReportVerdict(reportId: string): Promise<ReportVerdict | null> {
+  return runGenerate(reportId, true);
+}
+
 /** Read the last failed generation message. Ready rows have no error. */
 export async function loadVerdictError(reportId: string): Promise<string | null> {
   const row = await loadRow(reportId);
@@ -150,15 +180,21 @@ export type VerdictPeek = {
   value: ReportVerdict | null;
   error: string | null;
   stale: boolean;
+  ageMs: number;
 };
+
+function rowAgeMs(row: VerdictRow) {
+  const updated = Date.parse(row.updated_at);
+  return Number.isFinite(updated) ? Math.max(0, Date.now() - updated) : 0;
+}
 
 export async function peekReportVerdict(reportId: string): Promise<VerdictPeek> {
   const row = await loadRow(reportId);
-  if (!row) return { status: 'absent', value: null, error: null, stale: false };
+  if (!row) return { status: 'absent', value: null, error: null, stale: false, ageMs: 0 };
   if (row.status === 'ready') {
     const value = asVerdict(row.payload);
-    if (value) return { status: 'ready', value, error: null, stale: false };
-    return { status: 'failed', value: null, error: 'AI 返回格式无法解析，请稍后再试。', stale: false };
+    if (value) return { status: 'ready', value, error: null, stale: false, ageMs: rowAgeMs(row) };
+    return { status: 'failed', value: null, error: 'AI 返回格式无法解析，请稍后再试。', stale: false, ageMs: rowAgeMs(row) };
   }
   if (row.status === 'failed') {
     return {
@@ -166,9 +202,10 @@ export async function peekReportVerdict(reportId: string): Promise<VerdictPeek> 
       value: null,
       error: publicVerdictError(row.error || 'AI 概览暂时无法生成，请稍后再试。'),
       stale: false,
+      ageMs: rowAgeMs(row),
     };
   }
-  return { status: 'pending', value: null, error: null, stale: isStale(row) };
+  return { status: 'pending', value: null, error: null, stale: isStale(row), ageMs: rowAgeMs(row) };
 }
 
 /** First visit generates once and writes to DB; later visits only read. */
@@ -197,6 +234,15 @@ export type VerdictQueueJob = {
   verdict_status?: string | null;
   verdict_error?: string | null;
 };
+
+export async function getVerdictQueueJob(reportId: string): Promise<VerdictQueueJob | null> {
+  await ensureBackendSchema();
+  const [row] = await getDb()<VerdictQueueJob[]>`
+    SELECT a.id, a.code, a.company_name, a.title, a.published_at
+    FROM announcements a WHERE a.id=${reportId}
+  `;
+  return row ?? null;
+}
 
 export async function listReportsNeedingVerdict(limit = 5000) {
   await ensureBackendSchema();
@@ -286,11 +332,11 @@ export type QueuedVerdictOutcome = 'ok' | 'fail' | 'busy' | 'skip';
 /** One background job: never wait 4 minutes for another worker; yield if the LLM slot is taken. */
 export async function runQueuedVerdict(
   reportId: string,
-  options: VerdictGenerateOptions = {},
+  options: VerdictGenerateOptions & { force?: boolean } = {},
 ): Promise<{ outcome: QueuedVerdictOutcome; error: string | null }> {
   const previous = await loadRow(reportId);
   if (previous?.status === 'ready') return { outcome: 'skip', error: null };
-  if (previous?.status === 'pending' && !isStale(previous)) return { outcome: 'skip', error: null };
+  if (!options.force && previous?.status === 'pending' && !isStale(previous)) return { outcome: 'skip', error: null };
   if (!(await reportExists(reportId))) return { outcome: 'skip', error: null };
 
   const db = getDb();

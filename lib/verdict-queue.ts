@@ -3,11 +3,14 @@ import { dirname, join, resolve } from 'node:path';
 import { getIngestControl } from './ingest-control';
 import { llmConfigured } from './llm-providers';
 import { periodFromTitle } from './ingest-period';
+import { enqueuePriorityVerdict, takePriorityVerdict } from './verdict-priority';
 import {
   countDueVerdictJobs,
   countReportsNeedingVerdict,
+  getVerdictQueueJob,
   listDueVerdictJobs,
   listReportsNeedingVerdict,
+  peekReportVerdict,
   runQueuedVerdict,
   type VerdictQueueJob,
 } from './report-verdict-store';
@@ -262,8 +265,21 @@ async function snapshot(partial: Partial<VerdictQueueState>): Promise<VerdictQue
 export async function tickVerdictQueue(): Promise<number> {
   const control = await getIngestControl();
   const prev = readState();
+  const priorityId = takePriorityVerdict();
 
-  if (!control.autoVerdictEnabled) {
+  if (!llmConfigured()) {
+    if (priorityId) enqueuePriorityVerdict(priorityId);
+    await snapshot({
+      enabled: true,
+      status: 'paused',
+      current: null,
+      nextAt: nextIso(VERDICT_IDLE_MS),
+      note: '未配置 AI 接口，自动智析暂停',
+    });
+    return verdictQueueDelay('unconfigured');
+  }
+
+  if (!priorityId && !control.autoVerdictEnabled) {
     await snapshot({
       enabled: false,
       status: 'paused',
@@ -276,19 +292,8 @@ export async function tickVerdictQueue(): Promise<number> {
     return verdictQueueDelay('paused');
   }
 
-  if (!llmConfigured()) {
-    await snapshot({
-      enabled: true,
-      status: 'paused',
-      current: null,
-      nextAt: nextIso(VERDICT_IDLE_MS),
-      note: '未配置 AI 接口，自动智析暂停',
-    });
-    return verdictQueueDelay('unconfigured');
-  }
-
   const cooldownUntil = prev.cooldownUntil ? Date.parse(prev.cooldownUntil) : NaN;
-  if (Number.isFinite(cooldownUntil) && cooldownUntil > Date.now()) {
+  if (!priorityId && Number.isFinite(cooldownUntil) && cooldownUntil > Date.now()) {
     const remain = cooldownUntil - Date.now();
     await snapshot({
       enabled: true,
@@ -301,7 +306,23 @@ export async function tickVerdictQueue(): Promise<number> {
   }
   const streak = Number.isFinite(cooldownUntil) && cooldownUntil <= Date.now() ? 0 : prev.consecutiveFailures;
 
-  const jobs = await listDueVerdictJobs(12, VERDICT_FAIL_BACKOFF_MS);
+  let jobs = control.autoVerdictEnabled
+    ? await listDueVerdictJobs(12, VERDICT_FAIL_BACKOFF_MS)
+    : [];
+  let forceId: string | null = null;
+  if (priorityId) {
+    const peek = await peekReportVerdict(priorityId);
+    if (peek.status === 'pending' && !peek.stale && peek.ageMs < 12_000) {
+      enqueuePriorityVerdict(priorityId);
+      if (!jobs.length) return VERDICT_BUSY_MS;
+    } else if (peek.status !== 'ready') {
+      const extra = await getVerdictQueueJob(priorityId);
+      if (extra) {
+        forceId = extra.id;
+        jobs = [extra, ...jobs.filter((item) => item.id !== extra.id)];
+      }
+    }
+  }
   const pending = await countReportsNeedingVerdict();
   if (!jobs.length) {
     await snapshot({
@@ -338,6 +359,7 @@ export async function tickVerdictQueue(): Promise<number> {
     const result = await runQueuedVerdict(job.id, {
       timeoutMs: VERDICT_CALL_TIMEOUT_MS,
       acquireTimeoutMs: VERDICT_LOCK_WAIT_MS,
+      force: forceId === job.id,
     });
     outcome = result.outcome;
     error = result.error;

@@ -19,6 +19,7 @@ import {
   type CrawlStats,
 } from '@/lib/crawl-display';
 import { parseHomeQuery, queryMatchesCompany } from '@/lib/home-search';
+import { formatParseElapsed } from '@/lib/parse-queue';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { Icon } from '../ui-icons';
 import './crawl-overview.css';
@@ -166,7 +167,7 @@ const SETTINGS_FIELDS: Array<{
 }> = [
   { key: 'downloadPauseSec', label: '排队下载间隔', unit: '秒', hint: '排队任务领取下载之间的等待时间，用于降低封控风险。' },
   { key: 'downloadLimit', label: '并发下载数量', unit: '个', hint: '同时下载 PDF 的最大数量。' },
-  { key: 'parseLimit', label: '并发解析数量', unit: '个', hint: '同时解析 PDF 的最大数量。' },
+  { key: 'parseLimit', label: '并发解析数量', unit: '个', hint: '闲时自动解析的并发上限，默认 1（单队列）。采集页手动解析会插到队首；详情页打开会额外并发解析，不占这支队列。' },
   { key: 'lookbackDays', label: '采集窗口', unit: '天', prefix: '最近', hint: '初始化完成后，增量扫描只看最近这些天的公告。' },
   { key: 'pollIntervalMin', label: '抓取轮询间隔', unit: '分钟', hint: '扫描新公告和财报缺口的时间间隔。保存后 Worker 会按新间隔执行。' },
 ];
@@ -556,6 +557,7 @@ export default function CrawlOverview() {
   const [timeSort, setTimeSort] = useState<SortState>('default');
   const [queuePopover, setQueuePopover] = useState<null | 'download' | 'parse' | 'downloading' | 'parsing' | 'verdict'>(null);
   const [queueWaitTick, setQueueWaitTick] = useState(0);
+  const [parseElapsedTick, setParseElapsedTick] = useState(0);
   const dlQueueBtnRef = useRef<HTMLButtonElement>(null);
   const dlActiveBtnRef = useRef<HTMLButtonElement>(null);
   const parseQueueBtnRef = useRef<HTMLButtonElement>(null);
@@ -709,6 +711,13 @@ export default function CrawlOverview() {
     return () => window.clearInterval(id);
   }, [queuePopover, live?.downloadGate?.nextAt]);
 
+  useEffect(() => {
+    const parsing = queuePopover === 'parsing' || (live?.parseSlots.used ?? 0) > 0;
+    if (!parsing) return;
+    const id = window.setInterval(() => setParseElapsedTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [queuePopover, live?.parseSlots.used]);
+
   // Queue / in-flight non-empty → 5s partial live refresh (not full page reload).
   const queueBusy = Boolean(
     live?.running
@@ -723,7 +732,11 @@ export default function CrawlOverview() {
   );
   useEffect(() => {
     if (!queueBusy) return;
-    const ms = optimisticJobs.length || (live?.counts.pending_download ?? 0) > 0 || (live?.downloadSlots.used ?? 0) > 0
+    const ms = optimisticJobs.length
+      || (live?.counts.pending_download ?? 0) > 0
+      || (live?.counts.pending_parse ?? 0) > 0
+      || (live?.downloadSlots.used ?? 0) > 0
+      || (live?.parseSlots.used ?? 0) > 0
       ? 1_200
       : 5_000;
     const timer = window.setInterval(() => {
@@ -1306,11 +1319,11 @@ export default function CrawlOverview() {
       label,
       period: chosen?.period,
       stage: 'parse',
-      bucket: 'active',
+      bucket: 'queue',
     };
     patchRowBusy(busyId, 'parse', true);
     setOptimisticJobs((prev) => [job, ...prev.filter((item) => item.key !== key)].slice(0, 12));
-    setTriggerMsg(`正在解析 ${label}…`);
+    setTriggerMsg(`已插到解析队首 ${label}`);
     void refreshLive();
     try {
       const response = await fetch('/api/crawl/trigger', {
@@ -1431,7 +1444,7 @@ export default function CrawlOverview() {
         period: job.period,
         position: i + 1,
         status: 'queued',
-        reason: '刚加入排队解析',
+        reason: '已插到解析队首，空闲时优先',
       }));
     return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
   }, [optimisticJobs, live?.pendingParseItems, live?.queueItems]);
@@ -1465,18 +1478,27 @@ export default function CrawlOverview() {
   }, [optimisticJobs, live?.activeItems, downloadQueueItems]);
 
   const parsingItems = useMemo(() => {
+    void parseElapsedTick;
     const list = live?.activeParseItems ?? (live?.activeItems ?? []).filter((q) => q.stage === 'parse');
-    const rest = list.map((q) => ({
-      code: q.code,
-      name: q.name,
-      label: queueDisplayName(q),
-      period: q.period,
-      position: q.position,
-      status: q.status,
-      source: q.source,
-      reason: q.reason,
-      progress: q.progress,
-    }));
+    const rest = list.map((q) => {
+      const startedAt = q.startedAt;
+      const ageMs = startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : (q.ageMs ?? 0);
+      const progress = startedAt
+        ? `正在解析 · 已 ${formatParseElapsed(ageMs)} / 限 5分钟`
+        : q.progress;
+      return {
+        code: q.code,
+        name: q.name,
+        label: queueDisplayName(q),
+        period: q.period,
+        position: q.position,
+        status: q.status,
+        source: q.source,
+        reason: q.reason,
+        progress,
+        startedAt,
+      };
+    });
     const extra = optimisticJobs
       .filter((job) => job.stage === 'parse' && job.bucket === 'active' && !jobCovered(job, rest))
       .map((job, i) => ({
@@ -1489,7 +1511,7 @@ export default function CrawlOverview() {
         reason: '正在解析指定财报…',
       }));
     return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
-  }, [optimisticJobs, live?.activeParseItems, live?.activeItems]);
+  }, [optimisticJobs, live?.activeParseItems, live?.activeItems, parseElapsedTick]);
 
   const queueCount = Math.max(live?.counts.pending_download ?? 0, downloadQueueItems.length);
   const downloadUsed = Math.max(live?.downloadSlots.used ?? 0, downloadingItems.length);
@@ -1551,7 +1573,7 @@ export default function CrawlOverview() {
                   <li><em>自动智析</em><span>{autoVerdictEnabled ? '开' : '关'}</span></li>
                   <li><em>覆盖状态</em><span>{coverageReady ? '已初始化' : '全量补齐中'}</span></li>
                   <li><em>下载并发</em><span>{downloadMax}</span></li>
-                  <li><em>解析并发</em><span>{parseMax}</span></li>
+                  <li><em>解析并发</em><span>{parseMax}（闲时单队列；详情页可额外并发）</span></li>
                   <li><em>下载间隔</em><span>{downloadPauseSec} 秒</span></li>
                   <li><em>轮询间隔</em><span>{pollIntervalMin} 分钟</span></li>
                   <li><em>超时</em><span>下载/解析各 5 分钟 · 智析 90 秒</span></li>
@@ -1633,7 +1655,7 @@ export default function CrawlOverview() {
                 title="排队解析"
                 items={parseQueueItems}
                 empty="暂无排队解析"
-                note={paused ? '自动抓取已关：已下载 PDF 仍会继续解析。' : undefined}
+                note="闲时单队列。手动点「解析」插到队首；超时或失败会记下错误并排到队尾。详情页打开会立即并发解析，不进这支队列。"
                 onClose={() => setQueuePopover(null)}
                 anchorRef={parseQueueBtnRef}
               />
@@ -1649,14 +1671,16 @@ export default function CrawlOverview() {
                 onClick={() => setQueuePopover((v) => (v === 'parsing' ? null : 'parsing'))}
               >
                 <PulseDot on={parseUsed > 0} />
-                解析中(<b>{Math.min(parseUsed, parseMax)}/{parseMax}</b>)
+                解析中(<b>{parseUsed}/{parseMax}</b>)
               </button>
               <QueuePopover
                 open={queuePopover === 'parsing'}
                 title="解析中"
                 items={parsingItems}
                 empty={parseQueueCount > 0 ? '解析槽空闲，排队等待领取' : '当前无解析任务'}
-                note={paused ? '自动抓取已关：已下载 PDF 仍会继续解析。' : undefined}
+                note={parsingItems[0]
+                  ? `当前：${parsingItems[0].label} · ${parsingItems[0].progress ?? '计时中'}`
+                  : (paused ? '自动抓取已关：已下载 PDF 仍会继续解析。' : undefined)}
                 onClose={() => setQueuePopover(null)}
                 anchorRef={parseActiveBtnRef}
               />

@@ -30,7 +30,7 @@ import {
   setIngestProgress,
 } from './ingest-progress';
 import { getIngestSettings } from './ingest-settings';
-import { isPdfBytes, looksLikeBlockedPdf, pdfUrlCandidates, pickCninfoFallback } from './pdf-download';
+import { PARSE_PRIORITY_MANUAL } from './parse-queue';
 
 const companies = companiesJson as Company[];
 const companyByCode = new Map(companies.map((company) => [company.code, company]));
@@ -174,6 +174,7 @@ async function loadEnabledCompanyMap() {
 }
 
 export async function recoverStaleRuns() {
+  await ensureBackendSchema();
   const db = getDb();
   await db`
     UPDATE ingest_runs SET status='interrupted', finished_at=NOW(), error='Worker restarted before the run completed'
@@ -188,11 +189,12 @@ export async function recoverStaleRuns() {
     WHERE status='downloading'
       AND updated_at < NOW() - INTERVAL '5 minutes'
   `;
-  // 待解析超时：5 分钟仍停在 parsing → 退回排队解析（可再排）
+  // 待解析超时：5 分钟仍停在 parsing → 退回排队解析队尾
   await db`
     UPDATE announcements
     SET status='downloaded',
-        parse_error='解析超时（5分钟），已退回排队解析',
+        parse_priority=0,
+        parse_error='解析超时（5分钟），已排到队尾',
         updated_at=NOW()
     WHERE status='parsing'
       AND updated_at < NOW() - INTERVAL '5 minutes'
@@ -282,6 +284,167 @@ async function retireRedundantPendingDownloads(keepIds: string[] = []) {
   return { skipped };
 }
 
+export async function enqueueParseFront(ids: string[]) {
+  await ensureBackendSchema();
+  const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+  if (!unique.length) return 0;
+  const db = getDb();
+  const result = await db`
+    UPDATE announcements
+    SET parse_priority=${PARSE_PRIORITY_MANUAL},
+        parse_error=NULL,
+        status=CASE
+          WHEN pdf_key IS NOT NULL AND status NOT IN ('downloading', 'parsing') THEN 'downloaded'
+          ELSE status
+        END,
+        updated_at=NOW()
+    WHERE id=ANY(${unique}::text[])
+      AND pdf_key IS NOT NULL
+      AND status NOT IN ('downloading', 'parsing')
+  `;
+  return result.count;
+}
+
+export async function countManualParsePriority() {
+  await ensureBackendSchema();
+  const [row] = await getDb()<Array<{ n: number }>>`
+    SELECT COUNT(*)::int AS n
+    FROM announcements
+    WHERE parse_priority > 0
+      AND pdf_key IS NOT NULL
+      AND status IN ('downloaded', 'parse_partial')
+  `;
+  return row?.n ?? 0;
+}
+
+async function parseStoredAnnouncement(
+  record: StoredAnnouncement,
+  bytes: ArrayBuffer | Uint8Array | null,
+  filePath: string | undefined,
+  onDiskBytes: number | null,
+): Promise<'parsed' | 'parked' | 'skipped' | 'failed'> {
+  const db = getDb();
+  const period = periodFromTitle(record.title, record.published_at);
+  const parseStarted = new Date().toISOString();
+  const claimed = await db<Array<{ id: string }>>`
+    UPDATE announcements
+    SET status='parsing', parse_error=NULL, parse_priority=0, updated_at=${parseStarted}
+    WHERE id=${record.id} AND status <> 'parsing'
+    RETURNING id
+  `;
+  if (!claimed.length) return 'skipped';
+  setIngestProgress({
+    id: record.id,
+    code: record.code,
+    name: record.company_name,
+    title: record.title,
+    period,
+    source: record.source,
+    phase: 'parse',
+    detail: '解析正文与指标…',
+    startedAt: parseStarted,
+  });
+  const parseController = new AbortController();
+  const parseTimer = setTimeout(() => parseController.abort(), 5 * 60 * 1000);
+  try {
+    let payload = bytes;
+    if (!payload && filePath && !(onDiskBytes != null && shouldExtractTextExternally(onDiskBytes))) {
+      const object = record.pdf_key ? await readReport(record.pdf_key) : null;
+      if (object) payload = object.buffer.slice(object.byteOffset, object.byteOffset + object.byteLength);
+    }
+    if (payload && filePath && shouldExtractTextExternally(payload.byteLength)) payload = null;
+    if (!payload && !(filePath && onDiskBytes)) throw new Error('缺少可解析的 PDF');
+    const extracted = await Promise.race([
+      parseCoreMetrics(payload, { filePath }),
+      new Promise<never>((_, reject) => {
+        parseController.signal.addEventListener('abort', () => {
+          reject(new Error('解析超时（5分钟）'));
+        }, { once: true });
+      }),
+    ]);
+    if (!extracted.metrics.length && !extracted.chunks.length) {
+      clearIngestProgress(record.id);
+      await db`
+        UPDATE announcements
+        SET status='parse_parked',
+            parse_priority=0,
+            parse_error='未能抽取正文（扫描件或无法读出文字），已搁置',
+            updated_at=NOW()
+        WHERE id=${record.id}
+      `;
+      return 'parked';
+    }
+    const createdAt = new Date().toISOString();
+    const coreOk = hasCoreMetrics(extracted.metrics);
+    await ensureBackendSchema();
+    await db.begin(async (tx) => {
+      for (const metric of extracted.metrics) {
+        await tx`
+          INSERT INTO financial_metrics (announcement_id, code, period, metric, value, unit, source_page, source_label, confidence, verified, created_at)
+          VALUES (${record.id}, ${record.code}, ${period}, ${metric.metric}, ${metric.value}, ${metric.unit}, ${metric.page}, ${metric.sourceLabel}, ${metric.confidence}, false, ${createdAt})
+          ON CONFLICT (announcement_id, metric) DO UPDATE SET value=EXCLUDED.value, unit=EXCLUDED.unit,
+            source_page=EXCLUDED.source_page, source_label=EXCLUDED.source_label, confidence=EXCLUDED.confidence,
+            verified=CASE WHEN financial_metrics.value=EXCLUDED.value AND financial_metrics.unit=EXCLUDED.unit
+              AND financial_metrics.source_page IS NOT DISTINCT FROM EXCLUDED.source_page
+              AND financial_metrics.source_label IS NOT DISTINCT FROM EXCLUDED.source_label
+              THEN financial_metrics.verified ELSE false END
+        `;
+      }
+      await tx`DELETE FROM report_chunks WHERE announcement_id=${record.id}`;
+      for (const chunk of extracted.chunks) {
+        await tx`
+          INSERT INTO report_chunks (announcement_id, page, content, created_at)
+          VALUES (${record.id}, ${chunk.page}, ${chunk.content}, ${createdAt})
+          ON CONFLICT (announcement_id, page) DO UPDATE SET content=EXCLUDED.content, created_at=EXCLUDED.created_at
+        `;
+      }
+      await tx`
+        UPDATE announcements SET status=${coreOk ? 'review' : 'parse_partial'}, online_at=NULL,
+          parsed_at=${createdAt}, parse_priority=0,
+          parse_error=${coreOk ? null : '指标不完整（已解析，仅标注，不自动重试）'},
+          updated_at=${createdAt}
+        WHERE id=${record.id}
+      `;
+    });
+    clearIngestProgress(record.id);
+    return 'parsed';
+  } catch (error) {
+    clearIngestProgress(record.id);
+    const message = String(error).replace(/^Error:\s*/i, '');
+    const timedOut = /aborted|AbortError|超时/i.test(message);
+    const parseError = timedOut ? '解析超时（5分钟），已排到队尾' : message;
+    await db`
+      UPDATE announcements
+      SET status='downloaded', parse_priority=0, parse_error=${parseError}, updated_at=${new Date().toISOString()}
+      WHERE id=${record.id}
+    `;
+    return 'failed';
+  } finally {
+    clearTimeout(parseTimer);
+  }
+}
+
+export async function parseAnnouncementById(id: string): Promise<{ ok: boolean; outcome: string; error?: string }> {
+  await ensureBackendSchema();
+  await recoverStaleRuns();
+  const db = getDb();
+  const [record] = await db<StoredAnnouncement[]>`
+    SELECT id, source, source_id, code, company_name, title, report_type, published_at, pdf_url, pdf_key, status
+    FROM announcements WHERE id=${id}
+  `;
+  if (!record) return { ok: false, outcome: 'missing', error: '报告不存在' };
+  if (record.status === 'parsing') return { ok: true, outcome: 'inflight' };
+  if (!record.pdf_key) return { ok: false, outcome: 'no-pdf', error: '尚未下载 PDF' };
+  const filePath = reportPath(record.pdf_key);
+  const onDiskBytes = await reportByteLength(record.pdf_key);
+  const outcome = await parseStoredAnnouncement(record, null, filePath, onDiskBytes);
+  if (outcome === 'failed') {
+    const [row] = await db<Array<{ parse_error: string | null }>>`SELECT parse_error FROM announcements WHERE id=${id}`;
+    return { ok: false, outcome, error: row?.parse_error || '解析失败' };
+  }
+  return { ok: true, outcome };
+}
+
 export async function retireDuplicateIngestedReports() {
   const db = getDb();
   const rows = await db<Array<{
@@ -329,6 +492,7 @@ export async function processBacklog(options: {
   // 手动点「解析」才重试指标不完整；自动流水线只解析一次并标注
   const retryPartial = announcementIds.length > 0 || (codes.length > 0 && fullHistory);
   const pauseBetweenDownloads = downloadPauseMs();
+  await ensureBackendSchema();
   await recoverStaleRuns();
   await retireRedundantPendingDownloads(announcementIds);
   await retireDuplicateIngestedReports();
@@ -386,7 +550,9 @@ export async function processBacklog(options: {
         )
           AND (${codeFilter} OR code=ANY(${codes}::text[]))
           AND (${idFilter} OR id=ANY(${announcementIds}::text[]))
-        ORDER BY CASE WHEN status='downloaded' THEN 0 ELSE 1 END, published_at DESC
+        ORDER BY COALESCE(parse_priority, 0) DESC,
+          CASE WHEN parse_error IS NULL OR parse_error = '' THEN 0 ELSE 1 END,
+          published_at DESC
         LIMIT 20
       `
     : [];
@@ -544,84 +710,9 @@ export async function processBacklog(options: {
       }
 
       if (parsed < parseLimit && (bytes || (filePath && onDiskBytes))) {
-        const period = periodFromTitle(record.title, record.published_at);
-        const parseStarted = new Date().toISOString();
-        await db`
-          UPDATE announcements SET status='parsing', parse_error=NULL, updated_at=${parseStarted}
-          WHERE id=${record.id}
-        `;
-        setIngestProgress({
-          id: record.id,
-          code: record.code,
-          name: record.company_name,
-          title: record.title,
-          period,
-          source: record.source,
-          phase: 'parse',
-          detail: '解析正文与指标…',
-          startedAt: parseStarted,
-        });
-        const parseController = new AbortController();
-        const parseTimer = setTimeout(() => parseController.abort(), 5 * 60 * 1000);
-        let extracted: Awaited<ReturnType<typeof parseCoreMetrics>>;
-        try {
-          // parseCoreMetrics 本身不接 abort；用竞态实现硬超时，recoverStaleRuns 兜底
-          extracted = await Promise.race([
-            parseCoreMetrics(bytes, { filePath }),
-            new Promise<never>((_, reject) => {
-              parseController.signal.addEventListener('abort', () => {
-                reject(new Error('解析超时（5分钟）'));
-              }, { once: true });
-            }),
-          ]);
-        } finally {
-          clearTimeout(parseTimer);
-        }
-        if (!extracted.metrics.length && !extracted.chunks.length) {
-          clearIngestProgress(record.id);
-          await db`
-            UPDATE announcements
-            SET status='parse_parked',
-                parse_error='未能抽取正文（扫描件或无法读出文字），已搁置',
-                updated_at=NOW()
-            WHERE id=${record.id}
-          `;
-          continue;
-        }
-        const createdAt = new Date().toISOString();
-        const coreOk = hasCoreMetrics(extracted.metrics);
-        await ensureBackendSchema();
-        await db.begin(async (tx) => {
-          for (const metric of extracted.metrics) {
-            await tx`
-              INSERT INTO financial_metrics (announcement_id, code, period, metric, value, unit, source_page, source_label, confidence, verified, created_at)
-              VALUES (${record.id}, ${record.code}, ${period}, ${metric.metric}, ${metric.value}, ${metric.unit}, ${metric.page}, ${metric.sourceLabel}, ${metric.confidence}, false, ${createdAt})
-              ON CONFLICT (announcement_id, metric) DO UPDATE SET value=EXCLUDED.value, unit=EXCLUDED.unit,
-                source_page=EXCLUDED.source_page, source_label=EXCLUDED.source_label, confidence=EXCLUDED.confidence,
-                verified=CASE WHEN financial_metrics.value=EXCLUDED.value AND financial_metrics.unit=EXCLUDED.unit
-                  AND financial_metrics.source_page IS NOT DISTINCT FROM EXCLUDED.source_page
-                  AND financial_metrics.source_label IS NOT DISTINCT FROM EXCLUDED.source_label
-                  THEN financial_metrics.verified ELSE false END
-            `;
-          }
-          await tx`DELETE FROM report_chunks WHERE announcement_id=${record.id}`;
-          for (const chunk of extracted.chunks) {
-            await tx`
-              INSERT INTO report_chunks (announcement_id, page, content, created_at)
-              VALUES (${record.id}, ${chunk.page}, ${chunk.content}, ${createdAt})
-              ON CONFLICT (announcement_id, page) DO UPDATE SET content=EXCLUDED.content, created_at=EXCLUDED.created_at
-            `;
-          }
-          await tx`
-            UPDATE announcements SET status=${coreOk ? 'review' : 'parse_partial'}, online_at=NULL,
-              parsed_at=${createdAt},
-              parse_error=${coreOk ? null : '指标不完整（已解析，仅标注，不自动重试）'},
-              updated_at=${createdAt}
-            WHERE id=${record.id}
-          `;
-        });
-        clearIngestProgress(record.id);
-        parsed += 1;
+        const outcome = await parseStoredAnnouncement(record, bytes, filePath, onDiskBytes);
+        if (outcome === 'parsed') parsed += 1;
+        else if (outcome === 'failed') failed += 1;
       }
     } catch (error) {
       failed += 1;
@@ -638,9 +729,9 @@ export async function processBacklog(options: {
       if (timedOut && !hasPdf) {
         await db`UPDATE announcements SET status='discovered', parse_error='下载超时（5分钟），已退回排队下载', updated_at=${nowIso} WHERE id=${record.id}`;
       } else if (timedOut && hasPdf) {
-        await db`UPDATE announcements SET status='downloaded', parse_error='解析超时（5分钟），已退回排队解析', updated_at=${nowIso} WHERE id=${record.id}`;
+        await db`UPDATE announcements SET status='downloaded', parse_priority=0, parse_error='解析超时（5分钟），已排到队尾', updated_at=${nowIso} WHERE id=${record.id}`;
       } else if (hasPdf || wasParsing) {
-        await db`UPDATE announcements SET status='downloaded', parse_error=${message}, updated_at=${nowIso} WHERE id=${record.id}`;
+        await db`UPDATE announcements SET status='downloaded', parse_priority=0, parse_error=${message}, updated_at=${nowIso} WHERE id=${record.id}`;
       } else {
         await db`UPDATE announcements SET status='download_failed', parse_error=${message}, updated_at=${nowIso} WHERE id=${record.id}`;
       }
