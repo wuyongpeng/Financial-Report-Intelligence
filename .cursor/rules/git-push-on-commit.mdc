@@ -1,0 +1,24 @@
+---
+description: 本仓库提交后必须立刻推送到 origin，不要等用户再说一次 push
+alwaysApply: true
+---
+
+# 提交后立即推远端
+
+用户要求提交（含「提交 git」「commit」）时，默认视为同时要求推送到当前分支的 `origin`。不要只 commit 就结束，也不要再问要不要 push。
+
+## 流程
+
+1. 按常规完成 `git add` + `git commit`（不提交密钥、`.env`、`tsconfig.tsbuildinfo`）。
+2. 立刻 `git push origin HEAD`（当前分支，通常是 `main`）。
+3. 用 `git status -sb` 确认已与远端同步后，才能说推送成功。
+
+## 本仓库 SSH
+
+GitHub SSH 直连常在 `send-pack` 确认阶段被掐断。推送时默认走本机 SOCKS（sing-box `127.0.0.1:10808`），并关闭压缩：
+
+```bash
+GIT_SSH_COMMAND='ssh -i ~/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o Compression=no -o IPQoS=none -o ServerAliveInterval=5 -o TCPKeepAlive=yes -o ProxyCommand="nc -X 5 -x 127.0.0.1:10808 %h %p"' git push --progress origin HEAD
+```
+
+直连失败后不要用同一条坏路径连着重试；改走上述代理。禁止 `--force` 推 `main`，禁止 `--no-verify`。
