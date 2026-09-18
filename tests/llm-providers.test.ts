@@ -81,16 +81,14 @@ test('LLM_MODELS shares the same URL and key, keeping LLM_MODEL first', () => {
     LLM_BASE_URL: 'https://gateway.example/v1',
     LLM_API_KEY: 'sk-shared',
     LLM_MODEL: 'thudm/glm-5.2',
-    LLM_MODELS: 'thudm/glm-5.2, thudm/glm-5.1, minimax/MiniMax-M2.7-highspeed, weibo/glm-5, weibo/deepseek-v3',
+    LLM_MODELS: 'thudm/glm-5.2, minimax/MiniMax-M2.7-highspeed, thudm/glm-5.1',
     LLM_PROVIDERS: undefined,
   }, () => {
     const list = parseLlmProviders();
     assert.deepEqual(list.map((item) => item.model), [
       'thudm/glm-5.2',
-      'thudm/glm-5.1',
       'minimax/MiniMax-M2.7-highspeed',
-      'weibo/glm-5',
-      'weibo/deepseek-v3',
+      'thudm/glm-5.1',
     ]);
     assert.ok(list.every((item) => item.baseUrl === 'https://gateway.example/v1' && item.apiKey === 'sk-shared'));
     assert.equal(list[0].id, 'primary');
