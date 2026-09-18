@@ -23,6 +23,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REPORTS_DIR: /data/reports
       RUNTIME_DIR: /app/.data
+      LLM_MODELS: ${LLM_MODELS:-thudm/glm-5.2,thudm/glm-5.1,minimax/MiniMax-M2.7-highspeed,weibo/glm-5,weibo/deepseek-v3}
     depends_on:
       db:
         condition: service_healthy
@@ -39,6 +40,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REPORTS_DIR: /data/reports
       RUNTIME_DIR: /app/.data
+      LLM_MODELS: ${LLM_MODELS:-thudm/glm-5.2,thudm/glm-5.1,minimax/MiniMax-M2.7-highspeed,weibo/glm-5,weibo/deepseek-v3}
     depends_on:
       db:
         condition: service_healthy

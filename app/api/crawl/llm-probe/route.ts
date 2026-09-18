@@ -23,7 +23,12 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const auth = authorized(request);
-  if (!auth) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!auth) {
+    return Response.json(
+      { error: '请先登录后再检测连通性' },
+      { status: 401 },
+    );
+  }
   if (!llmConfigured()) {
     return Response.json(
       { ok: false, auth, error: '未配置 AI 接口', results: [] },
