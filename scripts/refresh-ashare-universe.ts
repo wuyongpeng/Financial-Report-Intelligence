@@ -4,77 +4,135 @@
  *
  * Usage:
  *   npx tsx scripts/refresh-ashare-universe.ts
- *   npm run refresh:ashare   # if wired in package.json
+ *   npm run refresh:ashare
  *
- * Notes:
- * - SSE list: query.sse.com.cn (A shares, stockType=1; STAR/科创板 688xxx merged via essentials + refresh)
- * - SZSE list: www.szse.cn report API (best-effort; may fail behind some networks)
- * - Always preserves existing entries and ensures essentials (e.g. 三一重工/600031)
- * - Recognition universe ≠ monitor pool (companies.json). Home search uses this file
- *   only to identify listed names/codes; watch/join still goes through /api/companies/watch.
+ * Row shape:
+ *   code, name, short_name, exchange, board, list_date
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-type Row = { code: string; name: string; exchange: 'SSE' | 'SZSE' };
+type Exchange = 'SSE' | 'SZSE' | 'BSE';
+type Row = {
+  code: string;
+  name: string;
+  short_name: string;
+  exchange: Exchange;
+  board: string;
+  list_date: string;
+};
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const OUT = path.join(ROOT, 'data', 'ashare-universe.json');
 const UA = 'FinanceReportIntelligence/1.0 (+ashare-universe-refresh)';
 
+function boardOf(code: string): string {
+  if (code.startsWith('688') || code.startsWith('689')) return '科创板';
+  if (code.startsWith('60')) return '主板';
+  if (code.startsWith('00')) return '主板';
+  if (code.startsWith('30')) return '创业板';
+  if (code.startsWith('8') || code.startsWith('4') || code.startsWith('92')) return '北交所';
+  return '';
+}
+
+function shortNameOf(name: string): string {
+  const n = name.replace(/[\s\u3000]+/g, '').trim();
+  return n.replace(/[AaＡａBbＢｂHhＨｈ]$/, '');
+}
+
+function fmtListDate(value: unknown): string {
+  if (value == null) return '';
+  let s = String(value).trim();
+  if (!s || s === '-' || s === 'None' || s === 'null') return '';
+  s = s.split(' ')[0]!.replace(/\//g, '-');
+  if (/^\d{8}$/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return '';
+}
+
+function enrich(row: Partial<Row> & { code: string; name: string; exchange: Exchange }): Row {
+  const code = row.code.trim().padStart(6, '0');
+  const name = row.name.replace(/[\s\u3000]+/g, '').trim();
+  return {
+    code,
+    name,
+    short_name: row.short_name?.trim() || shortNameOf(name),
+    exchange: row.exchange,
+    board: row.board?.trim() || boardOf(code),
+    list_date: fmtListDate(row.list_date),
+  };
+}
+
 const ESSENTIALS: Row[] = [
-  { code: '600031', name: '三一重工', exchange: 'SSE' },
-  { code: '600519', name: '贵州茅台', exchange: 'SSE' },
-  { code: '601318', name: '中国平安', exchange: 'SSE' },
-  { code: '600036', name: '招商银行', exchange: 'SSE' },
-  { code: '000001', name: '平安银行', exchange: 'SZSE' },
-  { code: '000002', name: '万科A', exchange: 'SZSE' },
-  { code: '300750', name: '宁德时代', exchange: 'SZSE' },
-  { code: '002714', name: '牧原股份', exchange: 'SZSE' },
-  { code: '688802', name: '沐曦股份', exchange: 'SSE' }, // STAR / 科创板 newly listed
-  { code: '688801', name: '燧原科技', exchange: 'SSE' }, // 2026-09-11 科创板
-  // 新上市科创板常见漏网：刷新失败时至少保证识别
+  enrich({ code: '600031', name: '三一重工', exchange: 'SSE' }),
+  enrich({ code: '600519', name: '贵州茅台', exchange: 'SSE' }),
+  enrich({ code: '601318', name: '中国平安', exchange: 'SSE' }),
+  enrich({ code: '600036', name: '招商银行', exchange: 'SSE' }),
+  enrich({ code: '000001', name: '平安银行', exchange: 'SZSE' }),
+  enrich({ code: '000002', name: '万科A', exchange: 'SZSE' }),
+  enrich({ code: '300750', name: '宁德时代', exchange: 'SZSE' }),
+  enrich({ code: '002714', name: '牧原股份', exchange: 'SZSE' }),
+  enrich({ code: '688802', name: '沐曦股份', exchange: 'SSE' }),
+  enrich({ code: '688801', name: '燧原科技', exchange: 'SSE' }),
 ];
 
-function exchangeOf(code: string): 'SSE' | 'SZSE' {
-  return code.startsWith('6') || code.startsWith('9') ? 'SSE' : 'SZSE';
+function exchangeOf(code: string): Exchange {
+  // 北交所：920/821/83x/87x/43x 等；不可把 9 开头一律当沪市 B 股。
+  if (code.startsWith('92') || code.startsWith('8') || code.startsWith('4')) return 'BSE';
+  if (code.startsWith('6') || code.startsWith('9')) return 'SSE';
+  return 'SZSE';
 }
 
-function normalizeName(name: string) {
-  return name.replace(/\s+/g, '').replace(/　/g, '').trim();
-}
-
-function upsert(map: Map<string, Row>, row: Row) {
-  const code = row.code.trim();
+function upsert(map: Map<string, Row>, raw: Partial<Row> & { code: string; name: string; exchange?: Exchange }) {
+  const code = raw.code.trim();
   if (!/^\d{6}$/.test(code)) return;
-  const name = normalizeName(row.name);
-  if (!name) return;
-  const exchange = row.exchange || exchangeOf(code);
+  const exchange = raw.exchange || exchangeOf(code);
+  const next = enrich({ ...raw, code, exchange });
+  if (!next.name) return;
   const prev = map.get(code);
   if (!prev) {
-    map.set(code, { code, name, exchange });
+    map.set(code, next);
     return;
   }
   const prevUgly = /^C.+-U$/.test(prev.name);
-  const nextUgly = /^C.+-U$/.test(name);
-  // Prefer cleaner / longer Chinese short name over Cxxx-U listing ticker.
-  if ((prevUgly && !nextUgly) || (!nextUgly && name.length >= prev.name.length && name !== code)) {
-    map.set(code, { code, name, exchange: prev.exchange || exchange });
-  }
+  const nextUgly = /^C.+-U$/.test(next.name);
+  const name =
+    (prevUgly && !nextUgly) || (!nextUgly && next.name.length >= prev.name.length && next.name !== code)
+      ? next.name
+      : prev.name;
+  map.set(code, {
+    code,
+    name,
+    short_name: shortNameOf(name),
+    exchange: prev.exchange || next.exchange,
+    board: prev.board || next.board || boardOf(code),
+    list_date: prev.list_date || next.list_date,
+  });
 }
 
 async function loadExisting(): Promise<Row[]> {
   try {
     const raw = await readFile(OUT, 'utf8');
-    const parsed = JSON.parse(raw) as Row[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(raw) as Array<Partial<Row>>;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((r) => r?.code && r?.name)
+      .map((r) =>
+        enrich({
+          code: String(r.code),
+          name: String(r.name),
+          exchange: (r.exchange as Exchange) || exchangeOf(String(r.code)),
+          short_name: r.short_name,
+          board: r.board,
+          list_date: r.list_date,
+        }),
+      );
   } catch {
     return [];
   }
 }
 
 async function fetchSse(): Promise<Row[]> {
-  // stockType=1 沪市主板等；=8 科创板。合并拉取，避免新上市科创板漏网。
   const out: Row[] = [];
   const seen = new Set<string>();
   for (const stockType of ['1', '8']) {
@@ -87,14 +145,15 @@ async function fetchSse(): Promise<Row[]> {
     });
     if (!res.ok) throw new Error(`SSE HTTP ${res.status} (stockType=${stockType})`);
     const json = await res.json() as {
-      pageHelp?: { total?: number; data?: Array<Record<string, string>> };
+      pageHelp?: { data?: Array<Record<string, string>> };
     };
     for (const row of json.pageHelp?.data ?? []) {
       const code = (row.SECURITY_CODE_A || row.SECURITY_CODE || '').trim();
       const name = row.SECURITY_ABBR_A || row.COMPANY_ABBR || row.SECURITY_ABBR || '';
+      const list_date = row.LISTING_DATE || '';
       if (!code || seen.has(code)) continue;
       seen.add(code);
-      out.push({ code, name, exchange: 'SSE' });
+      out.push(enrich({ code, name, exchange: 'SSE', list_date }));
     }
   }
   return out;
@@ -121,8 +180,19 @@ async function fetchSzse(): Promise<Row[]> {
     if (!rows.length) break;
     for (const row of rows) {
       const code = row.agdm || row.A股代码 || row.zqdm || '';
-      const name = row.agjc || row.A股简称 || row.zqjc || '';
-      if (code) out.push({ code: String(code).padStart(6, '0'), name: String(name), exchange: 'SZSE' });
+      let name = row.agjc || row.A股简称 || row.zqjc || '';
+      name = String(name).replace(/<[^>]+>/g, '').trim();
+      const list_date = row.agssrq || '';
+      if (code) {
+        out.push(
+          enrich({
+            code: String(code).padStart(6, '0'),
+            name: String(name),
+            exchange: 'SZSE',
+            list_date,
+          }),
+        );
+      }
     }
     const total = Number(block?.metadata?.recordcount ?? 0);
     if (page * 20 >= total || page > 200) break;
@@ -144,13 +214,30 @@ export async function refreshAshareUniverse() {
     const { join } = await import('node:path');
     const execFileAsync = promisify(execFile);
     const script = join(ROOT, 'scripts/ashare-list.py');
-    const { stdout } = await execFileAsync('python3', [script], {
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 180_000,
-    });
-    const payload = JSON.parse(String(stdout)) as { notes?: string[]; rows?: Row[] };
-    for (const row of payload.rows ?? []) upsert(map, row);
-    notes.push(`python-list: ${(payload.notes ?? []).join('; ')} → ${payload.rows?.length ?? 0}`);
+    let stdout = '';
+    let pyExit = 0;
+    try {
+      const res = await execFileAsync('python3', [script], {
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: 300_000,
+      });
+      stdout = String(res.stdout ?? '');
+    } catch (err) {
+      // Validation failure returns exit 1 but still prints JSON on stdout — keep the rows.
+      const e = err as { stdout?: string | Buffer; code?: number; message?: string };
+      stdout = String(e.stdout ?? '');
+      pyExit = typeof e.code === 'number' ? e.code : 1;
+      if (!stdout) {
+        notes.push(`python-list skipped: ${e.message ?? String(err)}`);
+      }
+    }
+    if (stdout) {
+      const payload = JSON.parse(stdout) as { notes?: string[]; rows?: Row[] };
+      for (const row of payload.rows ?? []) upsert(map, row);
+      notes.push(
+        `python-list(exit=${pyExit}): ${(payload.notes ?? []).join('; ')} → ${payload.rows?.length ?? 0}`,
+      );
+    }
   } catch (err) {
     notes.push(`python-list skipped: ${String(err)}`);
   }
@@ -176,20 +263,36 @@ export async function refreshAshareUniverse() {
   // Essentials last so preferred short names win over exchange "Cxxx-U" tickers.
   for (const row of ESSENTIALS) upsert(map, row);
   for (const row of map.values()) {
-    // 科创未盈利等：C燧原-U → 仍保留代码；若 essentials 未覆盖，去掉 C前缀/-U 便于搜索
     if (/^C.+-U$/.test(row.name) && !ESSENTIALS.some((e) => e.code === row.code)) {
       row.name = row.name.replace(/^C/, '').replace(/-U$/, '');
+      row.short_name = shortNameOf(row.name);
     }
+    // Ensure derived fields always present
+    row.board = row.board || boardOf(row.code);
+    row.short_name = row.short_name || shortNameOf(row.name);
+    row.list_date = fmtListDate(row.list_date);
   }
 
   const list = [...map.values()].sort((a, b) => a.code.localeCompare(b.code));
   await writeFile(OUT, `${JSON.stringify(list, null, 2)}\n`, 'utf8');
-  const sanyi = list.find((r) => r.code === '600031');
+
+  const byEx = { SSE: 0, SZSE: 0, BSE: 0 };
+  const byBoard: Record<string, number> = {};
+  let dated = 0;
+  for (const r of list) {
+    byEx[r.exchange] += 1;
+    byBoard[r.board || '(empty)'] = (byBoard[r.board || '(empty)'] || 0) + 1;
+    if (r.list_date) dated += 1;
+  }
+  const sample = list.find((r) => r.code === '000725');
   const summary = {
     out: OUT,
     count: list.length,
+    byEx,
+    byBoard,
+    list_date_filled: `${dated}/${list.length}`,
+    sample_000725: sample,
     notes,
-    sanyi,
   };
   console.log(JSON.stringify(summary, null, 2));
   return summary;

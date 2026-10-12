@@ -6,7 +6,14 @@
  */
 import seed from '@/data/ashare-universe.json';
 
-export type AshareRow = { code: string; name: string; exchange: 'SSE' | 'SZSE' | 'BSE' };
+export type AshareRow = {
+  code: string;
+  name: string;
+  short_name: string;
+  exchange: 'SSE' | 'SZSE' | 'BSE';
+  board: string;
+  list_date: string;
+};
 
 export function getAshareUniverse(): AshareRow[] {
   return (seed as AshareRow[]) ?? [];
