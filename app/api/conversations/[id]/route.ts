@@ -1,5 +1,11 @@
 import { ensureConversationOwner } from '@/lib/auth';
-import { apiError, uuid } from '@/lib/api';
+import type { Row } from 'postgres';
+import { apiError } from '@/lib/api';
+import {
+  parseConversationId,
+  type ConversationDetailResponse,
+  type DeleteConversationResponse,
+} from '@/contracts/conversations';
 import { deleteConversation, readConversation } from '@/lib/conversations';
 
 export const dynamic = 'force-dynamic';
@@ -13,13 +19,28 @@ function withCookie(body: unknown, status: number, setCookie?: string) {
 
 async function identity(request: Request, context: Context) {
   const { owner, setCookie } = ensureConversationOwner(request);
-  return { owner, setCookie, id: uuid((await context.params).id, 'id') };
+  return { owner, setCookie, id: parseConversationId((await context.params).id) };
+}
+
+function conversationDto(row: Row) {
+  return {
+    id: String(row.id),
+    report_id: String(row.report_id),
+    title: String(row.title),
+    created_at: new Date(row.created_at as string | Date).toISOString(),
+    updated_at: new Date(row.updated_at as string | Date).toISOString(),
+  };
 }
 
 export async function GET(request: Request, context: Context) {
   try {
     const { owner, setCookie, id } = await identity(request, context);
-    return withCookie(await readConversation(owner, id), 200, setCookie);
+    const result = await readConversation(owner, id);
+    const body = {
+      conversation: conversationDto(result.conversation),
+      messages: [...result.messages],
+    } satisfies ConversationDetailResponse;
+    return withCookie(body, 200, setCookie);
   } catch (error) { return apiError(error); }
 }
 
@@ -27,6 +48,7 @@ export async function DELETE(request: Request, context: Context) {
   try {
     const { owner, setCookie, id } = await identity(request, context);
     await deleteConversation(owner, id);
-    return withCookie({ ok: true }, 200, setCookie);
+    const body = { ok: true } satisfies DeleteConversationResponse;
+    return withCookie(body, 200, setCookie);
   } catch (error) { return apiError(error); }
 }

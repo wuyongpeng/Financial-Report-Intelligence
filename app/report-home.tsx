@@ -29,6 +29,8 @@ import {
   type ParsedPeriod,
 } from '@/lib/home-search';
 import type { Report } from '@/lib/detail-model';
+import { readContractJson } from '@/contracts/common';
+import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
@@ -404,12 +406,10 @@ export default function ReportHome() {
     if (pre !== 'no') {
       try {
         const response = await fetch(`/api/reports?code=${encodeURIComponent(company.code)}&limit=100`, { cache: 'no-store' });
-        if (response.ok) {
-          const payload = await response.json() as { reports?: Report[] };
-          matched = pickBestReport(payload.reports ?? [], period);
-          if (matched?.metrics?.[0]?.period) periodToken = matched.metrics[0].period;
-          else if (period.token) periodToken = period.token;
-        }
+        const payload = await readContractJson(response, parseReportListResponse);
+        matched = pickBestReport(payload.reports, period);
+        if (matched?.metrics?.[0]?.period) periodToken = matched.metrics[0].period;
+        else if (period.token) periodToken = period.token;
       } catch {
         /* fall through — still navigate if coverage says yes */
       }

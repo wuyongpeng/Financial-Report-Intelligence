@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import CompanyDetail from '../company-detail';
 import type { Report } from '@/lib/detail-model';
+import { readContractJson } from '@/contracts/common';
+import { parseReportListResponse } from '@/contracts/reports';
 import companiesJson from '@/data/companies.json';
 import { openingCompanyLabel } from '@/lib/crawl-display';
 
@@ -64,10 +66,9 @@ export default function CompanyCodeClient({ code }: { code: string }) {
       setLoading(true);
       try {
         const response = await fetch(`/api/reports?code=${encodeURIComponent(code)}&limit=100`, { cache: 'no-store' });
-        if (!response.ok) throw new Error(`公告接口 ${response.status}`);
-        const payload = await response.json() as { reports?: Report[] };
+        const payload = await readContractJson(response, parseReportListResponse);
         if (!active) return;
-        const reports = payload.reports ?? [];
+        const reports = payload.reports;
         const preferred = reports.find((item) => item.metrics?.length)
           ?? reports[0]
           ?? placeholderReport(code, meta);

@@ -8,6 +8,14 @@ import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
 import { citeFilingLabel, citeHoverText, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '@/lib/answer-cite';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
+import { readContractJson } from '@/contracts/common';
+import { parseReportListResponse } from '@/contracts/reports';
+import {
+  parseConversationDetailResponse,
+  parseConversationListResponse,
+  parseCreateConversationResponse,
+} from '@/contracts/conversations';
+import type { ChatStreamEvent } from '@/contracts/chat';
 import AnswerMarkdown from './answer-markdown';
 import { AnswerFeedback } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
@@ -175,9 +183,8 @@ function sleep(ms: number) {
 
 async function loadCompanyReports(code: string): Promise<Report[]> {
   const response = await fetch(`/api/reports?code=${encodeURIComponent(code)}&limit=100`, { cache: 'no-store' });
-  if (!response.ok) throw new Error('财报列表加载失败');
-  const data = await response.json() as { reports: Report[] };
-  const usable = (data.reports ?? []).filter((item) => item.id && !item.id.startsWith('pending:'));
+  const data = await readContractJson(response, parseReportListResponse);
+  const usable = data.reports.filter((item) => item.id && !item.id.startsWith('pending:'));
   return pickCanonicalReports(usable);
 }
 
@@ -453,14 +460,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     void (async () => {
       try {
         const response = await fetch(`/api/conversations?reportId=${encodeURIComponent(selected.id)}`, { signal: abort.signal, cache: 'no-store' });
-        if (!response.ok) throw new Error();
-        const data = await response.json() as { conversations: Array<{ id: string }> };
+        const data = await readContractJson(response, parseConversationListResponse);
         const id = conversationIds.current.get(selected.id) ?? data.conversations[0]?.id;
         // Empty / anonymous: keep in-memory company thread; never wipe on soft miss.
         if (!id) return;
         const detail = await fetch(`/api/conversations/${id}`, { signal: abort.signal, cache: 'no-store' });
-        if (!detail.ok) throw new Error();
-        const payload = await detail.json() as { messages: Array<{ role: 'user' | 'assistant'; content: string; evidence: Citation[]; status: string }> };
+        const payload = await readContractJson(detail, parseConversationDetailResponse);
         if (abort.signal.aborted) return;
         conversationIds.current.set(selected.id, id);
         setMessages(payload.messages.map(m => ({ role: m.role, text: m.content || (m.role === 'assistant' ? '这次回答尚未完成，可重新提问。' : ''), citations: m.evidence })));
@@ -1133,10 +1138,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (!conversationId) {
         try {
           const created = await fetch('/api/conversations', { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: id }) });
-          const payload = await created.json() as { conversation?: { id: string }; error?: string };
-          if (created.ok && payload.conversation) {
-            conversationId = payload.conversation.id; conversationIds.current.set(id, conversationId);
-          }
+          const payload = await readContractJson(created, parseCreateConversationResponse);
+          conversationId = payload.conversation.id; conversationIds.current.set(id, conversationId);
         } catch { /* ignore — anonymous users can ask without persisted memory */ }
       }
       const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), stream:true }) });
@@ -1145,7 +1148,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       while (true) {
         const {done,value:chunk} = await reader.read(); buffer += decoder.decode(chunk ?? new Uint8Array(), {stream:!done});
         const events = buffer.split('\n\n'); buffer = events.pop() ?? '';
-        for (const event of events) { const raw = event.split('\n').find(l=>l.startsWith('data: '))?.slice(6); if (!raw || raw==='[DONE]') continue; const p = JSON.parse(raw) as {content?:string;evidence?:Citation[];status?:string;error?:string;mode?:string;result?:{answer:string;evidence:Citation[];mode?:string}}; if(p.status==='reasoning') setThinking(true); if(p.content||p.result) setThinking(false); answer = p.result ? p.result.answer : answer + (p.content ?? ''); if(p.error) answer=p.error; update(p.result?.evidence ?? p.evidence); }
+        for (const event of events) { const raw = event.split('\n').find(l=>l.startsWith('data: '))?.slice(6); if (!raw || raw==='[DONE]') continue; const p = JSON.parse(raw) as ChatStreamEvent; if('status' in p && p.status==='reasoning') setThinking(true); if('content' in p||'result' in p) setThinking(false); answer = 'result' in p ? p.result.answer : answer + ('content' in p ? p.content : ''); if('error' in p) answer=p.error; update('result' in p ? p.result.evidence : 'evidence' in p ? p.evidence : undefined); }
         if(done) break;
       }
       if (!answer && !controller.signal.aborted) { answer='暂无法回答：未返回足够证据。可尝试询问本期营业收入或净利润。'; update(); }
@@ -1225,8 +1228,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     busyRef.current = true; setAsking(true);
     try {
       const response = await fetch('/api/conversations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: id }) });
-      const payload = await response.json() as { conversation?: { id: string }; error?: string };
-      if (response.ok && payload.conversation) {
+      const payload = await readContractJson(response, parseCreateConversationResponse);
+      if (payload.conversation) {
         conversationIds.current.set(id, payload.conversation.id);
         if (activeId.current === id) { setMessages([]); setQuestion(''); setClips([]); setPick(null); setOverviewPick(null); }
       } else if (activeId.current === id) {

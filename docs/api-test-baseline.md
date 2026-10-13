@@ -2,6 +2,19 @@
 
 本文说明架构重构前建立的自动化基线。目标是锁定当前公开行为，而不是证明当前接口设计或检索算法已经完善。
 
+## 共享 contracts
+
+核心公开接口的请求、响应 DTO 与运行时解析位于：
+
+- `contracts/common.ts`：通用 JSON 边界、错误读取和基础断言；
+- `contracts/reports.ts`：报告列表查询、报告和指标 DTO；
+- `contracts/conversations.ts`：会话创建、列表、详情和删除；
+- `contracts/chat.ts`：问答请求、普通响应及 SSE 事件。
+
+Route Handler 使用同一契约校验输入并约束输出；Web 客户端在 JSON 边界调用运行时解析器，不再只使用 TypeScript 类型断言。未来 Mobile 可直接复用这些平台无关契约，而不复制 `app/api` 的后端实现。
+
+本阶段保持既有 URL、HTTP 状态码和 JSON 外形不变，避免 contracts 建设与 API v2 迁移混在一起。
+
 ## 覆盖范围
 
 ### 快速契约测试
@@ -12,7 +25,8 @@
 - JSON、文本、UUID 和聊天请求输入边界；
 - 当前会话追问、跨期、同行及关键词排序行为；
 - SSE 的 LF/CRLF、网络分块、结束事件和不完整流；
-- 模型增量输出、证据引用校验与安全降级。
+- 模型增量输出、证据引用校验与安全降级；
+- Reports、Conversations、Chat contracts 的默认值、枚举和响应 DTO。
 
 执行：
 

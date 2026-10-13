@@ -1,21 +1,40 @@
 import { getDb } from '@/lib/db';
-import { ApiError, apiError } from '@/lib/api';
+import { apiError } from '@/lib/api';
+import { parseReportListQuery, type ReportListResponse } from '@/contracts/reports';
 import { classifyReportTitle, canonicalPeriodFromTitle } from '@/lib/ingest-period';
 import { healFilingLabels } from '@/lib/period-heal';
 
 export const dynamic = 'force-dynamic';
 
-type ReportRow = Record<string, unknown> & { id: string };
-type MetricRow = Record<string, unknown> & { announcement_id: string };
+type ReportRow = {
+  id: string;
+  code: string;
+  company_name: string;
+  title: string;
+  report_type: string;
+  published_at: string;
+  parsed_at: string | null;
+  industry: string;
+  status: string;
+  [key: string]: unknown;
+};
+type MetricRow = {
+  announcement_id: string;
+  metric: import('@/lib/detail-model').MetricName;
+  value: number;
+  unit: string;
+  period: string;
+  source_page: number | null;
+  source_label: string | null;
+  confidence: number;
+  verified: number;
+};
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const requestedLimit = Number(url.searchParams.get('limit') ?? 50);
-  if (!Number.isInteger(requestedLimit) || requestedLimit < 1) return apiError(new ApiError(400, 'limit 必须为正整数'));
-  const limit = Math.min(requestedLimit, 100);
-  const code = url.searchParams.get('code');
-  const byCompany = url.searchParams.get('view') === 'companies';
   try {
+    const query = parseReportListQuery(new URL(request.url));
+    const { limit, code } = query;
+    const byCompany = query.view === 'companies';
     const db = getDb();
     const reports = byCompany && !code
       ? await db<ReportRow[]>`SELECT a.*, c.industry, c.rank FROM companies c JOIN LATERAL (
@@ -51,21 +70,25 @@ export async function GET(request: Request) {
       `;
       const metricsByReport = new Map<string, MetricRow[]>();
       for (const metric of metrics) metricsByReport.set(metric.announcement_id, [...(metricsByReport.get(metric.announcement_id) ?? []), metric]);
-      return Response.json({ source: 'postgresql', count: reports.length, reports: reports.map((item) => {
-        const token = canonicalPeriodFromTitle(String(item.title ?? ''), item.published_at);
-        const kind = classifyReportTitle(String(item.title ?? ''));
-        const raw = metricsByReport.get(item.id) ?? [];
-        const healed = token ? raw.map((metric) => ({ ...metric, period: token })) : raw;
-        return {
-          ...item,
-          report_type: kind === 'other' ? item.report_type : kind,
-          metrics: healed,
-        };
-      }) }, {
-        headers: { 'cache-control': 'no-store' },
-      });
+      const body = {
+        source: 'postgresql',
+        count: reports.length,
+        reports: reports.map((item) => {
+          const token = canonicalPeriodFromTitle(String(item.title ?? ''), item.published_at);
+          const kind = classifyReportTitle(String(item.title ?? ''));
+          const raw = metricsByReport.get(item.id) ?? [];
+          const healed = token ? raw.map((metric) => ({ ...metric, period: token })) : raw;
+          return {
+            ...item,
+            report_type: kind === 'other' ? item.report_type : kind,
+            metrics: healed,
+          };
+        }),
+      } satisfies ReportListResponse;
+      return Response.json(body, { headers: { 'cache-control': 'no-store' } });
     }
-    return Response.json({ source: 'postgresql', count: 0, reports: [] }, { headers: { 'cache-control': 'no-store' } });
+    const empty = { source: 'postgresql', count: 0, reports: [] } satisfies ReportListResponse;
+    return Response.json(empty, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     return apiError(error);
   }
