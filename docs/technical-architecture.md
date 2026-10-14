@@ -40,7 +40,30 @@ Reports 是首个完整垂直样板：
 - 人工复核：管理员核对 PDF 后，指标标记为已复核，并写入复核事件。
 - 异常不自动上线：无法完整抽取时保留“部分解析”状态，而非填充猜测数据。
 
-## 问答
+## 问答与检索
+
+问答入口仍由 `app/api/chat` 提供 SSE/JSON 协议，检索内部按以下流水线分层：
+
+```text
+QuestionPlanner
+  → QueryPlan（指标、跨期、同行、页码、直答/拒答意图）
+  → RetrievalRepository（结构化指标、相关报告、页文本数据端口）
+  → PassageRetriever（当前为关键词规则排序）
+  → Retrieval Orchestrator（证据、计算、上下文组装）
+  → Answer Policy（结构化直答、证据不足、越界拒答）
+  → LLM Answer Generator + Citation Validator
+```
+
+对应模块：
+
+- `modules/retrieval/application/question-planner.ts`：问题规划与追问补全；
+- `modules/retrieval/domain/retrieval-repository.ts`：检索数据端口；
+- `modules/retrieval/infrastructure/postgres-retrieval-repository.ts`：PostgreSQL 查询适配器；
+- `modules/retrieval/application/keyword-passage-retriever.ts`：现有关键词召回与摘录策略；
+- `modules/retrieval/application/retrieve-context.ts`：结构化与原文检索编排；
+- `modules/retrieval/application/answer-policy.ts`：直答、拒答和证据充分性策略。
+
+`lib/rag.ts` 暂作为兼容与依赖组装入口，不再包含 SQL 或完整检索业务。当前仍是规则关键词检索，不宣称已经实现向量 RAG；后续可以在 `PassageRetriever` 接口后增加全文、向量和混合检索，而不改变 Chat API。
 
 问答服务组合结构化指标、同业覆盖信息和与问题相关的 PDF 页文本。若配置 OpenAI 兼容 LLM，答案通过 SSE 输出；否则返回可核验的原文证据。问答不会访问未入库外部数据，也不提供投资建议。
 
