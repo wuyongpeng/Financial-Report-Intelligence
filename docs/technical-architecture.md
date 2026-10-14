@@ -12,6 +12,27 @@ SSE / SZSE / CNINFO 公告列表
   → Next.js Web（图表、提纲阅读、问答）
 ```
 
+## 服务端分层
+
+项目采用模块化单体，HTTP 入口仍位于 `app/api`。核心模块逐步按以下依赖方向重构：
+
+```text
+Route Handler（HTTP/鉴权/序列化）
+  → Application Service（用例编排）
+    → Repository Interface（领域数据端口）
+      → PostgreSQL Adapter（SQL 与行映射）
+```
+
+Reports 是首个完整垂直样板：
+
+- `app/api/reports/route.ts`：解析请求、组装依赖、返回响应；
+- `modules/reports/application/list-reports.ts`：报告选择、同期补充、指标组合和 DTO 组装；
+- `modules/reports/domain/report-repository.ts`：数据库无关的 Repository 接口与领域记录；
+- `modules/reports/infrastructure/postgres-report-repository.ts`：数据库行到领域记录的映射；
+- `modules/reports/infrastructure/postgres-reports-database.ts`：SQL 实现。
+
+`contracts` 作为 HTTP 边界的共享请求/响应协议，不承载 SQL 或业务编排。Web 及未来 Mobile 可共享契约，但只通过 HTTP 调用后端。
+
 ## 解析与质量控制
 
 - 规则优先：对营业收入、归母净利润、EPS、ROE 使用确定性字段定位与单位换算。
