@@ -388,14 +388,20 @@ async function parseStoredAnnouncement(
     await ensureBackendSchema();
     await db.begin(async (tx) => {
       for (const metric of extracted.metrics) {
+        const priorValue = metric.priorValue ?? null;
+        const yoyPct = metric.yoyPct ?? null;
+        const yoySource = (priorValue != null || yoyPct != null) ? 'disclosed' : null;
         await tx`
-          INSERT INTO financial_metrics (announcement_id, code, period, metric, value, unit, source_page, source_label, confidence, verified, created_at)
-          VALUES (${record.id}, ${record.code}, ${period}, ${metric.metric}, ${metric.value}, ${metric.unit}, ${metric.page}, ${metric.sourceLabel}, ${metric.confidence}, false, ${createdAt})
+          INSERT INTO financial_metrics (announcement_id, code, period, metric, value, unit, source_page, source_label, confidence, verified, prior_value, yoy_pct, yoy_source, created_at)
+          VALUES (${record.id}, ${record.code}, ${period}, ${metric.metric}, ${metric.value}, ${metric.unit}, ${metric.page}, ${metric.sourceLabel}, ${metric.confidence}, false, ${priorValue}, ${yoyPct}, ${yoySource}, ${createdAt})
           ON CONFLICT (announcement_id, metric) DO UPDATE SET value=EXCLUDED.value, unit=EXCLUDED.unit,
             source_page=EXCLUDED.source_page, source_label=EXCLUDED.source_label, confidence=EXCLUDED.confidence,
+            prior_value=EXCLUDED.prior_value, yoy_pct=EXCLUDED.yoy_pct, yoy_source=EXCLUDED.yoy_source,
             verified=CASE WHEN financial_metrics.value=EXCLUDED.value AND financial_metrics.unit=EXCLUDED.unit
               AND financial_metrics.source_page IS NOT DISTINCT FROM EXCLUDED.source_page
               AND financial_metrics.source_label IS NOT DISTINCT FROM EXCLUDED.source_label
+              AND financial_metrics.prior_value IS NOT DISTINCT FROM EXCLUDED.prior_value
+              AND financial_metrics.yoy_pct IS NOT DISTINCT FROM EXCLUDED.yoy_pct
               THEN financial_metrics.verified ELSE false END
         `;
       }

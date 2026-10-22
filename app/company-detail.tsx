@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
-import { describeYoy, yoyTone } from '@/lib/crawl-display';
+import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
 import { changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
@@ -81,12 +81,20 @@ function EvaAnalyzing({ phase }: { phase: 'retrieving' | 'reasoning' }) {
   );
 }
 const pct = (n: number | undefined) => n === undefined ? '暂无同期数据' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
-function yoyPillText(yoy: ReturnType<typeof describeYoy>, baselineIsDefault: boolean) {
+function yoyPillText(yoy: ReturnType<typeof describeYoy> | ReturnType<typeof resolveYoy>, baselineIsDefault: boolean) {
   if (!yoy) return '暂无同期比较';
   const prefix = baselineIsDefault ? '同比' : '较基准';
   if (yoy.naPercent || yoy.kind === 'qualitative' || yoy.kind === 'flat') return `${prefix} ${yoy.label}`;
   if (yoy.label.startsWith('减亏') || yoy.label.startsWith('增亏')) return `${prefix} ${yoy.label}`;
   return `${prefix} ${pct(yoy.pct)}`;
+}
+
+function yoyPillTitle(yoy: ReturnType<typeof resolveYoy> | ReturnType<typeof describeYoy>, baselineIsDefault: boolean) {
+  if (!yoy) return undefined;
+  if (baselineIsDefault && 'source' in yoy && yoy.source === 'disclosed') {
+    return '来自本份财报上年同期列 / 同比增减';
+  }
+  return yoy.label;
 }
 
 function changeDirectionIcon(direction: ChangeDirection): { name: 'arrowUp' | 'arrowDown' | 'warn' | 'minus'; label: string } | null {
@@ -653,7 +661,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const deltas = metricNames.map(m => {
     const current = confidenceOf(selected, m), prior = confidenceOf(previous, m);
     const weakest = [current, prior].filter((n): n is number => n !== undefined);
-    const yoy = describeYoy(value(selected, m), value(previous, m));
+    const metricRow = selected.metrics.find(x => x.metric === m);
+    const yoy = baselineIsDefault
+      ? resolveYoy(value(selected, m), {
+        disclosedPrior: metricRow?.prior_value,
+        disclosedYoyPct: metricRow?.yoy_pct,
+        crossReportPrior: value(previous, m),
+      })
+      : describeYoy(value(selected, m), value(previous, m));
     return {
       metric: m,
       amount: yoy && !yoy.naPercent ? yoy.pct : undefined,
@@ -1408,7 +1423,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 <span className="cd-metric-tools">{footnote(m)}</span>
               </div>
               <strong>{amount(value(selected, m), m)}<i>{unitOf(m)}</i></strong>
-              <span className={`cd-pill ${pill}`}>{delta}</span>
+              <span className={`cd-pill ${pill}`} title={yoyPillTitle(yoy, baselineIsDefault)}>{delta}</span>
               {f && <small className="cd-metric-insight">{f.detail}</small>}
             </article>;
           })}</div>

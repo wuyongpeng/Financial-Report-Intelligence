@@ -10,6 +10,7 @@ import {
   formatYoyBadge,
   openingCompanyLabel,
   periodPrefixMatches,
+  resolveYoy,
   uniquePeriodTokens,
   verdictStatusLabel,
   yoyChange,
@@ -189,4 +190,40 @@ test('describeYoy: both negative uses abs prior — 减亏 / 增亏', () => {
   assert.ok(Math.abs((widened.pct ?? 0) - (-50)) < 1e-9);
   assert.match(widened.label, /增亏 50\.00%/);
   assert.equal(yoyTone(widened), 'down');
+});
+
+test('resolveYoy prefers disclosed YoY percent over cross-report prior', () => {
+  const yoy = resolveYoy(100, {
+    disclosedYoyPct: -45.57,
+    disclosedPrior: 200,
+    crossReportPrior: 1,
+  })!;
+  assert.equal(yoy.source, 'disclosed');
+  assert.ok(Math.abs((yoy.pct ?? 0) - (-45.57)) < 1e-9);
+  assert.equal(formatYoyBadge(yoy, 2), '-45.57%');
+});
+
+test('resolveYoy falls back to disclosed prior then cross-report prior', () => {
+  const fromDisclosedPrior = resolveYoy(120, {
+    disclosedPrior: 100,
+    crossReportPrior: 10,
+  })!;
+  assert.equal(fromDisclosedPrior.source, 'disclosed');
+  assert.ok(Math.abs((fromDisclosedPrior.pct ?? 0) - 20) < 1e-9);
+
+  const fromCross = resolveYoy(120, { crossReportPrior: 100 })!;
+  assert.equal(fromCross.source, 'computed');
+  assert.ok(Math.abs((fromCross.pct ?? 0) - 20) < 1e-9);
+
+  assert.equal(resolveYoy(120, {}), undefined);
+});
+
+test('resolveYoy keeps qualitative label when disclosed amounts cross zero', () => {
+  const yoy = resolveYoy(80, {
+    disclosedYoyPct: 99999,
+    disclosedPrior: -20,
+  })!;
+  assert.equal(yoy.source, 'disclosed');
+  assert.equal(yoy.label, '扭亏为盈');
+  assert.equal(yoy.naPercent, true);
 });

@@ -1,4 +1,5 @@
 import { apiError } from '@/lib/api';
+import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
 import { healFilingLabels } from '@/lib/period-heal';
 import { parseReportListQuery } from '@/contracts/reports';
@@ -10,6 +11,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
+    await ensureBackendSchema();
     const query = parseReportListQuery(new URL(request.url));
     const db = getDb();
     const repository = new PostgresReportRepository(createReportsDatabase(db));

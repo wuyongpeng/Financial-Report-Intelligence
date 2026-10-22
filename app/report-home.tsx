@@ -14,6 +14,7 @@ import {
   pickRecentPeriods,
   describeYoy,
   formatYoyBadge,
+  resolveYoy,
   yoyChange,
   yoyTone,
   type CrawlCompanyCoverage,
@@ -115,19 +116,39 @@ function metricByName(item: CrawlCompanyCoverage, name: string) {
   return item.metrics.find((m) => m.metric === name);
 }
 
+function metricResolvedYoy(metric: NonNullable<ReturnType<typeof metricByName>>) {
+  return resolveYoy(metric.value, {
+    disclosedPrior: metric.disclosedPrior,
+    disclosedYoyPct: metric.disclosedYoyPct,
+    crossReportPrior: metric.prior,
+  });
+}
+
 function primaryYoy(item: CrawlCompanyCoverage) {
   const revenue = metricByName(item, 'revenue');
-  if (revenue) return yoyChange(revenue.value, revenue.prior);
+  if (revenue) {
+    const yoy = metricResolvedYoy(revenue);
+    if (yoy && !yoy.naPercent && yoy.pct !== undefined) return yoy.pct;
+  }
   const profit = metricByName(item, 'net_profit');
-  if (profit) return yoyChange(profit.value, profit.prior);
+  if (profit) {
+    const yoy = metricResolvedYoy(profit);
+    if (yoy && !yoy.naPercent && yoy.pct !== undefined) return yoy.pct;
+  }
   return undefined;
 }
 
 function primaryYoyDesc(item: CrawlCompanyCoverage) {
   const revenue = metricByName(item, 'revenue');
-  if (revenue && revenue.prior !== undefined) return describeYoy(revenue.value, revenue.prior);
+  if (revenue) {
+    const yoy = metricResolvedYoy(revenue);
+    if (yoy) return yoy;
+  }
   const profit = metricByName(item, 'net_profit');
-  if (profit && profit.prior !== undefined) return describeYoy(profit.value, profit.prior);
+  if (profit) {
+    const yoy = metricResolvedYoy(profit);
+    if (yoy) return yoy;
+  }
   return undefined;
 }
 
@@ -1003,7 +1024,11 @@ export default function ReportHome() {
                         </div>
                       ) : null}
                       {previewMetrics.map((metric) => {
-                        const yoy = describeYoy(metric.value, metric.prior);
+                        const yoy = resolveYoy(metric.value, {
+                          disclosedPrior: metric.disclosedPrior,
+                          disclosedYoyPct: metric.disclosedYoyPct,
+                          crossReportPrior: metric.prior,
+                        });
                         const tone = yoyTone(yoy);
                         const badge = deltaLabel(yoy);
                         return (
@@ -1015,7 +1040,7 @@ export default function ReportHome() {
                             ) : (
                               <small
                                 className={tone === 'up' ? 'rh-ashare-up' : tone === 'down' ? 'rh-ashare-down' : undefined}
-                                title={yoy.label}
+                                title={yoy.source === 'disclosed' ? `${yoy.label}（财报披露）` : yoy.label}
                               >
                                 {tone === 'up' ? <Icon name="arrowUp" size={10} /> : null}
                                 {tone === 'down' ? <Icon name="arrowDown" size={10} /> : null}

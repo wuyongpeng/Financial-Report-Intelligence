@@ -31,6 +31,8 @@ export type RetrievalMetric = {
   period: string;
   sourcePage: number | null;
   sourceLabel: string | null;
+  priorValue?: number | null;
+  yoyPct?: number | null;
 };
 
 export type RetrievalChunk = {

@@ -16,6 +16,10 @@ export type ParsedMetric = {
   page: number;
   sourceLabel: string;
   confidence: number;
+  /** 上年同期金额（与 value 同单位缩放），来自摘要表第二列 */
+  priorValue?: number;
+  /** 财报披露的同比增减（%），括号为负；不对百分比做千元缩放 */
+  yoyPct?: number;
 };
 
 type MetricDefinition = {
@@ -61,10 +65,47 @@ function normalizePageText(text: string) {
   return text.replace(/\s+/g, ' ').replace(/([\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])/g, '$1').trim();
 }
 
+function parseSignedNumber(raw: string, openParen?: string, closeParen?: string) {
+  let value = Number(raw);
+  if (!Number.isFinite(value)) return null;
+  if (openParen && closeParen) value = -Math.abs(value);
+  return value;
+}
+
+/** After the current-period cell, read optional 上年同期 + 同比增减 from the same row. */
+function parseYoyPercentToken(text: string) {
+  // A-share forms: 9.05% | (45.57%) | （45.57%） | (45.57)% 
+  const match = text.match(/^\s*(?:\(\s*(-?\d+(?:\.\d+)?)\s*%\s*\)|(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%)/);
+  if (!match) return null;
+  if (match[1] !== undefined) {
+    const parsed = Number(match[1]);
+    return Number.isFinite(parsed) ? { value: -Math.abs(parsed), length: match[0].length } : null;
+  }
+  const parsed = parseSignedNumber(match[3], match[2], match[4]);
+  return parsed === null ? null : { value: parsed, length: match[0].length };
+}
+
+function parseTrailingPriorAndYoy(rest: string) {
+  let priorValue: number | undefined;
+  let yoyPct: number | undefined;
+  let cursor = rest;
+  const priorMatch = cursor.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?!\s*%)/);
+  if (priorMatch) {
+    const parsed = parseSignedNumber(priorMatch[2], priorMatch[1], priorMatch[3]);
+    if (parsed !== null) {
+      priorValue = parsed;
+      cursor = cursor.slice(priorMatch[0].length);
+    }
+  }
+  const yoy = parseYoyPercentToken(cursor);
+  if (yoy) yoyPct = yoy.value;
+  return { priorValue, yoyPct };
+}
+
 function candidateAfterLabel(pageText: string, label: string, definition: MetricDefinition, fallbackCurrencyUnit = '') {
   const index = pageText.indexOf(label);
   if (index < 0) return null;
-  let nearby = pageText.slice(index + label.length, index + label.length + 180).replace(/[,，]/g, '').replace(/（/g, '(').replace(/）/g, ')');
+  let nearby = pageText.slice(index + label.length, index + label.length + 220).replace(/[,，]/g, '').replace(/（/g, '(').replace(/）/g, ')');
   // Ratio/per-share rows often look like `基本每股收益（元/股）(1) 0.58`. Strip
   // small numeric footnotes anywhere before the real value. Parenthesized
   // currency amounts stay intact — those are negative values, not footnotes.
@@ -83,21 +124,49 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
       const value = Number(percentMatch[1]);
       if (!Number.isFinite(value)) return null;
       if (Math.abs(value) < definition.minAbs || Math.abs(value) > definition.maxAbs) return null;
-      return { value, detectedUnit: '%' };
+      const after = nearby.slice(percentMatch.index! + percentMatch[0].length);
+      // ROE tables list 本期% then 上年同期% (same unit). A following bare/percent
+      // number is prior level — not 同比增减 — unless a third % column appears.
+      const priorLevel = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?/);
+      let priorValue: number | undefined;
+      let yoyPct: number | undefined;
+      if (priorLevel) {
+        const parsed = parseSignedNumber(priorLevel[2], priorLevel[1], priorLevel[3]);
+        if (parsed !== null && Math.abs(parsed) <= definition.maxAbs) {
+          priorValue = parsed;
+          const rest = after.slice(priorLevel[0].length);
+          const yoy = parseYoyPercentToken(rest);
+          if (yoy) yoyPct = yoy.value;
+        }
+      }
+      return { value, detectedUnit: '%', priorValue, yoyPct };
     }
   }
   const valueMatch = nearby.match(/(?:人民币)?\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*(%|亿元|百万元|万元|千元|元\/股|元)?/);
   if (!valueMatch) return null;
-  let value = Number(valueMatch[2]);
-  if (valueMatch[1] && valueMatch[3]) value = -Math.abs(value);
-  if (!Number.isFinite(value)) return null;
+  let value = parseSignedNumber(valueMatch[2], valueMatch[1], valueMatch[3]);
+  if (value === null) return null;
   const detectedUnit = valueMatch[4] ?? '';
+  const scaleUnit = detectedUnit || fallbackCurrencyUnit || pageCurrencyUnit(pageText) || '元';
 
   if (currencyMetrics.has(definition.metric)) {
-    value = scaleCurrency(value, detectedUnit || fallbackCurrencyUnit || pageCurrencyUnit(pageText) || '元');
+    value = scaleCurrency(value, scaleUnit);
   }
   if (Math.abs(value) < definition.minAbs || Math.abs(value) > definition.maxAbs) return null;
-  return { value, detectedUnit };
+
+  const afterFirst = nearby.slice(valueMatch.index! + valueMatch[0].length);
+  const trailing = parseTrailingPriorAndYoy(afterFirst);
+  let priorValue = trailing.priorValue;
+  const yoyPct = trailing.yoyPct;
+  if (priorValue !== undefined) {
+    if (currencyMetrics.has(definition.metric)) {
+      priorValue = scaleCurrency(priorValue, scaleUnit === '%' ? '元' : scaleUnit);
+    }
+    if (Math.abs(priorValue) < definition.minAbs || Math.abs(priorValue) > definition.maxAbs) {
+      priorValue = undefined;
+    }
+  }
+  return { value, detectedUnit, priorValue, yoyPct };
 }
 
 function allLabelPositions(text: string, label: string) {
@@ -141,6 +210,8 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
           sourceLabel: label,
           confidence: 0,
           score,
+          ...(parsed.priorValue !== undefined ? { priorValue: parsed.priorValue } : {}),
+          ...(parsed.yoyPct !== undefined ? { yoyPct: parsed.yoyPct } : {}),
         });
       }
     }
@@ -165,6 +236,8 @@ function chooseCandidate(candidates: Candidate[]) {
     page: selected.page,
     sourceLabel: selected.sourceLabel,
     confidence: Number(confidence.toFixed(2)),
+    ...(selected.priorValue !== undefined ? { priorValue: selected.priorValue } : {}),
+    ...(selected.yoyPct !== undefined ? { yoyPct: selected.yoyPct } : {}),
   };
 }
 

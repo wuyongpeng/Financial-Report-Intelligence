@@ -29,6 +29,9 @@ export type DatabaseMetricRow = {
   source_label: string | null;
   confidence: number;
   verified: boolean | number;
+  prior_value?: number | null;
+  yoy_pct?: number | null;
+  yoy_source?: string | null;
 };
 
 export type ReportsDatabase = {
@@ -54,6 +57,10 @@ export function mapReportRow(row: DatabaseReportRow): ReportRecord {
 }
 
 export function mapMetricRow(row: DatabaseMetricRow): ReportMetricRecord {
+  const priorValue = row.prior_value == null || row.prior_value === undefined ? null : Number(row.prior_value);
+  const yoyPct = row.yoy_pct == null || row.yoy_pct === undefined ? null : Number(row.yoy_pct);
+  const rawSource = row.yoy_source == null || row.yoy_source === undefined ? null : String(row.yoy_source);
+  const yoySource = rawSource === 'disclosed' || rawSource === 'computed' ? rawSource : null;
   return {
     reportId: String(row.announcement_id),
     metric: row.metric,
@@ -64,6 +71,9 @@ export function mapMetricRow(row: DatabaseMetricRow): ReportMetricRecord {
     sourceLabel: row.source_label == null ? null : String(row.source_label),
     confidence: Number(row.confidence),
     verified: Number(row.verified),
+    priorValue: priorValue != null && Number.isFinite(priorValue) ? priorValue : null,
+    yoyPct: yoyPct != null && Number.isFinite(yoyPct) ? yoyPct : null,
+    yoySource,
   };
 }
 

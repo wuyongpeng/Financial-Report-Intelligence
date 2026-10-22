@@ -28,6 +28,9 @@ function metricDto(metric: ReportMetricRecord, period: string | null): Metric {
     source_label: metric.sourceLabel,
     confidence: metric.confidence,
     verified: metric.verified,
+    prior_value: metric.priorValue ?? null,
+    yoy_pct: metric.yoyPct ?? null,
+    yoy_source: metric.yoySource ?? null,
   };
 }
 

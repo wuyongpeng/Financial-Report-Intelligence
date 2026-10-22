@@ -43,7 +43,8 @@ export function createReportsDatabase(db: Db): ReportsDatabase {
     },
 
     async findMetricsByReportIds(reportIds) {
-      return db<DatabaseMetricRow[]>`SELECT announcement_id, period, metric, value, unit, source_page, source_label, confidence, verified
+      return db<DatabaseMetricRow[]>`SELECT announcement_id, period, metric, value, unit, source_page, source_label, confidence, verified,
+          prior_value, yoy_pct, yoy_source
         FROM financial_metrics WHERE announcement_id IN ${db(reportIds)}
         ORDER BY announcement_id, metric`;
     },

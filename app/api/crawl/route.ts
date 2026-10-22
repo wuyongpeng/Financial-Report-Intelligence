@@ -104,6 +104,7 @@ function priorPeriod(period: string) {
 
 export async function GET() {
   try {
+    await ensureBackendSchema();
     const db = getDb();
     const companies = await db<Array<{
       code: string; name: string; exchange: 'SSE' | 'SZSE'; industry: string; rank: number; weight: number;
@@ -136,7 +137,7 @@ export async function GET() {
     const latestByCode = new Map(latest.map((row) => [row.code, row]));
 
     const companyCodes = companies.map((c) => c.code);
-    type MetricRow = { announcement_id: string; period: string; metric: string; value: number; unit: string };
+    type MetricRow = { announcement_id: string; period: string; metric: string; value: number; unit: string; prior_value: number | null; yoy_pct: number | null };
     // Metrics loaded after we know all announcements (below). Placeholder maps filled later.
     let metricsByAnnouncement = new Map<string, MetricRow[]>();
     let priorLookup = new Map<string, number>();
@@ -172,7 +173,7 @@ export async function GET() {
     const allAnnIds = announcementPeriods.map((r) => r.id);
     const metrics: MetricRow[] = allAnnIds.length
       ? await db<MetricRow[]>`
-          SELECT announcement_id, period, metric, value, unit
+          SELECT announcement_id, period, metric, value, unit, prior_value, yoy_pct
           FROM financial_metrics
           WHERE announcement_id IN ${db(allAnnIds)}
             AND metric IN ('revenue','net_profit','eps','roe')
@@ -301,11 +302,15 @@ export async function GET() {
         if (!row) continue;
         const priorKey = resolvedPeriod ? priorPeriod(resolvedPeriod) : null;
         const prior = priorKey ? priorLookup.get(`${company.code}|${priorKey}|${metric}`) : undefined;
+        const disclosedPrior = row.prior_value == null ? undefined : Number(row.prior_value);
+        const disclosedYoyPct = row.yoy_pct == null ? undefined : Number(row.yoy_pct);
         preview.push({
           metric,
           label: METRIC_LABELS[metric],
           value: Number(row.value),
           ...(prior !== undefined ? { prior } : {}),
+          ...(disclosedPrior !== undefined && Number.isFinite(disclosedPrior) ? { disclosedPrior } : {}),
+          ...(disclosedYoyPct !== undefined && Number.isFinite(disclosedYoyPct) ? { disclosedYoyPct } : {}),
           unit: row.unit,
         });
       }

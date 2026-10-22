@@ -1,7 +1,7 @@
 import { ApiError } from '@/lib/api';
 import { buildPageLabels, resolvePageQuestion } from '@/lib/pdf-pages';
 import { labels, type MetricName } from '@/lib/detail-model';
-import { describeYoy } from '@/lib/crawl-display';
+import { resolveYoy } from '@/lib/crawl-display';
 import { canonicalPeriodFromTitle } from '@/lib/ingest-period';
 import type { Evidence, MemoryMessage } from '@/lib/conversations';
 import type { RetrievalRepository } from '../domain/retrieval-repository';
@@ -154,14 +154,23 @@ export async function retrieveContext(input: {
     const prior = factLines.find(item => item.metric.period === priorPeriod
       && item.metric.metric === fact.metric.metric
       && reportById.get(item.metric.reportId)?.code === target.code);
-    const yoy = describeYoy(fact.metric.value, prior?.metric.value);
-    if (prior && yoy) {
-      const formula = yoy.naPercent
-        ? '跨零或基期为零，百分比记为 N/A'
-        : (fact.metric.value < 0 && (prior.metric.value ?? 0) < 0)
-          ? '公式：(本期-上期)/|上期|'
-          : '公式：(本期-上期)/上期';
-      calculations.push(`${metricLabel(fact.metric.metric)}同比：${yoy.label}${fact.citation ? `【${fact.citation.id}】` : ''}（基期 ${priorPeriod}${prior.citation ? `【${prior.citation.id}】` : ''}，绝对变化 ${yoy.absoluteDelta}，${formula}）`);
+    const yoy = resolveYoy(fact.metric.value, {
+      disclosedPrior: fact.metric.priorValue,
+      disclosedYoyPct: fact.metric.yoyPct,
+      crossReportPrior: prior?.metric.value,
+    });
+    if (yoy) {
+      const formula = yoy.source === 'disclosed'
+        ? (yoy.naPercent ? '财报披露；跨零或基期为零，百分比记为 N/A' : '来自本份财报同比增减列')
+        : yoy.naPercent
+          ? '跨零或基期为零，百分比记为 N/A'
+          : (fact.metric.value < 0 && (prior?.metric.value ?? 0) < 0)
+            ? '公式：(本期-上期)/|上期|'
+            : '公式：(本期-上期)/上期';
+      const priorBit = prior
+        ? `基期 ${priorPeriod}${prior.citation ? `【${prior.citation.id}】` : ''}`
+        : (fact.metric.priorValue != null ? '基期来自本份财报上年同期列' : '无跨报告基期');
+      calculations.push(`${metricLabel(fact.metric.metric)}同比：${yoy.label}${fact.citation ? `【${fact.citation.id}】` : ''}（${priorBit}，绝对变化 ${yoy.absoluteDelta}，${formula}）`);
     }
   }
 

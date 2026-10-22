@@ -22,6 +22,9 @@ export type ReportMetricRecord = {
   sourceLabel: string | null;
   confidence: number;
   verified: number;
+  priorValue?: number | null;
+  yoyPct?: number | null;
+  yoySource?: 'disclosed' | 'computed' | null;
 };
 
 export type ReportSelection =

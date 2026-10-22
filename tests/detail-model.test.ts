@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { anomaliesConclusion, attributionConclusion, change, comparableHistory, sequentialHistory, historyConclusion, keyFindings, moduleForQuestion, peersConclusion, period, periodConclusion, priorYear, profitBridge, sourceRange, type Report } from '../lib/detail-model';
-import { describeYoy } from '../lib/crawl-display';
+import { describeYoy, resolveYoy } from '../lib/crawl-display';
 import { rankEvidence, unsupportedYears } from '../lib/chat-evidence';
 function report(id: string, period: string, value: number, type='annual', published='2026-04-01'): Report { return { id, code:'1',company_name:'测试',title:period,report_type:type,published_at:published,parsed_at:published,industry:'测试',status:'online',metrics:[{metric:'revenue',value,unit:'元',source_page:2,source_label:'营业收入',confidence:1,verified:1,period}] }; }
 test('history excludes later periods and other fiscal durations, deduplicates corrected filings',()=>{
@@ -151,4 +151,36 @@ test('change() returns undefined across zero; keyFindings use qualitative YoY la
   const findings = keyFindings([previous, current], current);
   assert.ok(findings.some((f) => f.headline.includes('扭亏为盈')));
   assert.equal(change(5e8, -1e9), undefined);
+});
+
+test('keyFindings prefer disclosed YoY on the metric row over cross-report prior', () => {
+  const metric = (name: string, value: number, extra: Record<string, unknown> = {}) => ({
+    metric: name as never, value, unit: '元', source_page: 7, source_label: name, confidence: 0.9, verified: 0, period: '', ...extra,
+  });
+  const previous = {
+    id: 'prev', code: '600000', company_name: '示例', title: '2025FY', report_type: 'annual', published_at: '2025-04-01',
+    parsed_at: '2025-01-01', industry: '银行', status: 'online',
+    metrics: [metric('net_profit', 1), metric('revenue', 1e10)], // absurd cross-report prior that would explode YoY
+  };
+  const current = {
+    id: 'curr', code: '600000', company_name: '示例', title: '2026FY', report_type: 'annual', published_at: '2026-04-01',
+    parsed_at: '2026-01-01', industry: '银行', status: 'online',
+    metrics: [
+      metric('net_profit', 2_752_825_000, { prior_value: 5_057_571_000, yoy_pct: -45.57, yoy_source: 'disclosed' }),
+      metric('revenue', 1e10, { prior_value: 9e9, yoy_pct: 11.11, yoy_source: 'disclosed' }),
+    ],
+  };
+  const findings = keyFindings([previous, current], current);
+  const profit = findings.find((f) => f.metric === 'net_profit');
+  assert.ok(profit);
+  assert.match(profit!.headline, /同比下降 45\.57%/);
+  assert.match(profit!.detail, /财报披露/);
+  assert.ok(!profit!.headline.includes('111'));
+  const resolved = resolveYoy(2_752_825_000, {
+    disclosedPrior: 5_057_571_000,
+    disclosedYoyPct: -45.57,
+    crossReportPrior: 1,
+  });
+  assert.equal(resolved?.source, 'disclosed');
+  assert.ok(Math.abs((resolved?.pct ?? 0) - (-45.57)) < 1e-9);
 });

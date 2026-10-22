@@ -1,6 +1,6 @@
 import { canonicalPeriodFromTitle, reportKindFromPeriod } from './ingest-period';
 import { betterKeepCandidate } from './period-dedupe';
-import { describeYoy } from './crawl-display';
+import { describeYoy, resolveYoy } from './crawl-display';
 
 export const metricNames = ['revenue', 'net_profit', 'eps', 'roe'] as const;
 // Balance-sheet and cash-flow rows power the health module; they are not headline cards.
@@ -8,7 +8,7 @@ export const supportMetricNames = ['total_assets', 'total_liabilities', 'operati
 export const allMetricNames = [...metricNames, ...supportMetricNames] as const;
 export type HeadlineMetric = typeof metricNames[number];
 export type MetricName = typeof allMetricNames[number];
-export type Metric = { metric: MetricName; value: number; unit: string; source_page: number | null; source_label: string | null; confidence: number; verified: number; period: string };
+export type Metric = { metric: MetricName; value: number; unit: string; source_page: number | null; source_label: string | null; confidence: number; verified: number; period: string; prior_value?: number | null; yoy_pct?: number | null; yoy_source?: 'disclosed' | 'computed' | null };
 export type Report = { id: string; code: string; company_name: string; title: string; report_type: string; published_at: string; parsed_at: string | null; industry: string; status: string; metrics: Metric[] };
 export type Citation = { id?: string; reportId?: string; companyName?: string; period?: string; page: number; quote: string; code?: string };
 export const labels: Record<MetricName, string> = {
@@ -128,20 +128,32 @@ export function keyFindings(reports: Report[], selected: Report): Finding[] {
   const out: Finding[] = [];
   for (const metric of metricNames) {
     const currentVal = value(selected, metric);
-    const priorVal = value(prior, metric);
-    const yoy = describeYoy(currentVal, priorVal);
+    const row = selected.metrics.find(item => item.metric === metric);
+    const disclosedPrior = row?.prior_value;
+    const disclosedYoyPct = row?.yoy_pct;
+    const crossPrior = value(prior, metric);
+    const yoy = resolveYoy(currentVal, {
+      disclosedPrior,
+      disclosedYoyPct,
+      crossReportPrior: crossPrior,
+    });
     if (!yoy) continue;
+    const priorVal = (disclosedPrior != null && Number.isFinite(disclosedPrior))
+      ? disclosedPrior
+      : crossPrior;
     const series = history.map(r => value(r, metric)).filter((v): v is number => v !== undefined);
     const current = currentVal!;
     const extreme = series.length >= 3 && (current === Math.max(...series) || current === Math.min(...series))
       ? `，为近 ${series.length} 期${current === Math.max(...series) ? '最高' : '最低'}` : '';
     const absDelta = format(Math.abs(yoy.absoluteDelta), metric);
     const deltaNote = yoy.absoluteDelta === 0 ? '' : `，变动 ${yoy.absoluteDelta >= 0 ? '+' : '-'}${absDelta}`;
+    const priorText = priorVal !== undefined ? format(priorVal, metric) : '—';
+    const sourceNote = yoy.source === 'disclosed' ? '（财报披露）' : '';
     out.push({
       id: `finding-${metric}`,
       metric,
       headline: `${labels[metric]}${yoy.label}`,
-      detail: `本期 ${format(current, metric)}，上年同期 ${format(priorVal, metric)}${deltaNote}${extreme}`,
+      detail: `本期 ${format(current, metric)}，上年同期 ${priorText}${deltaNote}${extreme}${sourceNote}`,
       module: 'anomalies',
       severity: yoy.naPercent || (yoy.pct !== undefined && Math.abs(yoy.pct) >= 30) ? 'watch' : 'info',
     });

@@ -49,6 +49,16 @@ export function parseMetricDto(value: unknown): Metric {
   const verified = typeof row.verified === 'boolean'
     ? Number(row.verified)
     : contractNumber(row.verified, 'metric.verified');
+  const priorValue = row.prior_value === null || row.prior_value === undefined
+    ? null
+    : contractNumber(row.prior_value, 'metric.prior_value');
+  const yoyPct = row.yoy_pct === null || row.yoy_pct === undefined
+    ? null
+    : contractNumber(row.yoy_pct, 'metric.yoy_pct');
+  const rawYoySource = row.yoy_source === null || row.yoy_source === undefined
+    ? null
+    : contractString(row.yoy_source, 'metric.yoy_source');
+  const yoySource = rawYoySource === 'disclosed' || rawYoySource === 'computed' ? rawYoySource : null;
   return {
     metric: metric as MetricName,
     value: contractNumber(row.value, 'metric.value'),
@@ -58,6 +68,9 @@ export function parseMetricDto(value: unknown): Metric {
     source_label: sourceLabel,
     confidence: contractNumber(row.confidence, 'metric.confidence'),
     verified,
+    prior_value: priorValue,
+    yoy_pct: yoyPct,
+    yoy_source: yoySource,
   };
 }
 

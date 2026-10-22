@@ -59,7 +59,12 @@ export type CrawlMetricPreview = {
   metric: HeadlineMetricName;
   label: string;
   value: number;
+  /** Cross-report prior from another announcement (fallback). */
   prior?: number;
+  /** Prior-period amount disclosed in this PDF's summary table. */
+  disclosedPrior?: number;
+  /** YoY % disclosed in this PDF (parentheses = negative). */
+  disclosedYoyPct?: number;
   unit: string;
 };
 
@@ -486,6 +491,77 @@ export function yoyChange(current?: number, prior?: number) {
   const yoy = describeYoy(current, prior);
   if (!yoy || yoy.naPercent || yoy.pct === undefined) return undefined;
   return yoy.pct;
+}
+
+export type YoySource = 'disclosed' | 'computed';
+
+export type ResolvedYoy = YoyResult & { source: YoySource };
+
+function yoyFromDisclosedPct(pct: number, current?: number, prior?: number): YoyResult {
+  const absoluteDelta = current !== undefined && prior !== undefined
+    && Number.isFinite(current) && Number.isFinite(prior)
+    ? current - prior
+    : 0;
+  if (prior !== undefined && Number.isFinite(prior) && current !== undefined && Number.isFinite(current)) {
+    const qualitative = describeYoy(current, prior);
+    if (qualitative?.naPercent) return qualitative;
+    if (current < 0 && prior < 0) {
+      if (pct === 0) return { kind: 'flat', pct: 0, label: '持平', absoluteDelta, naPercent: false };
+      const absPct = Math.abs(pct);
+      const narrowed = Math.abs(current) < Math.abs(prior);
+      return {
+        kind: 'pct',
+        pct,
+        label: narrowed ? `减亏 ${absPct.toFixed(2)}%` : `增亏 ${absPct.toFixed(2)}%`,
+        absoluteDelta,
+        naPercent: false,
+      };
+    }
+  }
+  if (pct === 0) return { kind: 'flat', pct: 0, label: '持平', absoluteDelta, naPercent: false };
+  const label = pct > 0 ? `同比增长 ${pct.toFixed(2)}%` : `同比下降 ${Math.abs(pct).toFixed(2)}%`;
+  return { kind: 'pct', pct, label, absoluteDelta, naPercent: false };
+}
+
+/**
+ * Prefer in-PDF disclosed YoY / prior over cross-report compute.
+ * 1) disclosedYoyPct → authoritative % (qualitative override if amounts cross zero)
+ * 2) disclosedPrior → describeYoy(current, disclosedPrior)
+ * 3) crossReportPrior → describeYoy(current, crossReportPrior)
+ */
+export function resolveYoy(
+  current: number | undefined,
+  opts: {
+    disclosedPrior?: number | null;
+    disclosedYoyPct?: number | null;
+    crossReportPrior?: number | null;
+  } = {},
+): ResolvedYoy | undefined {
+  if (current === undefined || !Number.isFinite(current)) return undefined;
+  const dPrior = opts.disclosedPrior;
+  const dYoy = opts.disclosedYoyPct;
+  const cPrior = opts.crossReportPrior;
+  const hasDPrior = dPrior != null && Number.isFinite(dPrior);
+  const hasDYoy = dYoy != null && Number.isFinite(dYoy);
+  const hasCPrior = cPrior != null && Number.isFinite(cPrior);
+
+  if (hasDYoy) {
+    const built = yoyFromDisclosedPct(
+      dYoy as number,
+      current,
+      hasDPrior ? (dPrior as number) : undefined,
+    );
+    return { ...built, source: 'disclosed' };
+  }
+  if (hasDPrior) {
+    const yoy = describeYoy(current, dPrior as number);
+    return yoy ? { ...yoy, source: 'disclosed' } : undefined;
+  }
+  if (hasCPrior) {
+    const yoy = describeYoy(current, cPrior as number);
+    return yoy ? { ...yoy, source: 'computed' } : undefined;
+  }
+  return undefined;
 }
 
 export function freshnessLabel(iso: string | null | undefined, now = Date.now()) {

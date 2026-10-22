@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS financial_metrics (
   source_label TEXT,
   confidence DOUBLE PRECISION NOT NULL DEFAULT 0,
   verified BOOLEAN NOT NULL DEFAULT FALSE,
+  prior_value DOUBLE PRECISION,
+  yoy_pct DOUBLE PRECISION,
+  yoy_source TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (announcement_id, metric)
 );

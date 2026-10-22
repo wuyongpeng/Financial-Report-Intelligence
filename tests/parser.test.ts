@@ -90,6 +90,37 @@ test('parenthesized currency amounts do not skip to the prior-period column', ()
   assert.equal(parseCoreMetricPages(['合并利润表 单位：元 营业总成本 80000']).some(m => m.metric === 'operating_cost'), false);
 });
 
+
+test('captures disclosed prior and YoY from 主要会计数据 three-column rows', () => {
+  const metrics = parseCoreMetricPages([
+    '经营业绩 2026 年 1-6 月 2025 年 1-6 月 同比增减 单位：人民币千元 营业收入 78,025,359 71,552,734 9.05% 归属于上市公司股东的净利润 2,752,825 5,057,571 (45.57%) 经营活动产生的现金流量净额 (126,600) 1,299,408 (109.74%)',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 78_025_359_000);
+  assert.equal(revenue?.priorValue, 71_552_734_000);
+  assert.equal(revenue?.yoyPct, 9.05);
+
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 2_752_825_000);
+  assert.equal(profit?.priorValue, 5_057_571_000);
+  assert.equal(profit?.yoyPct, -45.57);
+
+  const cash = metrics.find((item) => item.metric === 'operating_cash_flow');
+  assert.equal(cash?.value, -126_600_000);
+  assert.equal(cash?.priorValue, 1_299_408_000);
+  assert.equal(cash?.yoyPct, -109.74);
+});
+
+test('does not scale disclosed YoY percent by page 千元 unit', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：人民币千元 营业收入 10,000 8,000 (20.00%)',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 10_000_000);
+  assert.equal(revenue?.priorValue, 8_000_000);
+  assert.equal(revenue?.yoyPct, -20);
+});
+
 test('large PDFs skip in-memory pdf.js and use external text extract', async () => {
   assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES), false);
   assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES + 1), true);

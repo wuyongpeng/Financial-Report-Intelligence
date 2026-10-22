@@ -49,5 +49,8 @@ async function migrate() {
     )`;
     await tx`CREATE INDEX IF NOT EXISTS metric_feedback_announcement_idx ON metric_feedback (announcement_id, metric)`;
     await tx`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS parse_priority INTEGER NOT NULL DEFAULT 0`;
+    await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS prior_value DOUBLE PRECISION`;
+    await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS yoy_pct DOUBLE PRECISION`;
+    await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS yoy_source TEXT`;
   });
 }

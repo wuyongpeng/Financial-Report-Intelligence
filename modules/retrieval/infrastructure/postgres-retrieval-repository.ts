@@ -26,6 +26,8 @@ type MetricRow = {
   period: string;
   source_page: number | null;
   source_label: string | null;
+  prior_value?: number | null;
+  yoy_pct?: number | null;
 };
 type ChunkRow = { announcement_id: string; page: number; content: string };
 
@@ -42,6 +44,8 @@ export function mapRetrievalReport(row: ReportRow): RetrievalReport {
 }
 
 function mapMetric(row: MetricRow): RetrievalMetric {
+  const priorValue = row.prior_value == null || row.prior_value === undefined ? null : Number(row.prior_value);
+  const yoyPct = row.yoy_pct == null || row.yoy_pct === undefined ? null : Number(row.yoy_pct);
   return {
     reportId: String(row.announcement_id),
     metric: String(row.metric),
@@ -50,6 +54,8 @@ function mapMetric(row: MetricRow): RetrievalMetric {
     period: String(row.period),
     sourcePage: row.source_page == null ? null : Number(row.source_page),
     sourceLabel: row.source_label == null ? null : String(row.source_label),
+    priorValue: priorValue != null && Number.isFinite(priorValue) ? priorValue : null,
+    yoyPct: yoyPct != null && Number.isFinite(yoyPct) ? yoyPct : null,
   };
 }
 
@@ -68,7 +74,7 @@ export class PostgresRetrievalRepository implements RetrievalRepository {
 
   async findMetrics(reportIds: string[]) {
     if (!reportIds.length) return [];
-    const rows = await this.db<MetricRow[]>`SELECT announcement_id, metric, value, unit, period, source_page, source_label
+    const rows = await this.db<MetricRow[]>`SELECT announcement_id, metric, value, unit, period, source_page, source_label, prior_value, yoy_pct
       FROM financial_metrics WHERE announcement_id IN ${this.db(reportIds)} ORDER BY metric`;
     return rows.map(mapMetric);
   }
