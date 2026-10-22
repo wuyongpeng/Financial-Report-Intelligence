@@ -38,6 +38,7 @@ const companyByCode = new Map(companies.map((company) => [company.code, company]
 const seedReports = seedReportsJson as Array<{
   id: string; source: Announcement['source']; source_id: string; code: string; company_name: string;
   title: string; report_type: Announcement['reportType']; published_at: string; discovered_at: string; pdf_url: string;
+  industry?: string; rank?: number;
 }>;
 
 type StoredAnnouncement = {
@@ -59,6 +60,41 @@ async function logicalId(item: Announcement) {
   return sha256(`${item.code}|${asIsoDate(item.publishedAt).slice(0, 10)}|${normalizeTitle(item.title, item.name)}`);
 }
 
+
+/** SSE / SZSE / BSE from A-share code prefix (same rule as seedCompanies). */
+export function exchangeFromCode(code: string): Company['exchange'] {
+  if (code.startsWith('6') || code.startsWith('9')) return 'SSE';
+  if (code.startsWith('8') || code.startsWith('4')) return 'BSE';
+  return 'SZSE';
+}
+
+/** Build companies upsert fields from a seed-reports.json row (plus monitor-pool defaults when present). */
+export function companyFieldsFromSeedReport(item: {
+  code: string;
+  company_name: string;
+  industry?: string;
+  rank?: number;
+}) {
+  const fromPool = companyByCode.get(item.code);
+  return {
+    code: item.code,
+    name: item.company_name || fromPool?.name || item.code,
+    exchange: fromPool?.exchange ?? exchangeFromCode(item.code),
+    industry: item.industry || fromPool?.industry || '待分类',
+    rank: item.rank ?? fromPool?.rank ?? 999,
+    weight: fromPool?.weight ?? 60,
+  };
+}
+
+/** True when Postgres rejected an announcement insert because code is missing from companies. */
+export function isAnnouncementCodeForeignKeyError(error: unknown): boolean {
+  const err = error as { code?: string; constraint_name?: string; constraint?: string; message?: string };
+  const constraint = err?.constraint_name ?? err?.constraint ?? '';
+  if (err?.code === '23503' && /announcements_code_fkey/i.test(constraint)) return true;
+  const msg = String(err?.message ?? error);
+  return /announcements_code_fkey/i.test(msg)
+    || (err?.code === '23503' && /is not present in table ["']companies["']/i.test(msg));
+}
 
 /** Insert discovered row; ignore both id and (source, source_id) duplicates without aborting the batch. */
 async function insertDiscoveredAnnouncement(row: {
@@ -93,6 +129,11 @@ async function insertDiscoveredAnnouncement(row: {
   } catch (error) {
     const msg = String(error);
     if (/announcements_source_source_id_key|duplicate key/i.test(msg)) return 0;
+    // Unknown code must never kill the worker (seed / live race against companies FK).
+    if (isAnnouncementCodeForeignKeyError(error)) {
+      console.warn(`[ingest] skip announcement ${row.id}: code ${row.code} missing from companies (FK)`);
+      return 0;
+    }
     throw error;
   }
 }
@@ -123,6 +164,40 @@ async function seedCompanies(now: string) {
   });
 }
 
+/** Upsert companies for every code in seed-reports.json (monitor pool may omit some). */
+async function ensureSeedReportCompanies(now: string) {
+  const db = getDb();
+  const byCode = new Map<string, ReturnType<typeof companyFieldsFromSeedReport>>();
+  for (const item of seedReports) {
+    if (!item.code) continue;
+    // First occurrence wins; later duplicates share the same code.
+    if (!byCode.has(item.code)) byCode.set(item.code, companyFieldsFromSeedReport(item));
+  }
+  await db.begin(async (tx) => {
+    for (const company of byCode.values()) {
+      await tx`
+        INSERT INTO companies (code, name, exchange, industry, rank, weight, enabled, created_at, updated_at)
+        VALUES (
+          ${company.code},
+          ${company.name},
+          ${company.exchange},
+          ${company.industry},
+          ${company.rank},
+          ${company.weight},
+          true, ${now}, ${now}
+        )
+        ON CONFLICT (code) DO UPDATE SET
+          name=EXCLUDED.name,
+          exchange=EXCLUDED.exchange,
+          industry=EXCLUDED.industry,
+          rank=EXCLUDED.rank,
+          updated_at=EXCLUDED.updated_at
+      `;
+    }
+  });
+  return byCode.size;
+}
+
 async function seedSnapshotAnnouncements(now: string) {
   let seeded = 0;
   for (const item of seedReports) {
@@ -147,6 +222,8 @@ async function seedSnapshotAnnouncements(now: string) {
 export async function bootstrapLiveData() {
   const now = new Date().toISOString();
   await seedCompanies(now);
+  // seed-reports may include codes not in companies.json monitor pool (e.g. 600900).
+  await ensureSeedReportCompanies(now);
   const seeded = await seedSnapshotAnnouncements(now);
   return { companies: companies.length, announcements: seedReports.length, seeded, at: now };
 }
