@@ -951,6 +951,7 @@ export default function CrawlOverview() {
                     codes: [item.code],
                     parseOnly: true,
                     periods: [item.period],
+                    immediate: Boolean(item.announcementId),
                     ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
                   }),
             });
@@ -1386,7 +1387,7 @@ export default function CrawlOverview() {
     };
     patchRowBusy(busyId, 'parse', true);
     setOptimisticJobs((prev) => [job, ...prev.filter((item) => item.key !== key)].slice(0, 12));
-    setTriggerMsg(`已插到解析队首 ${label}`);
+    setTriggerMsg(chosen?.announcementId ? `已立即开始解析 ${label}` : `已触发解析 ${label}`);
     void refreshLive();
     try {
       const response = await fetch('/api/crawl/trigger', {
@@ -1396,6 +1397,8 @@ export default function CrawlOverview() {
           mode: 'parse',
           codes: [code],
           parseOnly: true,
+          // 重新/手动解析要立刻重抽指标，不能只插闲时队列
+          immediate: Boolean(chosen?.announcementId),
           ...(chosen?.announcementId ? { announcementIds: [chosen.announcementId] } : {}),
           ...(chosen?.period ? { periods: [chosen.period] } : {}),
         }),

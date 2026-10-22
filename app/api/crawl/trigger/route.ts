@@ -29,7 +29,7 @@ export async function POST(request: Request) {
 
   let body: {
     mode?: string; codes?: string[]; fullHistory?: boolean; lookback?: string; parseOnly?: boolean;
-    periods?: string[]; announcementIds?: string[]; immediate?: boolean;
+    periods?: string[]; announcementIds?: string[]; immediate?: boolean; queueOnly?: boolean;
   } = {};
   try { body = await request.json(); } catch { /* empty body ok */ }
   const discover = body.mode === 'discover' && auth === 'token';
@@ -91,9 +91,30 @@ export async function POST(request: Request) {
       }, { headers: { 'cache-control': 'no-store' } });
     }
 
-    // Crawl-page manual parse: jump to the front of the idle single queue.
+    // Crawl-page manual parse with concrete announcement ids: run now (re-parse wrong metrics).
+    // Idle enqueue remains available via body.queueOnly === true for non-urgent bulk.
     if (parseOnly && (codes.length || announcementIds.length)) {
-      if (announcementIds.length) {
+      if (announcementIds.length && body.queueOnly !== true) {
+        const ids = announcementIds;
+        after(async () => {
+          try {
+            await Promise.all(ids.map((id) => parseAnnouncementById(id)));
+          } catch (error) {
+            console.error('[parse] crawl-page reparse failed', ids, error);
+          }
+        });
+        return Response.json({
+          mode: 'parse-now',
+          auth,
+          codes,
+          periods,
+          announcementIds,
+          accepted: ids.length,
+          note: `已立即开始重新解析 ${ids.length} 份`,
+          ok: true,
+        }, { headers: { 'cache-control': 'no-store' } });
+      }
+      if (announcementIds.length && body.queueOnly === true) {
         const queued = await enqueueParseFront(announcementIds);
         return Response.json({
           mode: 'parse-queue',
