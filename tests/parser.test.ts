@@ -121,6 +121,50 @@ test('does not scale disclosed YoY percent by page 千元 unit', () => {
   assert.equal(revenue?.yoyPct, -20);
 });
 
+
+
+test('ZTE 2026H1 summary keeps 千元 scale and disclosed YoY for 归母净利润', () => {
+  // Layout-normalized excerpt from 中兴通讯 000063 二〇二六年半年度报告 §1.2.3
+  // (单位：千元, three columns 本期 | 上年同期 | 同比增减).
+  const metrics = parseCoreMetricPages([
+    [
+      '1.2.3 本集团主要会计数据和财务指标',
+      '单位：千元',
+      '项目',
+      '经营业绩 2026 年 1-6 月 2025 年 1-6 月 同比增减',
+      '营业收入 78,025,359 71,552,734 9.05%',
+      '归属于上市公司股东的净利润 2,752,825 5,057,571 (45.57%)',
+      '归属于上市公司股东的扣除非经常性损益的净利润 2,220,797 4,103,900 (45.89%)',
+      '经营活动产生的现金流量净额 (126,600) 1,299,408 (109.74%)',
+      '基本每股收益注 1 0.58 1.06 (45.28%)',
+      '加权平均净资产收益率注 1 3.65% 6.85%',
+    ].join(' '),
+  ]);
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 2_752_825_000);
+  assert.equal(profit?.priorValue, 5_057_571_000);
+  assert.equal(profit?.yoyPct, -45.57);
+
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 78_025_359_000);
+  assert.equal(revenue?.priorValue, 71_552_734_000);
+  assert.equal(revenue?.yoyPct, 9.05);
+
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 0.58);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 3.65);
+});
+
+test('keeps disclosed YoY when a later statement row repeats the same amount without YoY columns', () => {
+  const metrics = parseCoreMetricPages([
+    '报告摘要 主要会计数据 单位：人民币千元 归属于上市公司股东的净利润 2,752,825 5,057,571 (45.57%)',
+    '合并利润表 单位：人民币千元 归属于母公司股东的净利润 2,752,825 5,617,745',
+  ]);
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 2_752_825_000);
+  assert.equal(profit?.yoyPct, -45.57);
+  assert.equal(profit?.priorValue, 5_057_571_000);
+});
+
 test('large PDFs skip in-memory pdf.js and use external text extract', async () => {
   assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES), false);
   assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES + 1), true);

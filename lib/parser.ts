@@ -221,14 +221,28 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
 
 function chooseCandidate(candidates: Candidate[]) {
   if (!candidates.length) return null;
-  const sorted = [...candidates].sort((a, b) => b.score - a.score || a.page - b.page);
+  const sorted = [...candidates].sort((a, b) => {
+    const scoreDiff = b.score - a.score;
+    if (scoreDiff !== 0) return scoreDiff;
+    // Same score: prefer a hit that carried disclosed YoY / prior from the summary table.
+    const aYoy = a.yoyPct !== undefined || a.priorValue !== undefined ? 1 : 0;
+    const bYoy = b.yoyPct !== undefined || b.priorValue !== undefined ? 1 : 0;
+    if (bYoy !== aYoy) return bYoy - aYoy;
+    return a.page - b.page;
+  });
   const selected = sorted[0];
   const agreeing = candidates.filter((candidate) => {
     const tolerance = Math.max(0.0001, Math.abs(selected.value) * 0.001);
     return Math.abs(candidate.value - selected.value) <= tolerance;
-  }).length;
+  });
+  // Statement rows often repeat the current amount without 上年同期 / 同比增减.
+  // Keep disclosed YoY from any agreeing hit so a higher-scoring bare row cannot drop it.
+  const withYoy = agreeing.find((candidate) => candidate.yoyPct !== undefined);
+  const withPrior = agreeing.find((candidate) => candidate.priorValue !== undefined);
+  const priorValue = withYoy?.priorValue ?? withPrior?.priorValue ?? selected.priorValue;
+  const yoyPct = withYoy?.yoyPct ?? selected.yoyPct;
   const conflicting = candidates.some((candidate) => candidate.value !== selected.value && candidate.score >= selected.score - 0.16);
-  const confidence = Math.max(0.55, Math.min(0.96, selected.score + (agreeing > 1 ? 0.05 : 0) - (conflicting ? 0.12 : 0)));
+  const confidence = Math.max(0.55, Math.min(0.96, selected.score + (agreeing.length > 1 ? 0.05 : 0) - (conflicting ? 0.12 : 0)));
   return {
     metric: selected.metric,
     value: selected.value,
@@ -236,8 +250,8 @@ function chooseCandidate(candidates: Candidate[]) {
     page: selected.page,
     sourceLabel: selected.sourceLabel,
     confidence: Number(confidence.toFixed(2)),
-    ...(selected.priorValue !== undefined ? { priorValue: selected.priorValue } : {}),
-    ...(selected.yoyPct !== undefined ? { yoyPct: selected.yoyPct } : {}),
+    ...(priorValue !== undefined ? { priorValue } : {}),
+    ...(yoyPct !== undefined ? { yoyPct } : {}),
   };
 }
 
@@ -302,10 +316,14 @@ export async function parseCoreMetrics(bytes: ArrayBuffer | null, options?: { fi
   const primaryPages = Array.isArray(extracted.text) ? extracted.text : [extracted.text];
   let pages = primaryPages;
   let metrics = parseCoreMetricPages(pages);
-  if (metrics.length < LABELS.length) {
+  const disclosedCount = (rows: ParsedMetric[]) => rows.filter((row) => row.yoyPct !== undefined || row.priorValue !== undefined).length;
+  if (metrics.length < LABELS.length || disclosedCount(metrics) < 2) {
     const fallbackPages = await extractWithPoppler(fallbackBytes, filePath);
     const fallbackMetrics = parseCoreMetricPages(fallbackPages);
-    if (fallbackMetrics.length > metrics.length) {
+    if (
+      fallbackMetrics.length > metrics.length
+      || disclosedCount(fallbackMetrics) > disclosedCount(metrics)
+    ) {
       pages = fallbackPages;
       metrics = fallbackMetrics;
     }
