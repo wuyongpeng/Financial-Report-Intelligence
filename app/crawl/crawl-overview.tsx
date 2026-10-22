@@ -629,9 +629,9 @@ export default function CrawlOverview() {
   const [autoVerdictSaving, setAutoVerdictSaving] = useState(false);
   const [triggerMsg, setTriggerMsg] = useState('');
   const [optimisticJobs, setOptimisticJobs] = useState<OptimisticJob[]>([]);
-  const [rowBusy, setRowBusy] = useState<Record<string, Partial<Record<'crawl' | 'parse' | 'verdict', true>>>>({});
+  const [rowBusy, setRowBusy] = useState<Record<string, Partial<Record<'crawl' | 'parse' | 'verdict' | 'discard', true>>>>({});
   const [actionConfirm, setActionConfirm] = useState<null | {
-    mode: 'crawl' | 'parse' | 'verdict';
+    mode: 'crawl' | 'parse' | 'verdict' | 'discard';
     code: string;
     name: string;
     period?: string;
@@ -1192,7 +1192,7 @@ export default function CrawlOverview() {
     return announcementId || `${code}:${period || 'all'}`;
   }
 
-  function patchRowBusy(id: string, mode: 'crawl' | 'parse' | 'verdict', on: boolean) {
+  function patchRowBusy(id: string, mode: 'crawl' | 'parse' | 'verdict' | 'discard', on: boolean) {
     setRowBusy((prev) => {
       const cur = { ...prev[id] };
       if (on) cur[mode] = true;
@@ -1204,7 +1204,7 @@ export default function CrawlOverview() {
     });
   }
 
-  function isRowBusy(id: string, mode: 'crawl' | 'parse' | 'verdict') {
+  function isRowBusy(id: string, mode: 'crawl' | 'parse' | 'verdict' | 'discard') {
     return Boolean(rowBusy[id]?.[mode]);
   }
 
@@ -1301,13 +1301,36 @@ export default function CrawlOverview() {
     });
   }
 
+  function askDiscard(code: string, name: string, p: CrawlPeriodStatus) {
+    if (!p.announcementId) {
+      window.alert(`${name} ${p.period} 尚无入库公告，无法剔除`);
+      return;
+    }
+    setActionConfirm({
+      mode: 'discard',
+      code,
+      name,
+      period: p.period,
+      periodStatus: p,
+      title: '确认剔除错抓？',
+      okLabel: '剔除',
+      body: (
+        <>
+          <p>用于错抓或非完整财报（例如可转债/增发公告被当成季报）。剔除后会从列表移除、标记为非财报，并释放该期次，之后可重新「抓取」真财报。</p>
+          {p.title ? <p className="co-confirm-muted">{p.title.replace(/\s+/g, ' ').slice(0, 80)}</p> : null}
+        </>
+      ),
+    });
+  }
+
   async function confirmAction() {
     if (!actionConfirm) return;
     const { mode, code, name, period, periodStatus } = actionConfirm;
     setActionConfirm(null);
     if (mode === 'crawl') await runCrawlCompany(code, name, period, periodStatus?.announcementId);
     else if (mode === 'parse') await runParseCompany(code, name, periodStatus);
-    else await runVerdictCompany(code, name, periodStatus);
+    else if (mode === 'verdict') await runVerdictCompany(code, name, periodStatus);
+    else await runDiscardFiling(code, name, periodStatus);
   }
 
   async function runCrawlCompany(code: string, name: string, period?: string, announcementId?: string | null) {
@@ -1450,6 +1473,38 @@ export default function CrawlOverview() {
       setTriggerMsg(String(error));
     } finally {
       patchRowBusy(busyId, 'verdict', false);
+      window.setTimeout(() => setTriggerMsg(''), 6000);
+    }
+  }
+
+  async function runDiscardFiling(code: string, name: string, chosen?: CrawlPeriodStatus) {
+    if (!chosen?.announcementId) {
+      window.alert(`${name} ${chosen?.period ?? ''} 尚无入库公告，无法剔除`);
+      return;
+    }
+    const busyId = rowBusyId(code, chosen.period, chosen.announcementId);
+    if (isRowBusy(busyId, 'discard')) return;
+    const label = `${name} ${chosen.period}`;
+    patchRowBusy(busyId, 'discard', true);
+    setTriggerMsg(`正在剔除 ${label}…`);
+    try {
+      const response = await fetch('/api/crawl/discard', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ announcementId: chosen.announcementId }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string; note?: string; ok?: boolean };
+      if (!response.ok) {
+        setTriggerMsg(payload.error ?? '剔除失败');
+      } else {
+        setTriggerMsg(payload.note ?? `已剔除 ${label}`);
+        void refreshCoverage();
+        void refreshLive();
+      }
+    } catch (error) {
+      setTriggerMsg(String(error));
+    } finally {
+      patchRowBusy(busyId, 'discard', false);
       window.setTimeout(() => setTriggerMsg(''), 6000);
     }
   }
@@ -2164,6 +2219,7 @@ export default function CrawlOverview() {
                 const crawlBusy = isRowBusy(item.key, 'crawl');
                 const parseBusy = isRowBusy(item.key, 'parse');
                 const verdictBusy = isRowBusy(item.key, 'verdict');
+                const discardBusy = isRowBusy(item.key, 'discard') || isRowBusy(rowBusyId(item.code, item.period, item.announcementId), 'discard');
                 return (
                   <tr key={item.key} className={item.state === 'failed' ? 'is-fail' : ''}>
                     <td className="co-check-col">
@@ -2225,6 +2281,15 @@ export default function CrawlOverview() {
                           disabled={verdictBusy || (!canFillVerdict(item) && !parseBusy)}
                           onClick={() => askVerdict(item.code, item.name, period)}
                         >{verdictBusy ? '智析中' : '智析'}</button>
+                        {item.announcementId ? (
+                          <button
+                            type="button"
+                            className="co-text-act danger"
+                            disabled={discardBusy || crawlBusy || parseBusy || verdictBusy}
+                            title="剔除错抓/非完整财报，释放该期次"
+                            onClick={() => askDiscard(item.code, item.name, period)}
+                          >{discardBusy ? '剔除中' : '删除'}</button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

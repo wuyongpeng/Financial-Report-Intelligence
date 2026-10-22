@@ -63,3 +63,19 @@ test('pending download skips non-reports and already-ingested periods', () => {
     published_at: '2026-03-27',
   }, covered), null);
 });
+
+test('convertible-bond and offering titles are not full financial reports', () => {
+  const luxshareBond = '立讯精密工业股份有限公司2026年第三季度可转换公司债券转股结果暨股份变动公告';
+  assert.equal(classifyReportTitle(luxshareBond), 'other');
+  assert.equal(isFullFinancialReport(luxshareBond), false);
+  assert.equal(canonicalPeriodFromTitle(luxshareBond, '2026-10-10'), null);
+  assert.equal(isFullFinancialReport('某某公司可转债募集说明书'), false);
+  assert.equal(isFullFinancialReport('某某公司2026年公司债券募集说明书'), false);
+  assert.equal(isFullFinancialReport('某某公司非公开发行股票发行情况报告书'), false);
+  assert.equal(isFullFinancialReport('某某公司配股说明书'), false);
+  // Real quarterly / annual must stay true
+  assert.equal(isFullFinancialReport('立讯精密工业股份有限公司2026年第三季度报告'), true);
+  assert.equal(classifyReportTitle('立讯精密工业股份有限公司2026年第三季度报告'), 'quarterly');
+  assert.equal(canonicalPeriodFromTitle('立讯精密工业股份有限公司2026年第三季度报告', '2026-10-30'), '2026Q3');
+  assert.equal(isFullFinancialReport('立讯精密2025年年度报告'), true);
+});

@@ -455,6 +455,8 @@
 .co-text-act{border:0;background:none;color:#2a5cc7;font-size:12px;font-weight:500;cursor:pointer;padding:0;line-height:1.4;min-width:3.2em;text-align:center}
 .co-text-act:hover:not(:disabled){text-decoration:underline}
 .co-text-act:disabled{opacity:.5;cursor:not-allowed;color:#8090a6}
+.co-text-act.danger{color:#dc2626}
+.co-text-act.danger:hover:not(:disabled){color:#b91c1c}
 
 .co-source-text{font-size:13px;color:#334155}
 .co-source-text.muted{color:#94a3b8}
