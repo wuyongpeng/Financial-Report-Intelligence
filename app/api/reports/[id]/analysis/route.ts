@@ -1,11 +1,17 @@
 import { getDb } from '@/lib/db';
 import { canonicalPeriodFromTitle } from '@/lib/ingest-period';
+import { describeYoy } from '@/lib/crawl-display';
 
 type Metric = { metric: string; value: number; unit: string; period: string };
 
 function change(current?: number, previous?: number) {
-  if (current === undefined || previous === undefined || previous === 0) return null;
-  return ((current - previous) / Math.abs(previous)) * 100;
+  const yoy = describeYoy(current, previous);
+  if (!yoy || yoy.naPercent || yoy.pct === undefined) return null;
+  return yoy.pct;
+}
+
+function yoyDetail(current?: number, previous?: number) {
+  return describeYoy(current, previous);
 }
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -43,12 +49,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   ` : [];
   const latest = new Map(reportMetrics.map((metric) => [metric.metric, metric.value]));
   const prior = new Map(history.map(metric => [metric.metric, metric.value]));
-  const revenueChange = change(latest.get('revenue'), prior.get('revenue'));
-  const profitChange = change(latest.get('net_profit'), prior.get('net_profit'));
+  const revenueYoy = yoyDetail(latest.get('revenue'), prior.get('revenue'));
+  const profitYoy = yoyDetail(latest.get('net_profit'), prior.get('net_profit'));
+  const revenueChange = revenueYoy && !revenueYoy.naPercent ? revenueYoy.pct ?? null : null;
+  const profitChange = profitYoy && !profitYoy.naPercent ? profitYoy.pct ?? null : null;
   const anomalies: Array<{ level: 'risk' | 'info'; title: string; detail: string }> = [];
   if (revenueChange !== null && profitChange !== null && revenueChange > 0 && profitChange < 0) {
-    anomalies.push({ level: 'risk', title: '增收不增利', detail: `与上年同期同类型报告相比，营收变化 ${revenueChange.toFixed(1)}%，归母净利润变化 ${profitChange.toFixed(1)}%。` });
+    anomalies.push({ level: 'risk', title: '增收不增利', detail: `与上年同期同类型报告相比，营收${revenueYoy?.label ?? ''}，归母净利润${profitYoy?.label ?? ''}。` });
   }
-  if (profitChange !== null && Math.abs(profitChange) >= 30) anomalies.push({ level: 'info', title: '利润波动显著', detail: `归母净利润较上年同期同类型报告变化 ${profitChange.toFixed(1)}%，建议结合管理层讨论与原文核验。` });
+  if (profitYoy && (profitYoy.naPercent || (profitChange !== null && Math.abs(profitChange) >= 30))) {
+    anomalies.push({ level: 'info', title: '利润波动显著', detail: `归母净利润较上年同期同类型报告：${profitYoy.label}，建议结合管理层讨论与原文核验。` });
+  }
   return Response.json({ period, industry: target.industry, peers, anomalies, basis: '仅基于已入库结构化数据计算' }, { headers: { 'cache-control': 'no-store' } });
 }

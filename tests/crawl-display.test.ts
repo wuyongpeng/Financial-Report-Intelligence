@@ -3,13 +3,17 @@ import test from 'node:test';
 import {
   canBatchParseFiling,
   canFillVerdict,
+  describeYoy,
   estimateDownloadQueueWait,
   flattenCrawlFilings,
   formatQueueLastError,
+  formatYoyBadge,
   openingCompanyLabel,
   periodPrefixMatches,
   uniquePeriodTokens,
   verdictStatusLabel,
+  yoyChange,
+  yoyTone,
   type CrawlCompanyCoverage,
 } from '../lib/crawl-display';
 
@@ -133,4 +137,56 @@ test('queue last error is shown in Chinese for common download failures', () => 
   assert.equal(formatQueueLastError('Error: Downloaded object is not a PDF'), '下载内容不是 PDF');
   assert.equal(formatQueueLastError('PDF 404'), 'PDF 请求失败（404）');
   assert.equal(formatQueueLastError('下载超时（5分钟），已退回排队下载'), '下载超时（5分钟），已退回排队下载');
+});
+
+test('describeYoy: prior zero yields N/A percent and qualitative labels', () => {
+  assert.equal(describeYoy(100, 0)?.label, '实现首次盈利');
+  assert.equal(describeYoy(100, 0)?.naPercent, true);
+  assert.equal(describeYoy(0, 0)?.label, '无变化');
+  assert.equal(describeYoy(-50, 0)?.label, '首次亏损');
+  assert.equal(yoyChange(100, 0), undefined);
+});
+
+test('describeYoy: cross-zero yields 扭亏为盈 / 由盈转亏', () => {
+  const turnaround = describeYoy(80, -20)!;
+  assert.equal(turnaround.label, '扭亏为盈');
+  assert.equal(turnaround.naPercent, true);
+  assert.equal(turnaround.absoluteDelta, 100);
+  assert.equal(yoyChange(80, -20), undefined);
+
+  const reverse = describeYoy(-10, 40)!;
+  assert.equal(reverse.label, '由盈转亏');
+  assert.equal(reverse.naPercent, true);
+  assert.equal(formatYoyBadge(reverse), '由盈转亏');
+});
+
+test('describeYoy: same-sign positive uses prior as denominator and shows >100%', () => {
+  const yoy = describeYoy(300, 100)!;
+  assert.equal(yoy.kind, 'pct');
+  assert.equal(yoy.naPercent, false);
+  assert.ok(Math.abs((yoy.pct ?? 0) - 200) < 1e-9);
+  assert.match(yoy.label, /同比增长 200\.00%/);
+  assert.equal(formatYoyBadge(yoy, 1), '+200.0%');
+  assert.equal(yoyTone(yoy), 'up');
+
+  const down = describeYoy(80, 100)!;
+  assert.match(down.label, /同比下降 20\.00%/);
+  assert.equal(yoyTone(down), 'down');
+
+  const flat = describeYoy(100, 100)!;
+  assert.equal(flat.label, '持平');
+  assert.equal(flat.kind, 'flat');
+});
+
+test('describeYoy: both negative uses abs prior — 减亏 / 增亏', () => {
+  const narrowed = describeYoy(-50, -100)!;
+  assert.ok(Math.abs((narrowed.pct ?? 0) - 50) < 1e-9);
+  assert.match(narrowed.label, /减亏 50\.00%/);
+  assert.equal(yoyTone(narrowed), 'up');
+  assert.equal(formatYoyBadge(narrowed, 0), '减亏 50%');
+
+  const widened = describeYoy(-150, -100)!;
+  assert.ok(Math.abs((widened.pct ?? 0) - (-50)) < 1e-9);
+  assert.match(widened.label, /增亏 50\.00%/);
+  assert.equal(yoyTone(widened), 'down');
 });

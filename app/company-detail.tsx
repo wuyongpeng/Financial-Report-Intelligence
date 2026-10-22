@@ -1,7 +1,8 @@
 'use client';
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { amount, anomaliesConclusion, attributionConclusion, cashConversion, change, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { describeYoy, yoyTone } from '@/lib/crawl-display';
 import { changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
@@ -80,6 +81,14 @@ function EvaAnalyzing({ phase }: { phase: 'retrieving' | 'reasoning' }) {
   );
 }
 const pct = (n: number | undefined) => n === undefined ? '暂无同期数据' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+function yoyPillText(yoy: ReturnType<typeof describeYoy>, baselineIsDefault: boolean) {
+  if (!yoy) return '暂无同期比较';
+  const prefix = baselineIsDefault ? '同比' : '较基准';
+  if (yoy.naPercent || yoy.kind === 'qualitative' || yoy.kind === 'flat') return `${prefix} ${yoy.label}`;
+  if (yoy.label.startsWith('减亏') || yoy.label.startsWith('增亏')) return `${prefix} ${yoy.label}`;
+  return `${prefix} ${pct(yoy.pct)}`;
+}
+
 function changeDirectionIcon(direction: ChangeDirection): { name: 'arrowUp' | 'arrowDown' | 'warn' | 'minus'; label: string } | null {
   if (direction === '利好') return { name: 'arrowUp', label: '利好' };
   if (direction === '利空') return { name: 'arrowDown', label: '利空' };
@@ -644,7 +653,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const deltas = metricNames.map(m => {
     const current = confidenceOf(selected, m), prior = confidenceOf(previous, m);
     const weakest = [current, prior].filter((n): n is number => n !== undefined);
-    return { metric: m, amount: change(value(selected,m),value(previous,m)), confidence: weakest.length ? Math.min(...weakest) : undefined };
+    const yoy = describeYoy(value(selected, m), value(previous, m));
+    return {
+      metric: m,
+      amount: yoy && !yoy.naPercent ? yoy.pct : undefined,
+      yoy,
+      confidence: weakest.length ? Math.min(...weakest) : undefined,
+    };
   });
   const changes = deltas.filter(d => d.amount !== undefined).sort((a,b) => Math.abs(b.amount!) - Math.abs(a.amount!));
   const revenue = value(selected, 'revenue'), profit = value(selected, 'net_profit');
@@ -676,7 +691,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       return { text: attributionConclusion(bridge), sourceRef: cite ? [cite] : [] };
     }
     if (id === 'anomalies') {
-      const text = anomaliesConclusion(flaggedMoves.map(d => ({ metric: d.metric, amount: d.amount! })), changes.length);
+      const text = anomaliesConclusion(flaggedMoves.map(d => ({ metric: d.metric, amount: d.amount!, label: d.yoy?.label })), changes.length);
       if (text) {
         const cites = flaggedMoves.flatMap(d => { const c = metricCitation(d.metric); return c ? [c] : []; });
         return { text, sourceRef: cites };
@@ -1368,9 +1383,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           </section>
 
           <div className="cd-metrics" aria-label="四项核心指标">{metricNames.map(m => {
-            const d = deltas.find(x => x.metric === m)?.amount;
-            const pill = d === undefined ? 'cd-pill-idle' : d < 0 ? 'cd-pill-down' : 'cd-pill-up';
-            const delta = d === undefined ? '暂无同期比较' : `${baselineIsDefault ? '同比' : '较基准'} ${pct(d)}`;
+            const row = deltas.find(x => x.metric === m);
+            const yoy = row?.yoy;
+            const tone = yoyTone(yoy);
+            const pill = !yoy ? 'cd-pill-idle' : tone === 'down' ? 'cd-pill-down' : tone === 'up' ? 'cd-pill-up' : 'cd-pill-idle';
+            const delta = yoyPillText(yoy, baselineIsDefault);
             const f = findings.find(x => x.metric === m);
             const cite = metricCitation(m);
             const quote = [labels[m], `${amount(value(selected, m), m)}${unitOf(m)}`, delta, f?.detail].filter(Boolean).join(' · ');

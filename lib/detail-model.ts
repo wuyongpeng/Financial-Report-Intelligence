@@ -1,5 +1,6 @@
 import { canonicalPeriodFromTitle, reportKindFromPeriod } from './ingest-period';
 import { betterKeepCandidate } from './period-dedupe';
+import { describeYoy } from './crawl-display';
 
 export const metricNames = ['revenue', 'net_profit', 'eps', 'roe'] as const;
 // Balance-sheet and cash-flow rows power the health module; they are not headline cards.
@@ -46,7 +47,11 @@ export function grossMargin(report: Report | undefined) {
   const revenue = value(report, 'revenue'), cost = value(report, 'operating_cost');
   return revenue !== undefined && cost !== undefined && revenue > 0 ? (revenue - cost) / revenue * 100 : undefined;
 }
-export function change(current: number | undefined, prior: number | undefined) { return current === undefined || prior === undefined || prior === 0 ? undefined : (current - prior) / Math.abs(prior) * 100; }
+export function change(current: number | undefined, prior: number | undefined) {
+  const yoy = describeYoy(current, prior);
+  if (!yoy || yoy.naPercent || yoy.pct === undefined) return undefined;
+  return yoy.pct;
+}
 export function periodKey(report: Report) {
   const p = period(report); const year = Number(p.match(/20\d{2}/)?.[0] ?? 0);
   const quarter = /FY/.test(p) ? 4 : /H1|Q2/.test(p) ? 2 : /Q3/.test(p) ? 3 : /Q1/.test(p) ? 1 : 0;
@@ -122,19 +127,23 @@ export function keyFindings(reports: Report[], selected: Report): Finding[] {
   const history = comparableHistory(reports, selected);
   const out: Finding[] = [];
   for (const metric of metricNames) {
-    const delta = change(value(selected, metric), value(prior, metric));
-    if (delta === undefined) continue;
+    const currentVal = value(selected, metric);
+    const priorVal = value(prior, metric);
+    const yoy = describeYoy(currentVal, priorVal);
+    if (!yoy) continue;
     const series = history.map(r => value(r, metric)).filter((v): v is number => v !== undefined);
-    const current = value(selected, metric)!;
+    const current = currentVal!;
     const extreme = series.length >= 3 && (current === Math.max(...series) || current === Math.min(...series))
       ? `，为近 ${series.length} 期${current === Math.max(...series) ? '最高' : '最低'}` : '';
+    const absDelta = format(Math.abs(yoy.absoluteDelta), metric);
+    const deltaNote = yoy.absoluteDelta === 0 ? '' : `，变动 ${yoy.absoluteDelta >= 0 ? '+' : '-'}${absDelta}`;
     out.push({
       id: `finding-${metric}`,
       metric,
-      headline: `${labels[metric]}同比 ${delta >= 0 ? '+' : ''}${delta.toFixed(2)}%`,
-      detail: `本期 ${format(current, metric)}，上年同期 ${format(value(prior, metric), metric)}${extreme}`,
+      headline: `${labels[metric]}${yoy.label}`,
+      detail: `本期 ${format(current, metric)}，上年同期 ${format(priorVal, metric)}${deltaNote}${extreme}`,
       module: 'anomalies',
-      severity: Math.abs(delta) >= 30 ? 'watch' : 'info',
+      severity: yoy.naPercent || (yoy.pct !== undefined && Math.abs(yoy.pct) >= 30) ? 'watch' : 'info',
     });
   }
   const cash = cashConversion(selected);
@@ -173,9 +182,9 @@ export function attributionConclusion(bridge: NonNullable<ReturnType<typeof prof
   return `归母净利同比${verb}${amountText}，其中收入贡献 ${format(bridge.revenueEffect, 'net_profit')}、净利率贡献 ${format(bridge.marginEffect, 'net_profit')}`;
 }
 
-export function anomaliesConclusion(flagged: Array<{ metric: MetricName; amount: number }>, comparableCount = 0) {
+export function anomaliesConclusion(flagged: Array<{ metric: MetricName; amount: number; label?: string }>, comparableCount = 0) {
   if (flagged.length) {
-    return flagged.map((d) => `${labels[d.metric]}同比 ${d.amount >= 0 ? '+' : ''}${d.amount.toFixed(2)}%`).join('；');
+    return flagged.map((d) => d.label ? `${labels[d.metric]}${d.label}` : `${labels[d.metric]}同比 ${d.amount >= 0 ? '+' : ''}${d.amount.toFixed(2)}%`).join('；');
   }
   return comparableCount > 0 ? '核心指标同比波动均未超过 30%' : '';
 }

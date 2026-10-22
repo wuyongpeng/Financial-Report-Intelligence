@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { anomaliesConclusion, attributionConclusion, change, comparableHistory, sequentialHistory, historyConclusion, keyFindings, moduleForQuestion, peersConclusion, period, periodConclusion, priorYear, profitBridge, sourceRange, type Report } from '../lib/detail-model';
+import { describeYoy } from '../lib/crawl-display';
 import { rankEvidence, unsupportedYears } from '../lib/chat-evidence';
 function report(id: string, period: string, value: number, type='annual', published='2026-04-01'): Report { return { id, code:'1',company_name:'测试',title:period,report_type:type,published_at:published,parsed_at:published,industry:'测试',status:'online',metrics:[{metric:'revenue',value,unit:'元',source_page:2,source_label:'营业收入',confidence:1,verified:1,period}] }; }
 test('history excludes later periods and other fiscal durations, deduplicates corrected filings',()=>{
@@ -134,4 +135,20 @@ test('module conclusions stay number-backed and omit empty claims', () => {
   assert.equal(historyConclusion([current]), '');
   assert.match(peersConclusion([{ rank: 2, total: 5, label: 'ROE' }]), /ROE第 2\/5 家/);
   assert.equal(peersConclusion([{ rank: 1, total: 1, label: 'ROE' }]), '');
+});
+
+test('change() returns undefined across zero; keyFindings use qualitative YoY labels', () => {
+  assert.equal(change(80, -20), undefined);
+  assert.equal(describeYoy(80, -20)?.label, '扭亏为盈');
+  const metric = (name: string, value: number) => ({ metric: name as never, value, unit: '元', source_page: 6, source_label: name, confidence: 0.9, verified: 0, period: '' });
+  const build = (id: string, period: string, profit: number) => ({
+    id, code: '600000', company_name: '示例', title: period, report_type: 'annual', published_at: `${period.slice(0, 4)}-04-01`,
+    parsed_at: '2026-01-01', industry: '银行', status: 'online',
+    metrics: [{ ...metric('net_profit', profit), period }, { ...metric('revenue', 1e10), period }],
+  });
+  const previous = build('prev', '2025FY', -1e9);
+  const current = build('curr', '2026FY', 5e8);
+  const findings = keyFindings([previous, current], current);
+  assert.ok(findings.some((f) => f.headline.includes('扭亏为盈')));
+  assert.equal(change(5e8, -1e9), undefined);
 });

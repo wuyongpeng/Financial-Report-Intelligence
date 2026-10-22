@@ -23,6 +23,20 @@ test('prefers the summary value over a conflicting note value and lowers confide
 });
 
 
+test('strips bare EPS footnote without parentheses before the real value', () => {
+  const metrics = parseCoreMetricPages([
+    '公司2026年半年度报告摘要 主要会计数据 单位：人民币千元 营业总收入 78,025,359 归属于上市公司股东的净利润 2,753,412 基本每股收益（元/股）1 0.58 加权平均净资产收益率 3.65%',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 0.58);
+});
+
+test('keeps a lone integer EPS when no following numeric token exists', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：元 基本每股收益（元/股）2 加权平均净资产收益率 10%',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 2);
+});
+
 test('scales 千元 summary pages and ignores EPS/ROE footnote markers', () => {
   const metrics = parseCoreMetricPages([
     '公司2026年半年度报告摘要 主要会计数据 单位：人民币千元 营业总收入 78,025,359 归属于上市公司股东的净利润 2,753,412 基本每股收益（元/股）(1) 0.58 0.75 加权平均净资产收益率 (1) 3.65% 4.12%',

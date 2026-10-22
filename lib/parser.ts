@@ -71,7 +71,10 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
   if (!currencyMetrics.has(definition.metric)) {
     nearby = nearby
       .replace(/\(\s*元\s*\/?\s*股\s*\)/g, ' ')
-      .replace(/\(\s*[1-9]\d{0,2}\s*\)/g, ' ');
+      .replace(/\(\s*[1-9]\d{0,2}\s*\)/g, ' ')
+      // Bare footnote without parens: `基本每股收益（元/股）1 0.58`.
+      // Only strip when another numeric token follows so a lone integer EPS like `2` is kept.
+      .replace(/(?:^|\s)([1-9]\d{0,2})(?=\s+-?\d+(?:\.\d+)?)/g, ' ');
   }
   // Prefer an explicit percent token for ROE (avoids bare leading integers).
   if (definition.metric === 'roe') {

@@ -12,10 +12,14 @@ import {
   INDUSTRY_CHIPS,
   periodDisplay,
   pickRecentPeriods,
+  describeYoy,
+  formatYoyBadge,
   yoyChange,
+  yoyTone,
   type CrawlCompanyCoverage,
   type CrawlStats,
   type IndustryGroup,
+  type YoyResult,
 } from '@/lib/crawl-display';
 import {
   buildCompanyAskUrl,
@@ -49,8 +53,15 @@ type DialogState =
 const VIEW_STORAGE_KEY = 'home_view_mode';
 const STAR_STORAGE_KEY = 'home_starred_codes';
 
-function deltaLabel(n: number | undefined) {
-  return n === undefined ? '暂无同比' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+function deltaLabel(yoy: YoyResult | undefined) {
+  return formatYoyBadge(yoy, 1);
+}
+
+function yoyClass(yoy: YoyResult | undefined) {
+  const tone = yoyTone(yoy);
+  if (tone === 'up') return 'rh-ashare-up';
+  if (tone === 'down') return 'rh-ashare-down';
+  return undefined;
 }
 
 function matchKeyword(item: CrawlCompanyCoverage, keyword: string) {
@@ -109,6 +120,14 @@ function primaryYoy(item: CrawlCompanyCoverage) {
   if (revenue) return yoyChange(revenue.value, revenue.prior);
   const profit = metricByName(item, 'net_profit');
   if (profit) return yoyChange(profit.value, profit.prior);
+  return undefined;
+}
+
+function primaryYoyDesc(item: CrawlCompanyCoverage) {
+  const revenue = metricByName(item, 'revenue');
+  if (revenue && revenue.prior !== undefined) return describeYoy(revenue.value, revenue.prior);
+  const profit = metricByName(item, 'net_profit');
+  if (profit && profit.prior !== undefined) return describeYoy(profit.value, profit.prior);
   return undefined;
 }
 
@@ -840,7 +859,6 @@ export default function ReportHome() {
                   const revenue = metricByName(item, 'revenue');
                   const profit = metricByName(item, 'net_profit');
                   const eps = metricByName(item, 'eps');
-                  const yoy = primaryYoy(item);
                   const isStarred = starredSet.has(item.code);
                   return (
                     <tr key={item.code} className={connected ? '' : 'rh-row-empty'}>
@@ -862,13 +880,12 @@ export default function ReportHome() {
                       <td>{profit ? formatMetricValue('net_profit', profit.value) : '—'}</td>
                       <td>{eps ? formatMetricValue('eps', eps.value) : '—'}</td>
                       <td>
-                        {yoy === undefined ? (
-                          '—'
-                        ) : (
-                          <span className={yoy >= 0 ? 'rh-ashare-up' : 'rh-ashare-down'}>
-                            {yoy >= 0 ? '+' : ''}{yoy.toFixed(1)}%
-                          </span>
-                        )}
+                        {(() => {
+                          const desc = primaryYoyDesc(item);
+                          if (!desc) return '—';
+                          const cls = yoyClass(desc);
+                          return cls ? <span className={cls}>{deltaLabel(desc)}</span> : <span>{deltaLabel(desc)}</span>;
+                        })()}
                       </td>
                       <td>{freshnessLabel(item.lastCrawlAt)}</td>
                       <td>{statusMeta(item)}</td>
@@ -986,20 +1003,23 @@ export default function ReportHome() {
                         </div>
                       ) : null}
                       {previewMetrics.map((metric) => {
-                        const delta = yoyChange(metric.value, metric.prior);
+                        const yoy = describeYoy(metric.value, metric.prior);
+                        const tone = yoyTone(yoy);
+                        const badge = deltaLabel(yoy);
                         return (
                           <div key={metric.metric}>
                             <span>{metric.label}</span>
                             <strong>{formatMetricValue(metric.metric, metric.value)}</strong>
-                            {delta === undefined ? (
+                            {!yoy ? (
                               <small>暂无同比</small>
                             ) : (
                               <small
-                                className={delta >= 0 ? 'rh-ashare-up' : 'rh-ashare-down'}
-                                title={`同比 ${deltaLabel(delta)}`}
+                                className={tone === 'up' ? 'rh-ashare-up' : tone === 'down' ? 'rh-ashare-down' : undefined}
+                                title={yoy.label}
                               >
-                                <Icon name={delta >= 0 ? 'arrowUp' : 'arrowDown'} size={10} />
-                                {deltaLabel(delta)}
+                                {tone === 'up' ? <Icon name="arrowUp" size={10} /> : null}
+                                {tone === 'down' ? <Icon name="arrowDown" size={10} /> : null}
+                                {badge}
                               </small>
                             )}
                           </div>

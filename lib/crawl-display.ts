@@ -399,9 +399,93 @@ export function formatMetricValue(metric: HeadlineMetricName, value: number) {
   return `${value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 元`;
 }
 
+export type YoyKind = 'pct' | 'qualitative' | 'flat';
+
+export type YoyResult = {
+  kind: YoyKind;
+  /** Signed percent when computed; omitted when percent must show N/A. */
+  pct?: number;
+  /** Chinese display phrase (full sentence fragment). */
+  label: string;
+  /** current - prior, always when both inputs are finite. */
+  absoluteDelta: number;
+  /** True when percent must show N/A (prior zero or cross-zero). */
+  naPercent: boolean;
+};
+
+/**
+ * A-share YoY display rules:
+ * 1) prior === 0 → N/A percent + 实现首次盈利 / 无变化 / 首次亏损
+ * 2) cross-zero → N/A percent + 扭亏为盈 / 由盈转亏
+ * 3) same-sign positive → (本期-基期)/基期；增长/下降/持平（即使 |pct|>100 也照常展示）
+ * 4) both negative → (本期-基期)/|基期|；减亏 / 增亏 / 持平
+ */
+export function describeYoy(current?: number, prior?: number): YoyResult | undefined {
+  if (current === undefined || prior === undefined) return undefined;
+  if (!Number.isFinite(current) || !Number.isFinite(prior)) return undefined;
+  const absoluteDelta = current - prior;
+
+  if (prior === 0) {
+    const label = current > 0 ? '实现首次盈利' : current === 0 ? '无变化' : '首次亏损';
+    return { kind: 'qualitative', label, absoluteDelta, naPercent: true };
+  }
+
+  if ((current > 0 && prior < 0) || (current < 0 && prior > 0)) {
+    const label = prior < 0 && current > 0 ? '扭亏为盈' : '由盈转亏';
+    return { kind: 'qualitative', label, absoluteDelta, naPercent: true };
+  }
+
+  if (current < 0 && prior < 0) {
+    const pct = ((current - prior) / Math.abs(prior)) * 100;
+    if (Math.abs(current) === Math.abs(prior) || pct === 0) {
+      return { kind: 'flat', pct: 0, label: '持平', absoluteDelta, naPercent: false };
+    }
+    const absPct = Math.abs(pct);
+    const narrowed = Math.abs(current) < Math.abs(prior);
+    const label = narrowed ? `减亏 ${absPct.toFixed(2)}%` : `增亏 ${absPct.toFixed(2)}%`;
+    return { kind: 'pct', pct, label, absoluteDelta, naPercent: false };
+  }
+
+  // Same sign, prior ≠ 0 (both positive here; negatives handled above)
+  const pct = ((current - prior) / prior) * 100;
+  if (pct === 0) {
+    return { kind: 'flat', pct: 0, label: '持平', absoluteDelta, naPercent: false };
+  }
+  const label = pct > 0 ? `同比增长 ${pct.toFixed(2)}%` : `同比下降 ${Math.abs(pct).toFixed(2)}%`;
+  return { kind: 'pct', pct, label, absoluteDelta, naPercent: false };
+}
+
+/** Short badge text for cards: +12.3% / 扭亏为盈 / 减亏 50.0% / 持平. */
+export function formatYoyBadge(yoy: YoyResult | undefined, digits = 1): string {
+  if (!yoy) return '暂无同比';
+  if (yoy.naPercent || yoy.kind === 'qualitative') return yoy.label;
+  if (yoy.kind === 'flat') return '持平';
+  const absPct = Math.abs(yoy.pct ?? 0).toFixed(digits);
+  if (yoy.label.startsWith('减亏')) return `减亏 ${absPct}%`;
+  if (yoy.label.startsWith('增亏')) return `增亏 ${absPct}%`;
+  const pct = yoy.pct ?? 0;
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(digits)}%`;
+}
+
+/** A-share color hint: up / down / neutral. */
+export function yoyTone(yoy: YoyResult | undefined): 'up' | 'down' | 'neutral' {
+  if (!yoy) return 'neutral';
+  if (yoy.naPercent) {
+    if (yoy.label === '扭亏为盈' || yoy.label === '实现首次盈利') return 'up';
+    if (yoy.label === '由盈转亏' || yoy.label === '首次亏损') return 'down';
+    return 'neutral';
+  }
+  if (yoy.kind === 'flat' || yoy.pct === undefined || yoy.pct === 0) return 'neutral';
+  if (yoy.label.startsWith('减亏')) return 'up';
+  if (yoy.label.startsWith('增亏')) return 'down';
+  return yoy.pct > 0 ? 'up' : 'down';
+}
+
+/** Numeric YoY for sorting / callers that only want a percent; undefined when N/A. */
 export function yoyChange(current?: number, prior?: number) {
-  if (current === undefined || prior === undefined || prior === 0) return undefined;
-  return ((current - prior) / Math.abs(prior)) * 100;
+  const yoy = describeYoy(current, prior);
+  if (!yoy || yoy.naPercent || yoy.pct === undefined) return undefined;
+  return yoy.pct;
 }
 
 export function freshnessLabel(iso: string | null | undefined, now = Date.now()) {
