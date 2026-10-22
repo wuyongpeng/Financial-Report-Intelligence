@@ -120,6 +120,41 @@ export function sourceRange(text: string, quote: string): [number, number] | nul
 }
 
 export type Finding = { id: string; metric: MetricName; headline: string; detail: string; module: string; severity: 'watch' | 'info' };
+
+/** Card/tooltip line: 本期 / 上年同期 / 变动. No source parenthetical. */
+export function metricYoyDetail(
+  metric: MetricName,
+  current: number,
+  prior: number | undefined,
+  absoluteDelta?: number,
+  extreme = '',
+): string | undefined {
+  if (prior === undefined || !Number.isFinite(prior) || !Number.isFinite(current)) return undefined;
+  const delta = absoluteDelta !== undefined && Number.isFinite(absoluteDelta) ? absoluteDelta : current - prior;
+  const deltaNote = delta === 0 ? '' : `，变动 ${delta >= 0 ? '+' : '-'}${format(Math.abs(delta), metric)}`;
+  return `本期 ${format(current, metric)}，上年同期 ${format(prior, metric)}${deltaNote}${extreme}`;
+}
+
+/** Prefer disclosed prior, then cross-report; else back out from disclosed YoY %. */
+export function resolveMetricPrior(
+  current: number | undefined,
+  opts: { disclosedPrior?: number | null; disclosedYoyPct?: number | null; crossReportPrior?: number | null },
+): number | undefined {
+  const dPrior = opts.disclosedPrior;
+  if (dPrior != null && Number.isFinite(dPrior)) return dPrior as number;
+  const cPrior = opts.crossReportPrior;
+  if (cPrior != null && Number.isFinite(cPrior)) return cPrior as number;
+  const pct = opts.disclosedYoyPct;
+  if (
+    current !== undefined && Number.isFinite(current)
+    && pct != null && Number.isFinite(pct) && pct !== -100
+  ) {
+    const implied = current / (1 + (pct as number) / 100);
+    if (Number.isFinite(implied)) return implied;
+  }
+  return undefined;
+}
+
 // Findings are ranked restatements of parsed numbers, never new claims. Anything
 // that needs a missing input is simply not produced.
 export function keyFindings(reports: Report[], selected: Report): Finding[] {
@@ -138,22 +173,22 @@ export function keyFindings(reports: Report[], selected: Report): Finding[] {
       crossReportPrior: crossPrior,
     });
     if (!yoy) continue;
-    const priorVal = (disclosedPrior != null && Number.isFinite(disclosedPrior))
-      ? disclosedPrior
-      : crossPrior;
+    const priorVal = resolveMetricPrior(currentVal, {
+      disclosedPrior,
+      disclosedYoyPct,
+      crossReportPrior: crossPrior,
+    });
     const series = history.map(r => value(r, metric)).filter((v): v is number => v !== undefined);
     const current = currentVal!;
     const extreme = series.length >= 3 && (current === Math.max(...series) || current === Math.min(...series))
       ? `，为近 ${series.length} 期${current === Math.max(...series) ? '最高' : '最低'}` : '';
-    const absDelta = format(Math.abs(yoy.absoluteDelta), metric);
-    const deltaNote = yoy.absoluteDelta === 0 ? '' : `，变动 ${yoy.absoluteDelta >= 0 ? '+' : '-'}${absDelta}`;
-    const priorText = priorVal !== undefined ? format(priorVal, metric) : '—';
-    const sourceNote = yoy.source === 'disclosed' ? '（财报披露）' : '';
+    const detail = metricYoyDetail(metric, current, priorVal, priorVal !== undefined ? current - priorVal : yoy.absoluteDelta, extreme)
+      ?? `本期 ${format(current, metric)}，上年同期 —${extreme}`;
     out.push({
       id: `finding-${metric}`,
       metric,
       headline: `${labels[metric]}${yoy.label}`,
-      detail: `本期 ${format(current, metric)}，上年同期 ${priorText}${deltaNote}${extreme}${sourceNote}`,
+      detail,
       module: 'anomalies',
       severity: yoy.naPercent || (yoy.pct !== undefined && Math.abs(yoy.pct) >= 30) ? 'watch' : 'info',
     });

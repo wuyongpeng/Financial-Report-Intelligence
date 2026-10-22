@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
 import { changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
@@ -89,12 +89,8 @@ function yoyPillText(yoy: ReturnType<typeof describeYoy> | ReturnType<typeof res
   return `${prefix} ${pct(yoy.pct)}`;
 }
 
-function yoyPillTitle(yoy: ReturnType<typeof resolveYoy> | ReturnType<typeof describeYoy>, baselineIsDefault: boolean) {
-  if (!yoy) return undefined;
-  if (baselineIsDefault && 'source' in yoy && yoy.source === 'disclosed') {
-    return '来自本份财报上年同期列 / 同比增减';
-  }
-  return yoy.label;
+function yoyPillHover(detail: string | undefined) {
+  return detail || undefined;
 }
 
 function changeDirectionIcon(direction: ChangeDirection): { name: 'arrowUp' | 'arrowDown' | 'warn' | 'minus'; label: string } | null {
@@ -659,20 +655,33 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   // A comparison inherits the weakest of the two parses; surface that on the pill.
   function confidenceOf(report: Report | undefined, m: MetricName) { return report?.metrics.find(x => x.metric === m)?.confidence; }
   const deltas = metricNames.map(m => {
-    const current = confidenceOf(selected, m), prior = confidenceOf(previous, m);
-    const weakest = [current, prior].filter((n): n is number => n !== undefined);
+    const currentConf = confidenceOf(selected, m), priorConf = confidenceOf(previous, m);
+    const weakest = [currentConf, priorConf].filter((n): n is number => n !== undefined);
     const metricRow = selected.metrics.find(x => x.metric === m);
+    const currentVal = value(selected, m);
+    const crossPrior = value(previous, m);
     const yoy = baselineIsDefault
-      ? resolveYoy(value(selected, m), {
+      ? resolveYoy(currentVal, {
         disclosedPrior: metricRow?.prior_value,
         disclosedYoyPct: metricRow?.yoy_pct,
-        crossReportPrior: value(previous, m),
+        crossReportPrior: crossPrior,
       })
-      : describeYoy(value(selected, m), value(previous, m));
+      : describeYoy(currentVal, crossPrior);
+    const priorVal = baselineIsDefault
+      ? resolveMetricPrior(currentVal, {
+        disclosedPrior: metricRow?.prior_value,
+        disclosedYoyPct: metricRow?.yoy_pct,
+        crossReportPrior: crossPrior,
+      })
+      : crossPrior;
+    const detail = currentVal !== undefined && yoy
+      ? metricYoyDetail(m, currentVal, priorVal, priorVal !== undefined ? currentVal - priorVal : undefined)
+      : undefined;
     return {
       metric: m,
       amount: yoy && !yoy.naPercent ? yoy.pct : undefined,
       yoy,
+      detail,
       confidence: weakest.length ? Math.min(...weakest) : undefined,
     };
   });
@@ -1403,9 +1412,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             const tone = yoyTone(yoy);
             const pill = !yoy ? 'cd-pill-idle' : tone === 'down' ? 'cd-pill-down' : tone === 'up' ? 'cd-pill-up' : 'cd-pill-idle';
             const delta = yoyPillText(yoy, baselineIsDefault);
-            const f = findings.find(x => x.metric === m);
+            const hover = yoyPillHover(row?.detail);
             const cite = metricCitation(m);
-            const quote = [labels[m], `${amount(value(selected, m), m)}${unitOf(m)}`, delta, f?.detail].filter(Boolean).join(' · ');
+            const quote = [labels[m], `${amount(value(selected, m), m)}${unitOf(m)}`, delta, row?.detail].filter(Boolean).join(' · ');
             return <article
               key={m}
               data-metric={m}
@@ -1423,8 +1432,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 <span className="cd-metric-tools">{footnote(m)}</span>
               </div>
               <strong>{amount(value(selected, m), m)}<i>{unitOf(m)}</i></strong>
-              <span className={`cd-pill ${pill}`} title={yoyPillTitle(yoy, baselineIsDefault)}>{delta}</span>
-              {f && <small className="cd-metric-insight">{f.detail}</small>}
+              <span className={`cd-pill ${pill}`} title={hover}>{delta}</span>
             </article>;
           })}</div>
           {baselineOptions.length>0 && <div className="cd-baseline-row"><label>对比基准 <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`${period(defaultPrevious)}（上年同期）`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}</select></label>{!baselineIsDefault && previous && <span className="cd-note">当前以 {period(previous)} 为基准，非上年同期。</span>}</div>}

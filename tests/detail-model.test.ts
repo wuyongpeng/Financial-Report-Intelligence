@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { anomaliesConclusion, attributionConclusion, change, comparableHistory, sequentialHistory, historyConclusion, keyFindings, moduleForQuestion, peersConclusion, period, periodConclusion, priorYear, profitBridge, sourceRange, type Report } from '../lib/detail-model';
+import { anomaliesConclusion, attributionConclusion, change, comparableHistory, sequentialHistory, historyConclusion, keyFindings, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodConclusion, priorYear, profitBridge, resolveMetricPrior, sourceRange, type Report } from '../lib/detail-model';
 import { describeYoy, resolveYoy } from '../lib/crawl-display';
 import { rankEvidence, unsupportedYears } from '../lib/chat-evidence';
 function report(id: string, period: string, value: number, type='annual', published='2026-04-01'): Report { return { id, code:'1',company_name:'测试',title:period,report_type:type,published_at:published,parsed_at:published,industry:'测试',status:'online',metrics:[{metric:'revenue',value,unit:'元',source_page:2,source_label:'营业收入',confidence:1,verified:1,period}] }; }
@@ -174,7 +174,8 @@ test('keyFindings prefer disclosed YoY on the metric row over cross-report prior
   const profit = findings.find((f) => f.metric === 'net_profit');
   assert.ok(profit);
   assert.match(profit!.headline, /同比下降 45\.57%/);
-  assert.match(profit!.detail, /财报披露/);
+  assert.match(profit!.detail, /本期 27\.53 亿，上年同期 50\.58 亿，变动 -23\.05 亿/);
+  assert.ok(!profit!.detail.includes('财报披露'));
   assert.ok(!profit!.headline.includes('111'));
   const resolved = resolveYoy(2_752_825_000, {
     disclosedPrior: 5_057_571_000,
@@ -183,4 +184,20 @@ test('keyFindings prefer disclosed YoY on the metric row over cross-report prior
   });
   assert.equal(resolved?.source, 'disclosed');
   assert.ok(Math.abs((resolved?.pct ?? 0) - (-45.57)) < 1e-9);
+});
+
+test('metricYoyDetail omits source note and skips when prior missing', () => {
+  assert.equal(
+    metricYoyDetail('net_profit', 2_752_825_000, 5_057_571_000),
+    '本期 27.53 亿，上年同期 50.58 亿，变动 -23.05 亿',
+  );
+  assert.equal(metricYoyDetail('revenue', 1e10, undefined), undefined);
+  assert.ok(!metricYoyDetail('eps', 0.58, 1.06)!.includes('财报披露'));
+});
+
+test('resolveMetricPrior prefers disclosed, then cross, then implied from YoY %', () => {
+  assert.equal(resolveMetricPrior(110, { disclosedPrior: 100, disclosedYoyPct: 20, crossReportPrior: 90 }), 100);
+  assert.equal(resolveMetricPrior(110, { disclosedYoyPct: 10, crossReportPrior: 90 }), 90);
+  const implied = resolveMetricPrior(110, { disclosedYoyPct: 10 });
+  assert.ok(implied !== undefined && Math.abs(implied! - 100) < 1e-9);
 });

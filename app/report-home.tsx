@@ -1040,7 +1040,7 @@ export default function ReportHome() {
                             ) : (
                               <small
                                 className={tone === 'up' ? 'rh-ashare-up' : tone === 'down' ? 'rh-ashare-down' : undefined}
-                                title={yoy.source === 'disclosed' ? `${yoy.label}（财报披露）` : yoy.label}
+                                title={yoy.label}
                               >
                                 {tone === 'up' ? <Icon name="arrowUp" size={10} /> : null}
                                 {tone === 'down' ? <Icon name="arrowDown" size={10} /> : null}
