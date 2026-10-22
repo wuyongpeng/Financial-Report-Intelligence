@@ -329,6 +329,17 @@
 .co-confirm-cancel{border:1px solid #e2e8f0;background:#fff;color:#475569}
 .co-confirm-ok{border:1px solid #2a5cc7;background:#2a5cc7;color:#fff}
 .co-confirm-ok:hover{background:#1d4ed8}
+.co-confirm-ok.danger{border-color:#dc2626;background:#dc2626}
+.co-confirm-ok.danger:hover:not(:disabled){background:#b91c1c}
+.co-confirm-ok:disabled{opacity:.45;cursor:not-allowed}
+.co-confirm-password{display:grid;gap:6px;margin-top:12px}
+.co-confirm-password span{font-size:12px;color:#64748b}
+.co-confirm-password input{
+  border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;font-size:13px;color:#1e293b;
+  outline:none;background:#fff
+}
+.co-confirm-password input:focus{border-color:#94a3b8;box-shadow:0 0 0 3px #e2e8f080}
+.co-confirm-password-error{font-size:12px;color:#dc2626}
 
 .co-settings-backdrop{
   position:fixed;inset:0;z-index:140;

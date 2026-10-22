@@ -1,6 +1,7 @@
 import { demoAccessEnabled, isAppUser } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { discardAnnouncement } from '@/lib/discard-announcement';
+import { matchesDiscardPassword } from '@/lib/discard-password';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,16 +17,21 @@ function authorized(request: Request) {
 /**
  * Soft-discard a wrong capture from the ops crawl table.
  * Marks auto_skipped, clears metrics/verdicts/chunks; keeps the row for audit.
+ * Requires ops delete password in body.password (exact "EVA" until real auth).
  */
 export async function POST(request: Request) {
   const auth = authorized(request);
   if (!auth) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  let body: { announcementId?: unknown; id?: unknown } = {};
+  let body: { announcementId?: unknown; id?: unknown; password?: unknown } = {};
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: '请求体无效' }, { status: 400 });
+  }
+
+  if (!matchesDiscardPassword(body.password)) {
+    return Response.json({ error: '删除密码错误' }, { status: 403 });
   }
 
   const announcementId = typeof body.announcementId === 'string'

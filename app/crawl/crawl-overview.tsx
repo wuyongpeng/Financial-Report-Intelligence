@@ -20,6 +20,7 @@ import {
 } from '@/lib/crawl-display';
 import { parseHomeQuery, queryMatchesCompany } from '@/lib/home-search';
 import { formatParseElapsed } from '@/lib/parse-queue';
+import { DISCARD_CONFIRM_PASSWORD } from '@/lib/discard-password';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { Icon } from '../ui-icons';
 import './crawl-overview.css';
@@ -640,6 +641,8 @@ export default function CrawlOverview() {
     body: ReactNode;
     okLabel: string;
   }>(null);
+  const [discardPassword, setDiscardPassword] = useState('');
+  const [discardPasswordError, setDiscardPasswordError] = useState('');
   const [periodPrefix, setPeriodPrefix] = useState('');
   const [onlyMissingAi, setOnlyMissingAi] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -1306,6 +1309,8 @@ export default function CrawlOverview() {
       window.alert(`${name} ${p.period} 尚无入库公告，无法剔除`);
       return;
     }
+    setDiscardPassword('');
+    setDiscardPasswordError('');
     setActionConfirm({
       mode: 'discard',
       code,
@@ -1313,11 +1318,12 @@ export default function CrawlOverview() {
       period: p.period,
       periodStatus: p,
       title: '确认剔除错抓？',
-      okLabel: '剔除',
+      okLabel: '删除',
       body: (
         <>
           <p>用于错抓或非完整财报（例如可转债/增发公告被当成季报）。剔除后会从列表移除、标记为非财报，并释放该期次，之后可重新「抓取」真财报。</p>
           {p.title ? <p className="co-confirm-muted">{p.title.replace(/\s+/g, ' ').slice(0, 80)}</p> : null}
+          <p>请输入删除密码后再确认，防止误删。</p>
         </>
       ),
     });
@@ -1326,11 +1332,22 @@ export default function CrawlOverview() {
   async function confirmAction() {
     if (!actionConfirm) return;
     const { mode, code, name, period, periodStatus } = actionConfirm;
+    if (mode === 'discard') {
+      if (discardPassword !== DISCARD_CONFIRM_PASSWORD) {
+        setDiscardPasswordError('删除密码错误');
+        return;
+      }
+      const password = discardPassword;
+      setActionConfirm(null);
+      setDiscardPassword('');
+      setDiscardPasswordError('');
+      await runDiscardFiling(code, name, periodStatus, password);
+      return;
+    }
     setActionConfirm(null);
     if (mode === 'crawl') await runCrawlCompany(code, name, period, periodStatus?.announcementId);
     else if (mode === 'parse') await runParseCompany(code, name, periodStatus);
     else if (mode === 'verdict') await runVerdictCompany(code, name, periodStatus);
-    else await runDiscardFiling(code, name, periodStatus);
   }
 
   async function runCrawlCompany(code: string, name: string, period?: string, announcementId?: string | null) {
@@ -1477,7 +1494,7 @@ export default function CrawlOverview() {
     }
   }
 
-  async function runDiscardFiling(code: string, name: string, chosen?: CrawlPeriodStatus) {
+  async function runDiscardFiling(code: string, name: string, chosen?: CrawlPeriodStatus, password?: string) {
     if (!chosen?.announcementId) {
       window.alert(`${name} ${chosen?.period ?? ''} 尚无入库公告，无法剔除`);
       return;
@@ -1491,7 +1508,7 @@ export default function CrawlOverview() {
       const response = await fetch('/api/crawl/discard', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ announcementId: chosen.announcementId }),
+        body: JSON.stringify({ announcementId: chosen.announcementId, password: password ?? '' }),
       });
       const payload = await response.json().catch(() => ({})) as { error?: string; note?: string; ok?: boolean };
       if (!response.ok) {
@@ -2064,9 +2081,45 @@ export default function CrawlOverview() {
           <div className="co-confirm-dialog">
             <h3>{actionConfirm.title}</h3>
             <div className="co-confirm-body">{actionConfirm.body}</div>
+            {actionConfirm.mode === 'discard' ? (
+              <label className="co-confirm-password">
+                <span>删除密码</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  autoFocus
+                  placeholder="请输入删除密码"
+                  value={discardPassword}
+                  onChange={(e) => {
+                    setDiscardPassword(e.target.value);
+                    if (discardPasswordError) setDiscardPasswordError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void confirmAction();
+                    }
+                  }}
+                />
+                {discardPasswordError ? <span className="co-confirm-password-error">{discardPasswordError}</span> : null}
+              </label>
+            ) : null}
             <div className="co-confirm-actions">
-              <button type="button" className="co-confirm-cancel" onClick={() => setActionConfirm(null)}>取消</button>
-              <button type="button" className="co-confirm-ok" onClick={() => void confirmAction()}>{actionConfirm.okLabel}</button>
+              <button
+                type="button"
+                className="co-confirm-cancel"
+                onClick={() => {
+                  setActionConfirm(null);
+                  setDiscardPassword('');
+                  setDiscardPasswordError('');
+                }}
+              >取消</button>
+              <button
+                type="button"
+                className={`co-confirm-ok${actionConfirm.mode === 'discard' ? ' danger' : ''}`}
+                disabled={actionConfirm.mode === 'discard' && discardPassword !== DISCARD_CONFIRM_PASSWORD}
+                onClick={() => void confirmAction()}
+              >{actionConfirm.okLabel}</button>
             </div>
           </div>
         </div>
