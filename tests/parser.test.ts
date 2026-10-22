@@ -22,6 +22,27 @@ test('prefers the summary value over a conflicting note value and lowers confide
   assert.ok((revenue?.confidence ?? 1) < 0.9);
 });
 
+
+test('scales 千元 summary pages and ignores EPS/ROE footnote markers', () => {
+  const metrics = parseCoreMetricPages([
+    '公司2026年半年度报告摘要 主要会计数据 单位：人民币千元 营业总收入 78,025,359 归属于上市公司股东的净利润 2,753,412 基本每股收益（元/股）(1) 0.58 0.75 加权平均净资产收益率 (1) 3.65% 4.12%',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'revenue')?.value, 78025359000);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 2753412000);
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 0.58);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 3.65);
+});
+
+test('detects 千元 inside parenthetical unit notes like bank pages', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据（人民币千元，特别注明除外）营业总收入 10,000 归属于上市公司股东的净利润 500 基本每股收益 0.12 加权平均净资产收益率 2.50%',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'revenue')?.value, 10000000);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 500000);
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 0.12);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 2.5);
+});
+
 test('rejects implausible EPS values instead of publishing a likely page or year number', () => {
   const metrics = parseCoreMetricPages(['主要会计数据 基本每股收益 2026']);
   assert.equal(metrics.some((item) => item.metric === 'eps'), false);

@@ -41,13 +41,19 @@ const LABELS: MetricDefinition[] = [
 ];
 
 function pageCurrencyUnit(text: string) {
-  return text.match(/(?:单位\s*[：:]\s*)?人民币\s*(亿元|百万元|万元|元)/)?.[1]
-    ?? text.match(/单位\s*[：:]\s*(亿元|百万元|万元|元)/)?.[1]
+  // 千元 must precede 元 in every alternation — A-share summaries often use 人民币千元.
+  return text.match(/(?:单位\s*[：:]\s*)?人民币\s*(亿元|百万元|万元|千元|元)/)?.[1]
+    ?? text.match(/单位\s*[：:]\s*(亿元|百万元|万元|千元|元)/)?.[1]
+    ?? text.match(/[（(]\s*人民币\s*(亿元|百万元|万元|千元|元)/)?.[1]
     ?? '';
 }
 
 function scaleCurrency(value: number, unit: string) {
-  const scaled = unit === '亿元' ? value * 100000000 : unit === '百万元' ? value * 1000000 : unit === '万元' ? value * 10000 : value;
+  const scaled = unit === '亿元' ? value * 100000000
+    : unit === '百万元' ? value * 1000000
+    : unit === '万元' ? value * 10000
+    : unit === '千元' ? value * 1000
+    : value;
   return Math.round(scaled * 100) / 100;
 }
 
@@ -59,10 +65,25 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
   const index = pageText.indexOf(label);
   if (index < 0) return null;
   let nearby = pageText.slice(index + label.length, index + label.length + 180).replace(/[,，]/g, '').replace(/（/g, '(').replace(/）/g, ')');
-  // Only ratio/per-share summary rows use the small footnote markers handled
-  // here. Parenthesized currency amounts are values, not footnotes.
-  if (!currencyMetrics.has(definition.metric)) nearby = nearby.replace(/^\s*\([1-9]\)\s+(?=-?\d)/, '');
-  const valueMatch = nearby.match(/(?:人民币)?\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*(%|亿元|百万元|万元|元\/股|元)?/);
+  // Ratio/per-share rows often look like `基本每股收益（元/股）(1) 0.58`. Strip
+  // small numeric footnotes anywhere before the real value. Parenthesized
+  // currency amounts stay intact — those are negative values, not footnotes.
+  if (!currencyMetrics.has(definition.metric)) {
+    nearby = nearby
+      .replace(/\(\s*元\s*\/?\s*股\s*\)/g, ' ')
+      .replace(/\(\s*[1-9]\d{0,2}\s*\)/g, ' ');
+  }
+  // Prefer an explicit percent token for ROE (avoids bare leading integers).
+  if (definition.metric === 'roe') {
+    const percentMatch = nearby.match(/(-?\d+(?:\.\d+)?)\s*%/);
+    if (percentMatch) {
+      const value = Number(percentMatch[1]);
+      if (!Number.isFinite(value)) return null;
+      if (Math.abs(value) < definition.minAbs || Math.abs(value) > definition.maxAbs) return null;
+      return { value, detectedUnit: '%' };
+    }
+  }
+  const valueMatch = nearby.match(/(?:人民币)?\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*(%|亿元|百万元|万元|千元|元\/股|元)?/);
   if (!valueMatch) return null;
   let value = Number(valueMatch[2]);
   if (valueMatch[1] && valueMatch[3]) value = -Math.abs(value);
