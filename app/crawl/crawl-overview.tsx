@@ -605,7 +605,7 @@ export default function CrawlOverview() {
   const [search, setSearch] = useState(focusCode);
   const [source, setSource] = useState<SourceFilter>('all');
   const [onlyFailed, setOnlyFailed] = useState(false);
-  const [onlyParsing, setOnlyParsing] = useState(false);
+  const [onlyUnparsed, setOnlyUnparsed] = useState(false);
   const [timeCol, setTimeCol] = useState<TimeCol | null>(null);
   const [timeSort, setTimeSort] = useState<SortState>('default');
   const [queuePopover, setQueuePopover] = useState<null | 'download' | 'parse' | 'downloading' | 'parsing' | 'verdict' | 'verdicting' | 'verdictSkipped'>(null);
@@ -861,7 +861,7 @@ export default function CrawlOverview() {
     let list = allFilings.filter((item) => {
       if (source !== 'all' && item.source !== source) return false;
       if (onlyFailed && item.state !== 'failed') return false;
-      if (onlyParsing && item.state !== 'downloaded') return false;
+      if (onlyUnparsed && (item.state === 'parsed' || item.state === 'parsed_partial')) return false;
       if (onlyMissingAi && item.verdictStatus === 'ready') return false;
       if (!periodPrefixMatches(item.period, periodPrefix)) return false;
       if (!keyword) return true;
@@ -876,7 +876,7 @@ export default function CrawlOverview() {
       });
     }
     return list;
-  }, [allFilings, search, source, onlyFailed, onlyParsing, onlyMissingAi, periodPrefix, timeCol, timeSort]);
+  }, [allFilings, search, source, onlyFailed, onlyUnparsed, onlyMissingAi, periodPrefix, timeCol, timeSort]);
 
   const selectedFilings = useMemo(
     () => filings.filter((row) => selectedIds.has(row.key)),
@@ -2252,21 +2252,21 @@ export default function CrawlOverview() {
               aria-pressed={onlyFailed}
               onClick={() => {
                 setOnlyFailed((v) => !v);
-                if (!onlyFailed) setOnlyParsing(false);
+                if (!onlyFailed) setOnlyUnparsed(false);
               }}
             >
               失败
             </button>
             <button
               type="button"
-              className={`co-toggle ${onlyParsing ? 'on' : ''}`}
-              aria-pressed={onlyParsing}
+              className={`co-toggle ${onlyUnparsed ? 'on' : ''}`}
+              aria-pressed={onlyUnparsed}
               onClick={() => {
-                setOnlyParsing((v) => !v);
-                if (!onlyParsing) setOnlyFailed(false);
+                setOnlyUnparsed((v) => !v);
+                if (!onlyUnparsed) setOnlyFailed(false);
               }}
             >
-              解析中
+              未解析
             </button>
             <button
               type="button"
