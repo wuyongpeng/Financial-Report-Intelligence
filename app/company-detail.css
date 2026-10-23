@@ -219,18 +219,23 @@
 .cd-verdict-down .cd-verdict-dot{background:#dc2626}
 .cd-verdict-down .cd-brief-title{color:#9b2c2c}
 
-/* 披露排雷：有命中才展示；色系与概览其它卡片一致 */
-.cd-disclosure-flags{margin:10px 0 14px;border:1px solid var(--cd-line);border-radius:10px;background:#fff;padding:12px 14px 10px}
-.cd-disclosure-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 8px}
-.cd-disclosure-head h3{margin:0;font-size:14px;font-weight:600;color:#5b6d86}
-.cd-disclosure-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-.cd-disclosure-card{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--cd-line);border-radius:10px;background:#fff;padding:10px 12px}
-.cd-disclosure-main{flex:1;min-width:0}
-.cd-disclosure-main b{display:block;font-size:13px;font-weight:600;color:#24364f;margin:0 0 6px}
-.cd-disclosure-main p{margin:0 0 5px;font-size:12px;line-height:1.65;color:#6b7a8d}
-.cd-disclosure-main p:last-child{margin-bottom:0}
-.cd-disclosure-k{display:inline-block;min-width:4.5em;margin-right:6px;font-size:11px;font-weight:600;color:#8a97ab;letter-spacing:.02em}
-.cd-disclosure-cites{flex-shrink:0;display:flex;flex-wrap:wrap;gap:4px;padding-top:2px}
+/* 重点关注：固定四卡；蓝灰色系与概览一致 */
+.cd-focus-highlights{margin:10px 0 14px;border:1px solid var(--cd-line);border-radius:10px;background:#fff;padding:12px 14px 10px}
+.cd-focus-hl-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 8px}
+.cd-focus-hl-head h3{margin:0;font-size:14px;font-weight:600;color:#5b6d86}
+.cd-focus-hl-list{list-style:none;margin:0;padding:0;display:grid;gap:8px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:720px){.cd-focus-hl-list{grid-template-columns:1fr}}
+.cd-focus-hl-card{border:1px solid var(--cd-line);border-radius:10px;background:#fff;padding:10px 12px;min-width:0}
+.cd-focus-hl-title-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 6px}
+.cd-focus-hl-title-row b{font-size:13px;font-weight:600;color:#24364f}
+.cd-focus-hl-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#c5cedb}
+.cd-focus-hl-dot.status-signal{background:#dc2626}
+.cd-focus-hl-dot.status-none{background:#c5cedb}
+.cd-focus-hl-dot.status-insufficient{background:#d6c7a8}
+.cd-focus-hl-conclusion{margin:0 0 6px;font-size:12px;line-height:1.65;color:#6b7a8d}
+.cd-focus-hl-cites{display:flex;flex-wrap:wrap;gap:6px}
+.cd-focus-hl-cite{border:0;background:none;padding:0;font-size:12px;color:#3064db;cursor:pointer;line-height:1.4}
+.cd-focus-hl-cite:hover{text-decoration:underline}
 .cd-more-toggle{display:block;width:100%;border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit}
 .cd-more-toggle:hover h3{color:#3064db}
 .cd-more-chevron{display:inline-block;margin-left:6px;font-size:12px;color:#8a97ab;font-weight:500}

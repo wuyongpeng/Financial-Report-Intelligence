@@ -4,7 +4,13 @@ import { describeYoy, resolveYoy } from './crawl-display';
 
 export const metricNames = ['revenue', 'net_profit', 'eps', 'roe'] as const;
 // Balance-sheet and cash-flow rows power the health module; they are not headline cards.
-export const supportMetricNames = ['total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost'] as const;
+export const supportMetricNames = [
+  'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost',
+  'non_recurring_pnl', 'profit_ex_non_recurring',
+  'cash_and_equivalents', 'restricted_cash',
+  'short_term_borrowings', 'long_term_borrowings', 'bonds_payable', 'current_portion_debt',
+  'goodwill', 'equity_parent',
+] as const;
 export const allMetricNames = [...metricNames, ...supportMetricNames] as const;
 export type HeadlineMetric = typeof metricNames[number];
 export type MetricName = typeof allMetricNames[number];
@@ -14,8 +20,18 @@ export type Citation = { id?: string; reportId?: string; companyName?: string; p
 export const labels: Record<MetricName, string> = {
   revenue: '营业收入', net_profit: '归母净利润', eps: '每股收益 EPS', roe: '净资产收益率 ROE',
   total_assets: '资产总计', total_liabilities: '负债合计', operating_cash_flow: '经营现金流净额', operating_cost: '营业成本',
+  non_recurring_pnl: '非经常性损益', profit_ex_non_recurring: '扣除非经常性损益后的净利润',
+  cash_and_equivalents: '货币资金', restricted_cash: '受限货币资金',
+  short_term_borrowings: '短期借款', long_term_borrowings: '长期借款', bonds_payable: '应付债券', current_portion_debt: '一年内到期的非流动负债',
+  goodwill: '商誉', equity_parent: '归属于母公司股东的权益',
 };
-const currencyMetrics = new Set<MetricName>(['revenue', 'net_profit', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost']);
+const currencyMetrics = new Set<MetricName>([
+  'revenue', 'net_profit', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost',
+  'non_recurring_pnl', 'profit_ex_non_recurring',
+  'cash_and_equivalents', 'restricted_cash',
+  'short_term_borrowings', 'long_term_borrowings', 'bonds_payable', 'current_portion_debt',
+  'goodwill', 'equity_parent',
+]);
 export function value(report: Report | undefined, metric: MetricName) { return report?.metrics.find(item => item.metric === metric)?.value; }
 export function period(report: Report) {
   return canonicalPeriodFromTitle(report.title, report.published_at) ?? report.metrics[0]?.period ?? report.title;

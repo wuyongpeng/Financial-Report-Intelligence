@@ -4,7 +4,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent
 import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
 import { verdictTone, type ReportVerdict } from '@/lib/report-verdict';
-import { buildDisclosureFlags } from '@/lib/disclosure-flags';
+import { buildFocusHighlights } from '@/lib/focus-highlights';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
@@ -741,15 +741,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const selfGrowth = growthRanks.find(p => p.code === selected.code)?.value;
   const growthStanding = standing(growthRanks, selfGrowth);
   const findings = keyFindings(reports, selected);
-  const disclosureFlags = buildDisclosureFlags({
-    selected,
-    previous,
-    yoyMoves: deltas.map((d) => ({
-      metric: d.metric,
-      pct: d.amount,
-      label: d.yoy?.label,
-    })),
-  });
+  const focusHighlights = buildFocusHighlights(selected, { previous });
   const verdictGenerating = verdictStatus === 'loading' || verdictRefreshing;
   const flaggedMoves = changes.filter(d => Math.abs(d.amount!) >= 30);
   const skillDepthModules = industryAttributionModules(selected.industry);
@@ -1600,43 +1592,50 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             )) : <span className="cd-ratio-empty">缺必要科目，暂不计算</span>}
           </section>
 
-          {disclosureFlags.length > 0 ? (
-          <section className="cd-disclosure-flags" aria-label="披露排雷" id="cd-disclosure">
-            <div className="cd-disclosure-head">
-              <h3>披露排雷</h3>
+          <section className="cd-focus-highlights" aria-label="重点关注" id="cd-focus-highlights">
+            <div className="cd-focus-hl-head">
+              <h3>重点关注</h3>
             </div>
-            <ul className="cd-disclosure-list">
-              {disclosureFlags.map((flag) => {
-                const cite = flag.metric ? metricCitation(flag.metric) : null;
-                const quote = [flag.title, flag.phenomenon, flag.why].filter(Boolean).join(' · ');
+            <ul className="cd-focus-hl-list">
+              {focusHighlights.map((card) => {
+                const quote = [card.title, card.conclusion].filter(Boolean).join(' · ');
+                const firstPage = card.cites[0]?.page;
                 return (
                   <li
-                    key={flag.id}
-                    className={`cd-disclosure-card cd-focus-card${pickedCard(`flag-${flag.id}`)}`}
+                    key={card.id}
+                    className={`cd-focus-hl-card cd-focus-card status-${card.status}${pickedCard(`focus-${card.id}`)}`}
                     data-focus-card
-                    data-focus-id={`flag-${flag.id}`}
+                    data-focus-id={`focus-${card.id}`}
                     data-focus-kind="finding"
-                    data-focus-title={flag.title}
+                    data-focus-title={card.title}
                     data-focus-quote={quote}
-                    {...(cite?.page ? { 'data-focus-page': String(cite.page) } : {})}
+                    {...(firstPage ? { 'data-focus-page': String(firstPage) } : {})}
                   >
-                    <div className="cd-disclosure-main">
-                      <b>{flag.title}</b>
-                      <p className="cd-disclosure-phenomenon">
-                        <span className="cd-disclosure-k">现象</span>
-                        {flag.phenomenon}
-                        {flag.metric ? footnote(flag.metric) : null}
-                      </p>
-                      <p className="cd-disclosure-why"><span className="cd-disclosure-k">为何值得看</span>{flag.why}</p>
-                      <p className="cd-disclosure-where"><span className="cd-disclosure-k">可选去哪查</span>{flag.where}</p>
+                    <div className="cd-focus-hl-title-row">
+                      <b>{card.title}</b>
+                      <span className={`cd-focus-hl-dot status-${card.status}`} aria-hidden="true" />
                     </div>
-                    {cite ? <span className="cd-disclosure-cites">{citationLink(cite, flag.id)}</span> : null}
+                    <p className="cd-focus-hl-conclusion">{card.conclusion}</p>
+                    {card.cites.length > 0 ? (
+                      <div className="cd-focus-hl-cites">
+                        {card.cites.map((c, i) => (
+                          <button
+                            type="button"
+                            key={`${card.id}-${c.metric ?? i}-${c.page}`}
+                            className="cd-focus-hl-cite"
+                            title={pageDescription(c.page)}
+                            onClick={() => cite({ page: c.page, quote: c.quote }, false, c.metric ?? null)}
+                          >
+                            查看原文 {pageLabel(c.page)}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </li>
                 );
               })}
             </ul>
           </section>
-          ) : null}
 
           <section className={`cd-more-analysis${depthOpen ? '' : ' cd-more-collapsed'}`} id="cd-more">
             <div className="cd-more-title">

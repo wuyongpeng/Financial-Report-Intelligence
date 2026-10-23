@@ -9,6 +9,16 @@ export const METRIC_PATTERNS = {
   total_liabilities: /负债/,
   operating_cash_flow: /现金流/,
   operating_cost: /成本|毛利/,
+  non_recurring_pnl: /非经常性损益/,
+  profit_ex_non_recurring: /扣非/,
+  cash_and_equivalents: /货币资金/,
+  restricted_cash: /受限.*货币资金|货币资金.*受限/,
+  short_term_borrowings: /短期借款/,
+  long_term_borrowings: /长期借款/,
+  bonds_payable: /应付债券/,
+  current_portion_debt: /一年内到期/,
+  goodwill: /商誉/,
+  equity_parent: /归属于母公司.*权益|归母净资产|归母权益/,
 } as const;
 
 export type RetrievalMetricName = keyof typeof METRIC_PATTERNS;

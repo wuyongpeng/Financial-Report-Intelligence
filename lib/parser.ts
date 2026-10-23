@@ -1,4 +1,10 @@
-export const parsedMetricNames = ['revenue', 'net_profit', 'eps', 'roe', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost'] as const;
+export const parsedMetricNames = [
+  'revenue', 'net_profit', 'eps', 'roe', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost',
+  'non_recurring_pnl', 'profit_ex_non_recurring',
+  'cash_and_equivalents', 'restricted_cash',
+  'short_term_borrowings', 'long_term_borrowings', 'bonds_payable', 'current_portion_debt',
+  'goodwill', 'equity_parent',
+] as const;
 export const PARSE_PAGE_LIMIT = 120;
 /** pdf.js loads the whole file; above this, extract the first pages from disk instead. */
 export const PDFJS_PARSE_MAX_BYTES = 50 * 1024 * 1024;
@@ -7,7 +13,13 @@ export function shouldExtractTextExternally(byteLength: number) {
   return byteLength > PDFJS_PARSE_MAX_BYTES;
 }
 // Currency rows share one scaling path; ratios and per-share values must not be scaled.
-const currencyMetrics = new Set(['revenue', 'net_profit', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost']);
+const currencyMetrics = new Set([
+  'revenue', 'net_profit', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost',
+  'non_recurring_pnl', 'profit_ex_non_recurring',
+  'cash_and_equivalents', 'restricted_cash',
+  'short_term_borrowings', 'long_term_borrowings', 'bonds_payable', 'current_portion_debt',
+  'goodwill', 'equity_parent',
+]);
 
 export type ParsedMetric = {
   metric: typeof parsedMetricNames[number];
@@ -42,6 +54,17 @@ const LABELS: MetricDefinition[] = [
   // Operating cash flow is legitimately negative, so no lower bound on magnitude.
   { metric: 'operating_cash_flow', labels: ['经营活动产生的现金流量净额', '经营活动现金流量净额'], unit: '元', minAbs: 0, maxAbs: 1e16 },
   { metric: 'operating_cost', labels: ['营业成本'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
+  { metric: 'non_recurring_pnl', labels: ['非经常性损益合计', '非经常性损益净额', '非经常性损益'], unit: '元', minAbs: 0, maxAbs: 1e15 },
+  { metric: 'profit_ex_non_recurring', labels: ['扣除非经常性损益后的净利润', '归属于上市公司股东的扣除非经常性损益的净利润', '扣非后归属于上市公司股东的净利润'], unit: '元', minAbs: 0, maxAbs: 1e15 },
+  { metric: 'cash_and_equivalents', labels: ['货币资金'], unit: '元', minAbs: 0, maxAbs: 1e16 },
+  { metric: 'restricted_cash', labels: ['受限货币资金', '使用受限的货币资金', '受限制的货币资金'], unit: '元', minAbs: 0, maxAbs: 1e16 },
+  { metric: 'short_term_borrowings', labels: ['短期借款'], unit: '元', minAbs: 0, maxAbs: 1e16 },
+  { metric: 'long_term_borrowings', labels: ['长期借款'], unit: '元', minAbs: 0, maxAbs: 1e16 },
+  { metric: 'bonds_payable', labels: ['应付债券'], unit: '元', minAbs: 0, maxAbs: 1e16 },
+  // Approximation: full line item when finer借款/债券 split is unavailable.
+  { metric: 'current_portion_debt', labels: ['一年内到期的非流动负债'], unit: '元', minAbs: 0, maxAbs: 1e16 },
+  { metric: 'goodwill', labels: ['商誉'], unit: '元', minAbs: 0, maxAbs: 1e16 },
+  { metric: 'equity_parent', labels: ['归属于母公司股东的权益', '归属于母公司所有者权益', '归属于上市公司股东的净资产', '归属于本公司股东权益合计'], unit: '元', minAbs: 0, maxAbs: 1e16 },
 ];
 
 function pageCurrencyUnit(text: string) {
@@ -236,8 +259,16 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
   for (let pageIndex = 0; pageIndex < Math.min(pages.length, PARSE_PAGE_LIMIT); pageIndex += 1) {
     const page = normalizePageText(pages[pageIndex]);
     const isSummary = /主要会计数据|主要财务指标|报告摘要/.test(page);
-    const statement = definition.metric === 'total_assets' || definition.metric === 'total_liabilities' ? /合并资产负债表|资产负债表/
+    const balanceSheet = new Set([
+      'total_assets', 'total_liabilities',
+      'cash_and_equivalents', 'restricted_cash',
+      'short_term_borrowings', 'long_term_borrowings', 'bonds_payable', 'current_portion_debt',
+      'goodwill', 'equity_parent',
+    ]);
+    const statement = balanceSheet.has(definition.metric) ? /合并资产负债表|资产负债表/
       : definition.metric === 'operating_cash_flow' ? /合并现金流量表|现金流量表/
+      : definition.metric === 'non_recurring_pnl' || definition.metric === 'profit_ex_non_recurring'
+        ? /非经常性损益|主要会计数据|主要财务指标|报告摘要|合并利润表|利润表/
       : /合并利润表|利润表/;
     const isPrimaryStatement = statement.test(page);
     const hasPageUnit = Boolean(pageCurrencyUnit(page));
@@ -367,7 +398,8 @@ export async function parseCoreMetrics(bytes: ArrayBuffer | null, options?: { fi
   let pages = primaryPages;
   let metrics = parseCoreMetricPages(pages);
   const disclosedCount = (rows: ParsedMetric[]) => rows.filter((row) => row.yoyPct !== undefined || row.priorValue !== undefined).length;
-  if (metrics.length < LABELS.length || disclosedCount(metrics) < 2) {
+  const CORE_METRIC_TARGET = 8; // headline + original support rows; extra focus metrics are best-effort
+  if (metrics.length < CORE_METRIC_TARGET || disclosedCount(metrics) < 2) {
     const fallbackPages = await extractWithPoppler(fallbackBytes, filePath);
     const fallbackMetrics = parseCoreMetricPages(fallbackPages);
     if (
