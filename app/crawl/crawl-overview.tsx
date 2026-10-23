@@ -924,7 +924,7 @@ export default function CrawlOverview() {
     confirmText: string,
   ) {
     if (!jobs.length) {
-      setTriggerMsg(mode === 'parse' ? '所选财报尚未下载，请先批量抓取。' : mode === 'verdict' ? '所选财报尚未解析，或智析已生成。' : '请先勾选要处理的财报。');
+      setTriggerMsg(mode === 'parse' ? '所选财报尚未下载，请先批量抓取。' : mode === 'verdict' ? '所选财报尚未解析，无法智析。' : '请先勾选要处理的财报。');
       window.setTimeout(() => setTriggerMsg(''), 6000);
       return;
     }
@@ -937,7 +937,10 @@ export default function CrawlOverview() {
       for (const item of jobs) {
         try {
           if (mode === 'verdict') {
-            await requestReportVerdict(item.announcementId!, { fill: true });
+            await requestReportVerdict(
+              item.announcementId!,
+              item.verdictStatus === 'ready' ? { refresh: true } : { fill: true },
+            );
           } else {
             const response = await fetch('/api/crawl/trigger', {
               method: 'POST',
@@ -998,15 +1001,19 @@ export default function CrawlOverview() {
   }
 
   function runBatchVerdict() {
-    const jobs = selectedFilings.filter((row) => canFillVerdict(row) && row.verdictStatus !== 'ready');
+    const jobs = selectedFilings.filter((row) => canFillVerdict(row));
     const skipped = selectedFilings.length - jobs.length;
-    void runBatchJobs(
-      jobs,
-      'verdict',
-      skipped
-        ? `将为 ${jobs.length} 份尚未智析的财报调用 AI（跳过 ${skipped} 份）。继续？`
-        : `将为 ${jobs.length} 份财报生成智析。已有结果的不会重算。继续？`,
-    );
+    const refreshCount = jobs.filter((row) => row.verdictStatus === 'ready').length;
+    const fillCount = jobs.length - refreshCount;
+    let confirmText = `将为 ${jobs.length} 份财报智析`;
+    if (refreshCount > 0) {
+      confirmText += `（其中 ${refreshCount} 份已有结果，将覆盖重算`;
+      if (fillCount > 0) confirmText += `，${fillCount} 份新建`;
+      confirmText += '）';
+    }
+    if (skipped > 0) confirmText += `；跳过 ${skipped} 份尚未解析`;
+    confirmText += '。继续？';
+    void runBatchJobs(jobs, 'verdict', confirmText);
   }
 
   function onTimeSort(col: TimeCol) {
