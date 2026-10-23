@@ -22,6 +22,7 @@ import { AnswerFeedback } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
+import { ensureGuestCookie } from '@/lib/guest-session-client';
 import {
   depthAttributionLead,
   industryAttributionModules,
@@ -488,12 +489,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     memoryReady.current = false;
     void (async () => {
       try {
-        const response = await fetch(`/api/conversations?reportId=${encodeURIComponent(selected.id)}`, { signal: abort.signal, cache: 'no-store' });
+        // Guest cookie must land before hydrate so Postgres owner_key stays stable on HTTP demos.
+        await ensureGuestCookie();
+        if (abort.signal.aborted) return;
+        const response = await fetch(`/api/conversations?reportId=${encodeURIComponent(selected.id)}`, { signal: abort.signal, cache: 'no-store', credentials: 'same-origin' });
         const data = await readContractJson(response, parseConversationListResponse);
         const id = conversationIds.current.get(selected.id) ?? data.conversations[0]?.id;
         // Empty / anonymous: keep in-memory company thread; never wipe on soft miss.
         if (!id) return;
-        const detail = await fetch(`/api/conversations/${id}`, { signal: abort.signal, cache: 'no-store' });
+        const detail = await fetch(`/api/conversations/${id}`, { signal: abort.signal, cache: 'no-store', credentials: 'same-origin' });
         const payload = await readContractJson(detail, parseConversationDetailResponse);
         if (abort.signal.aborted) return;
         conversationIds.current.set(selected.id, id);
@@ -1277,15 +1281,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     let answer = '';
     function update(citations?: Citation[]) { if (activeId.current !== id || controller.signal.aborted) return; setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:answer, ...(citations ? { citations } : {}) } : item)); }
     try {
+      await ensureGuestCookie();
       let conversationId = conversationIds.current.get(id);
       if (!conversationId) {
         try {
-          const created = await fetch('/api/conversations', { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: id }) });
+          const created = await fetch('/api/conversations', { method: 'POST', signal: controller.signal, credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: id }) });
           const payload = await readContractJson(created, parseCreateConversationResponse);
           conversationId = payload.conversation.id; conversationIds.current.set(id, conversationId);
         } catch { /* ignore — anonymous users can ask without persisted memory */ }
       }
-      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), stream:true }) });
+      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), stream:true }) });
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
@@ -1370,7 +1375,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const id = selected.id;
     busyRef.current = true; setAsking(true);
     try {
-      const response = await fetch('/api/conversations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: id }) });
+      await ensureGuestCookie();
+      const response = await fetch('/api/conversations', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: id }) });
       const payload = await readContractJson(response, parseCreateConversationResponse);
       if (payload.conversation) {
         conversationIds.current.set(id, payload.conversation.id);

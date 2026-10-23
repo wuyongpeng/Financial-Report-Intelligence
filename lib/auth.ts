@@ -116,22 +116,18 @@ export function isAdmin(request: Request) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+/** Secure only when COOKIE_SECURE=true. NODE_ENV=production alone must not force it,
+ * or plain HTTP/IP demos drop the cookie and mint a new owner every request. */
+function cookieSecureAttribute() {
+  return process.env.COOKIE_SECURE === 'true' ? '; Secure' : '';
+}
+
 export function adminCookieHeader(value: string, expires?: Date) {
-  // IP + HTTP verification cannot persist a Secure cookie. Keep the production
-  // default, but allow the VM bootstrap environment to opt out explicitly.
-  const secureCookie = process.env.COOKIE_SECURE
-    ? process.env.COOKIE_SECURE === 'true'
-    : process.env.NODE_ENV === 'production';
-  const secure = secureCookie ? '; Secure' : '';
-  return `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${expires ? 0 : maxAgeSeconds}${secure}`;
+  return `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${expires ? 0 : maxAgeSeconds}${cookieSecureAttribute()}`;
 }
 
 export function appCookieHeader(value: string, expires?: Date) {
-  const secureCookie = process.env.COOKIE_SECURE
-    ? process.env.COOKIE_SECURE === 'true'
-    : process.env.NODE_ENV === 'production';
-  const secure = secureCookie ? '; Secure' : '';
-  return `${appCookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${expires ? 0 : maxAgeSeconds}${secure}`;
+  return `${appCookieName}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${expires ? 0 : maxAgeSeconds}${cookieSecureAttribute()}`;
 }
 
 
@@ -166,13 +162,9 @@ export function ensureGuestSession(request: Request): { owner: string; setCookie
   const expiresAt = Math.floor(Date.now() / 1000) + guestMaxAgeSeconds;
   const payload = `${id}.${expiresAt}`;
   const value = `${payload}.${signGuest(payload)}`;
-  const secureCookie = process.env.COOKIE_SECURE
-    ? process.env.COOKIE_SECURE === 'true'
-    : process.env.NODE_ENV === 'production';
-  const secure = secureCookie ? '; Secure' : '';
   return {
     owner: createHmac('sha256', guestSecret()).update(`conversation:guest:${id}`).digest('hex'),
-    setCookie: `${guestCookieName}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${guestMaxAgeSeconds}${secure}`,
+    setCookie: `${guestCookieName}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${guestMaxAgeSeconds}${cookieSecureAttribute()}`,
   };
 }
 
