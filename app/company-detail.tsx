@@ -3,7 +3,8 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
-import { changeTone, verdictTone, type ChangeDirection, type ReportVerdict } from '@/lib/report-verdict';
+import { verdictTone, type ReportVerdict } from '@/lib/report-verdict';
+import { buildDisclosureFlags } from '@/lib/disclosure-flags';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
@@ -98,12 +99,6 @@ function yoyPillHover(detail: string | undefined) {
   return detail || undefined;
 }
 
-function changeDirectionIcon(direction: ChangeDirection): { name: 'arrowUp' | 'arrowDown' | 'warn' | 'minus'; label: string } | null {
-  if (direction === '利好') return { name: 'arrowUp', label: '利好' };
-  if (direction === '利空') return { name: 'arrowDown', label: '利空' };
-  if (direction === '风险') return { name: 'warn', label: '风险' };
-  return { name: 'minus', label: '中性' };
-}
 function reportTypeLabel(r: Report) {
   const kind = filingType(r);
   return kind === 'annual' ? '年报' : kind === 'semiannual' ? '中报' : '季报';
@@ -270,6 +265,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [metric, setMetric] = useState<HeadlineMetric>('revenue');
   const [overlay, setOverlay] = useState<HeadlineMetric | null>(null);
   const [expanded, setExpanded] = useState<string[]>([]);
+  /** 深度归因整块默认折叠，点标题展开。 */
+  const [depthOpen, setDepthOpen] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState('');
@@ -319,7 +316,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     memoryReady.current = false; setMemoryLoading(true);
     activeId.current = report.id;
     setSelected(report); onSelect(report.id); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
-    setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setFocused(null);
+    setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setDepthOpen(false); setFocused(null);
     setPdfSearch(''); setPdfSearchHits([]); setPdfSearchOpen(false); setSearchHighlight(null);
     setVerdict(null); setVerdictStatus('loading'); setVerdictRefreshing(false); setVerdictError('');
   }
@@ -744,7 +741,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const selfGrowth = growthRanks.find(p => p.code === selected.code)?.value;
   const growthStanding = standing(growthRanks, selfGrowth);
   const findings = keyFindings(reports, selected);
-  const verdictChanges = verdict?.changes ?? [];
+  const disclosureFlags = buildDisclosureFlags({
+    selected,
+    previous,
+    yoyMoves: deltas.map((d) => ({
+      metric: d.metric,
+      pct: d.amount,
+      label: d.yoy?.label,
+    })),
+  });
   const verdictGenerating = verdictStatus === 'loading' || verdictRefreshing;
   const flaggedMoves = changes.filter(d => Math.abs(d.amount!) >= 30);
   const skillDepthModules = industryAttributionModules(selected.industry);
@@ -1034,7 +1039,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   function answerSources(message: Message) {
     return uniqueAnswerSources(message.text, message.citations, pageLabel);
   }
-  function focusModule(id: string) { if (sourceDrawerOpen) closeSource(); setExpanded(e => e.includes(id) ? e : [...e,id]); setFocused(id); setMobilePane('dashboard'); window.setTimeout(() => document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 80); }
+  function focusModule(id: string) { if (sourceDrawerOpen) closeSource(); setDepthOpen(true); setExpanded(e => e.includes(id) ? e : [...e,id]); setFocused(id); setMobilePane('dashboard'); window.setTimeout(() => document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 80); }
   function resizeComposer() {
     const el = questionRef.current;
     if (!el) return;
@@ -1553,34 +1558,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </article>;
           })}</div>
           {baselineOptions.length>0 && <div className="cd-baseline-row"><label>对比基准 <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`${period(defaultPrevious)}（上年同期）`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}</select></label>{!baselineIsDefault && previous && <span className="cd-note">当前以 {period(previous)} 为基准，非上年同期。</span>}</div>}
-          {!verdictGenerating && verdictStatus === 'ready' && verdictChanges.length > 0 && <section className="cd-key-changes" aria-label="关键变化">
-            <h3>关键变化</h3>
-            <ul>
-              {verdictChanges.map((item, index) => {
-                const icon = changeDirectionIcon(item.direction);
-                const primary = item.sourceRef[0];
-                return <li
-                  key={`${item.title}-${index}`}
-                  className={`cd-key-change cd-key-change-${changeTone(item.direction)} cd-focus-card${pickedCard(`change-${index}`)}`}
-                  data-focus-card
-                  data-focus-id={`change-${index}`}
-                  data-focus-kind="finding"
-                  data-focus-title={item.title}
-                  data-focus-quote={`${item.title}：${item.description}`}
-                  {...(primary?.page ? { 'data-focus-page': String(primary.page) } : {})}
-                >
-                  <div className="cd-key-change-main">
-                    {icon && <span className="cd-key-change-icon" aria-label={icon.label}><Icon name={icon.name} size={16} /></span>}
-                    <span>
-                      <b>{item.title}</b>
-                      <small>{item.description}</small>
-                    </span>
-                  </div>
-                  <span className="cd-key-change-cites">{item.sourceRef.map((c, i) => citationLink(c, `${index}-${i}`))}</span>
-                </li>;
-              })}
-            </ul>
-          </section>}
           </div>
 
           <section
@@ -1623,13 +1600,63 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             )) : <span className="cd-ratio-empty">缺必要科目，暂不计算</span>}
           </section>
 
-          <section className="cd-more-analysis" id="cd-more">
-            <div className="cd-more-title">
-              <div>
-                <h3>深度归因{industrySkillBadge(selected.industry)}</h3>
-                <p className="cd-more-lead">{depthAttributionLead(selected.industry)}</p>
-              </div>
+          <section className="cd-disclosure-flags" aria-label="披露排雷" id="cd-disclosure">
+            <div className="cd-disclosure-head">
+              <h3>披露排雷</h3>
+              <span>基于结构化指标自动提示 · 不下投资结论</span>
             </div>
+            {disclosureFlags.length === 0 ? (
+              <p className="cd-disclosure-empty">本报告未触发关注项</p>
+            ) : (
+              <ul className="cd-disclosure-list">
+                {disclosureFlags.map((flag) => {
+                  const cite = flag.metric ? metricCitation(flag.metric) : null;
+                  const quote = [flag.title, flag.phenomenon, flag.why].filter(Boolean).join(' · ');
+                  return (
+                    <li
+                      key={flag.id}
+                      className={`cd-disclosure-card cd-focus-card${pickedCard(`flag-${flag.id}`)}`}
+                      data-focus-card
+                      data-focus-id={`flag-${flag.id}`}
+                      data-focus-kind="finding"
+                      data-focus-title={flag.title}
+                      data-focus-quote={quote}
+                      {...(cite?.page ? { 'data-focus-page': String(cite.page) } : {})}
+                    >
+                      <div className="cd-disclosure-main">
+                        <b>{flag.title}</b>
+                        <p className="cd-disclosure-phenomenon">
+                          <span className="cd-disclosure-k">现象</span>
+                          {flag.phenomenon}
+                          {flag.metric ? footnote(flag.metric) : null}
+                        </p>
+                        <p className="cd-disclosure-why"><span className="cd-disclosure-k">为何值得看</span>{flag.why}</p>
+                        <p className="cd-disclosure-where"><span className="cd-disclosure-k">可选去哪查</span>{flag.where}</p>
+                      </div>
+                      {cite ? <span className="cd-disclosure-cites">{citationLink(cite, flag.id)}</span> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section className={`cd-more-analysis${depthOpen ? '' : ' cd-more-collapsed'}`} id="cd-more">
+            <div className="cd-more-title">
+              <button
+                type="button"
+                className="cd-more-toggle"
+                aria-expanded={depthOpen}
+                aria-controls="cd-more-body"
+                onClick={() => setDepthOpen((v) => !v)}
+              >
+                <div>
+                  <h3>深度归因{industrySkillBadge(selected.industry)} <span className="cd-more-chevron" aria-hidden="true">{depthOpen ? '▾' : '▸'}</span></h3>
+                  <p className="cd-more-lead">{depthAttributionLead(selected.industry)}{depthOpen ? '' : ' · 点击展开'}</p>
+                </div>
+              </button>
+            </div>
+            {depthOpen && <div id="cd-more-body" className="cd-more-body">
             {depthModuleDefs.map((def,index)=>{
               const id = def.id;
               const label = moduleLabel(id);
@@ -1692,6 +1719,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 )}
               </section>;
             })}
+            </div>}
           </section>
           <p className="cd-data-note">数据来自已解析财报 · 数字旁角标可定位原文 · 未复核指标请结合 PDF 核验</p>
         </div>
