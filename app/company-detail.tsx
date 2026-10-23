@@ -1623,10 +1623,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                             type="button"
                             key={`${card.id}-${c.metric ?? i}-${c.page}`}
                             className="cd-focus-hl-cite"
-                            title={pageDescription(c.page)}
+                            title={`定位原文，${pageDescription(c.page)}`}
                             onClick={() => cite({ page: c.page, quote: c.quote }, false, c.metric ?? null)}
                           >
-                            查看原文 {pageLabel(c.page)}
+                            [{pageLabel(c.page)}]
                           </button>
                         ))}
                       </div>

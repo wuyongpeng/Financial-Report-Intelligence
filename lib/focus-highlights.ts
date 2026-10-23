@@ -55,9 +55,15 @@ function citeFor(report: Report, metric: MetricName): FocusCite | null {
 }
 
 function citesOf(report: Report, metrics: MetricName[]): FocusCite[] {
-  return metrics
-    .map((m) => citeFor(report, m))
-    .filter((c): c is FocusCite => Boolean(c));
+  const out: FocusCite[] = [];
+  const seen = new Set<number>();
+  for (const m of metrics) {
+    const c = citeFor(report, m);
+    if (!c || seen.has(c.page)) continue;
+    seen.add(c.page);
+    out.push(c);
+  }
+  return out;
 }
 
 /**
