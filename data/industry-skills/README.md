@@ -8,7 +8,7 @@
 
 ## 用户侧
 
-- 仅使用 `userFacing.badge` 与 `userFacing.hover`（例如标题旁「半导体视角」）。
+- 详情页徽章统一展示「产业视角」；`title`/悬浮用 `depthAttributionLead`（如「按半导体行业视角组织归因」）。数据层 `userFacing.badge` 仍可保留「××视角」供内部对照。
 - **不要做可点问题芯片**——追问模板尚未产品化；禁区里「稼动率」等不得写进默认悬停承诺。
 
 ## 加载

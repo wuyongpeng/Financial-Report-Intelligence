@@ -7,6 +7,7 @@ import {
   industryFromStructuredContext,
   industrySkillSystemAppend,
   industrySkillUserFacing,
+  depthAttributionLead,
   resetIndustrySkillCache,
 } from '../lib/industry-skills';
 
@@ -59,7 +60,7 @@ test('半导体 attributionModules expose volume/price/structure/gross/inventory
   const mods = industryAttributionModules('半导体');
   assert.ok(mods);
   assert.equal(mods!.length, 5);
-  assert.deepEqual(mods!.map((m) => m.title), ['量', '价', '结构', '毛利', '存货与资本开支']);
+  assert.deepEqual(mods!.map((m) => m.title), ['晶圆销量', '平均售价', '地区与应用结构', '毛利率', '存货与资本开支']);
   assert.deepEqual(mods!.map((m) => m.id), ['volume', 'price', 'structure', 'gross_margin', 'inventory_capex']);
   assert.equal(industryAttributionModules('待分类'), null);
   assert.equal(industryAttributionModules('不存在的行业XYZ'), null);
@@ -79,4 +80,11 @@ test('broad label 电子 does not resolve to 消费电子', () => {
   assert.equal(getIndustrySkill('电子'), null);
   assert.equal(industrySkillUserFacing('电子'), null);
   assert.equal(industryAttributionModules('电子'), null);
+});
+
+test('depthAttributionLead uses real industry name, not 产业', () => {
+  resetIndustrySkillCache();
+  assert.equal(depthAttributionLead('半导体'), '按半导体行业视角组织归因');
+  assert.equal(depthAttributionLead('半导体及元件'), '按半导体行业视角组织归因');
+  assert.equal(depthAttributionLead(null), '解释营收、利润与异常指标为何变动');
 });

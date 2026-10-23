@@ -223,7 +223,12 @@ async function waitForParsedReport(code: string, id: string, signal: AbortSignal
 function industrySkillBadge(industry: string | null | undefined) {
   const skillUi = industrySkillUserFacing(industry);
   if (!skillUi) return null;
-  return <span className="cd-industry-skill-badge" title={skillUi.hover}>{skillUi.badge}</span>;
+  // Always show a unified label; hover carries the industry-specific lead.
+  return (
+    <span className="cd-industry-skill-badge" title={depthAttributionLead(industry)}>
+      产业视角
+    </span>
+  );
 }
 
 export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null, preferredCite = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null; preferredCite?: { page: number; quote: string } | null }) {

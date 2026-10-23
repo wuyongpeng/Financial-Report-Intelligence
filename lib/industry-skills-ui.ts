@@ -112,12 +112,13 @@ export function industryAttributionModules(industry: string | null | undefined):
 }
 
 export function depthAttributionLead(industry: string | null | undefined): string {
+  // Prefer resolved skill industry name so UI badge「产业视角」 never becomes「按产业行业…」.
+  const key = resolveIndustrySkillKey(industry);
+  if (key) return `按${key}行业视角组织归因`;
   const ui = industrySkillUserFacing(industry);
   if (ui?.badge) {
     const name = ui.badge.replace(/视角$/, '');
-    return `按${name}行业视角组织归因`;
+    if (name && name !== '产业') return `按${name}行业视角组织归因`;
   }
-  const key = resolveIndustrySkillKey(industry);
-  if (key) return `按${key}行业视角组织归因`;
   return '解释营收、利润与异常指标为何变动';
 }
