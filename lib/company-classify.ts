@@ -21,6 +21,7 @@ const NAME_HINTS: Array<{ test: RegExp; sector: IndustryGroup; industry: string 
   { test: /啤酒/, sector: '消费', industry: '啤酒' },
   { test: /电器|家电|智家/, sector: '消费', industry: '家电' },
   { test: /牧原|温氏|牧|禽|渔/, sector: '消费', industry: '农林牧渔' },
+  { test: /中芯|华虹|晶圆代工/, sector: '科技', industry: '半导体' },
   { test: /芯片|半导体|微电子|集成电路|燧原|沐曦|寒武|海光|龙芯/, sector: '科技', industry: 'AI芯片' },
   { test: /光伏|硅料|硅片/, sector: '新能源', industry: '光伏' },
   { test: /锂电|电池/, sector: '新能源', industry: '锂电' },
@@ -118,10 +119,18 @@ export function classifyFromSignals(opts: {
     ? classifyFromIndustryText(opts.marketIndustry, opts.name)
     : null;
   if (fromMarket) {
-    // Name can refine 计算机 → AI芯片 for known design houses.
+    // Name can refine broad market labels (计算机→AI芯片, 电子→半导体 foundry).
     const fromName = classifyFromName(opts.name);
-    if (fromName && fromMarket.sector === '科技' && fromName.industry === 'AI芯片') {
-      return { ...fromName, source: 'market' };
+    if (fromName && fromMarket.sector === '科技') {
+      if (fromName.industry === 'AI芯片') {
+        return { ...fromName, source: 'market' };
+      }
+      if (
+        fromName.industry === '半导体'
+        && (fromMarket.industry === '电子' || fromMarket.industry === '消费电子')
+      ) {
+        return { ...fromName, source: 'market' };
+      }
     }
     return { ...fromMarket, source: 'market' };
   }

@@ -72,3 +72,11 @@ test('fuzzy industry label still resolves 半导体 skill', () => {
   assert.equal(industrySkillUserFacing('半导体及元件')?.badge, '半导体视角');
   assert.ok(industryAttributionModules('半导体及元件')?.length);
 });
+
+
+test('broad label 电子 does not resolve to 消费电子', () => {
+  resetIndustrySkillCache();
+  assert.equal(getIndustrySkill('电子'), null);
+  assert.equal(industrySkillUserFacing('电子'), null);
+  assert.equal(industryAttributionModules('电子'), null);
+});

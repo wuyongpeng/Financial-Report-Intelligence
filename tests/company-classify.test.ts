@@ -47,3 +47,11 @@ test('mapIndustryGroup derives 一级 from 二级 without sector', () => {
   assert.equal(mapIndustryGroup('券商'), '金融');
   assert.equal(mapIndustryGroup('军工'), '制造军工');
 });
+
+
+test('中芯国际 maps to 半导体 even under broad 电子 market label', () => {
+  assert.deepEqual(classifyFromName('中芯国际'), { sector: '科技', industry: '半导体' });
+  const tagged = classifyFromSignals({ name: '中芯国际', marketIndustry: '电子' });
+  assert.equal(tagged.industry, '半导体');
+  assert.equal(tagged.sector, '科技');
+});

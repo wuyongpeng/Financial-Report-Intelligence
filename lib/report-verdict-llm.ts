@@ -12,6 +12,7 @@ import { FALLBACK_ATTRIBUTION_MODULES } from './industry-skills-ui';
 import { loadRagContext } from './rag';
 import {
   buildVerdictJsonSchema,
+  ensureAttributionModules,
   parseReportVerdictJson,
   unwrapModelJson,
   type ReportVerdict,
@@ -48,14 +49,15 @@ function modulesSystemRule(moduleDefs: AttributionModuleDef[]): string {
     return `9. modules 是「深度归因」的落库结论，必须按本行业维度组织，而不是复述指标卡。
    modules[].id 只能是：${ids}。
    modules[].title 必须与 id 对应，只能是：${titles}。
-   每个维度有原文数字证据时写一条；没有证据的维度不要输出。禁止使用 business、attribution、anomalies、history、peers。
-   每条 conclusion 必须含具体数字，建议不超过 40 字。空话、套话一律不要写，宁缺毋滥。
+   **必须为上述每一个 id 各写恰好 1 条**，禁止漏维、禁止整维留空、禁止使用 business、attribution、anomalies、history、peers。
+   每条 conclusion 结构：**先一句定性结论，再跟关键数字**（约 50～90 字，须含数字）。正常人先看结论，再用数据验证。
+   某维原文未单独披露时：写「未单独披露××」，并就近改用已披露的营收/毛利/存货/Capex/销量/ASP/地区/费用/现金流等数字作支撑，禁止只写「暂无」或空话。
 ${lines}
-   没有把握的模块不要输出。没有可写的模块时 modules 返回 []。`;
+   modules 数组长度应等于维度数（${moduleDefs.length}）。`;
   }
-  return `9. modules 是「深度归因」的落库结论，用来解释营收、利润、异常指标为什么变动，而不是复述指标卡。id 只能是 business、attribution、anomalies、history、peers。每条 conclusion 必须含具体数字，建议不超过 40 字。空话、套话、没有数字的定性一律不要写，宁缺毋滥。
-${lines}
-   没有把握的模块不要输出。没有可写的模块时 modules 返回 []。`;
+  return `9. modules 是「深度归因」的落库结论，用来解释营收、利润、异常指标为什么变动，而不是复述指标卡。id 只能是 business、attribution、anomalies、history、peers。
+   **尽量为这五个 id 各写 1 条**；每条 conclusion 先一句结论再跟数字（约 50～90 字，须含数字）。某维证据不足时写「未单独披露××」并改用邻近已披露指标数字，禁止整维留空。
+${lines}`;
 }
 
 function buildSystemPrompt(moduleDefs: AttributionModuleDef[]): string {
@@ -74,8 +76,8 @@ function verdictUserPrompt(
   const industryMode = !isFallbackModuleDefs(moduleDefs);
   const schema = buildVerdictJsonSchema(industryMode ? moduleDefs : null);
   const moduleHint = industryMode
-    ? `modules（0～${moduleDefs.length} 条；深度归因按行业维度 ${moduleDefs.map((m) => m.title).join('/')}；id/title 必须与 Schema 枚举一致；没有数字证据的维度不要写）`
-    : 'modules（0～5 条；这是深度归因，要解释变动原因，没有数字证据的模块不要写）';
+    ? `modules（必须 ${moduleDefs.length} 条，每个维度一条；深度归因按行业维度 ${moduleDefs.map((m) => m.title).join('/')}；id/title 必须与 Schema 枚举一致；每条先结论后数字；未披露维写「未单独披露」并改用邻近数字）`
+    : 'modules（尽量 5 条；深度归因，每条先结论后数字；证据不足也要写未披露+邻近数字，不要整维留空）';
   return `请生成当前财报的 AI 速判 JSON。
 
 结构化数据（含已计算同比，不要重新计算核心指标）：
@@ -407,10 +409,18 @@ export async function generateReportVerdict(
   const moduleDefs = skillModules?.length ? skillModules : FALLBACK_ATTRIBUTION_MODULES;
   const systemPrompt = buildSystemPrompt(moduleDefs);
   const systemContent = skillAppend ? `${systemPrompt}\n\n${skillAppend}` : systemPrompt;
-  return completeJson([
+  const result = await completeJson([
     { role: 'system', content: systemContent },
     { role: 'user', content: verdictUserPrompt(context.structuredContext, context.passages, context.evidence.map((item) => item.id), moduleDefs) },
   ], context.evidence, options);
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    value: ensureAttributionModules(result.value, moduleDefs, {
+      structuredContext: context.structuredContext,
+      evidence: context.evidence,
+    }),
+  };
 }
 
 async function resolveReportIndustry(reportId: string): Promise<string | null> {

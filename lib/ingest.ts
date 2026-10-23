@@ -86,11 +86,16 @@ export function companyFieldsFromSeedReport(item: {
   rank?: number;
 }) {
   const fromPool = companyByCode.get(item.code);
+  const poolIndustry = fromPool?.industry?.trim();
+  // Monitor-pool labels (半导体/面板/…) beat coarse seed-reports tags like 「电子」.
+  const industry = (poolIndustry && poolIndustry !== '待分类')
+    ? poolIndustry
+    : (item.industry || poolIndustry || '待分类');
   return {
     code: item.code,
     name: item.company_name || fromPool?.name || item.code,
     exchange: fromPool?.exchange ?? exchangeFromCode(item.code),
-    industry: item.industry || fromPool?.industry || '待分类',
+    industry,
     rank: item.rank ?? fromPool?.rank ?? 999,
     weight: fromPool?.weight ?? 60,
   };

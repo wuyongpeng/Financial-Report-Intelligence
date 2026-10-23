@@ -54,7 +54,15 @@ for (const item of seedAll as SkillLite[]) {
   if (item?.industry) skillByIndustry.set(item.industry, item);
 }
 
-/** Exact match, then longest skill name contained in / containing the label. */
+/**
+ * Exact match, then longest skill name contained in the label
+ * (e.g. 半导体及元件 → 半导体). Reverse match (skill contains label)
+ * is only for non-broad labels so 「电子」 does not become 「消费电子」.
+ */
+const BROAD_INDUSTRY_FRAGMENTS = new Set([
+  '电子', '计算机', '通信', '汽车', '机械', '建筑', '电力', '金融', '医药', '生物', '化工', '材料',
+]);
+
 export function resolveIndustrySkillKey(industry: string | null | undefined): string | null {
   if (!industry || industry === '待分类') return null;
   const trimmed = industry.trim();
@@ -62,7 +70,14 @@ export function resolveIndustrySkillKey(industry: string | null | undefined): st
   if (skillByIndustry.has(trimmed)) return trimmed;
   let best: string | null = null;
   for (const key of skillByIndustry.keys()) {
-    if (trimmed.includes(key) || key.includes(trimmed)) {
+    if (trimmed.includes(key)) {
+      if (!best || key.length > best.length) best = key;
+    }
+  }
+  if (best) return best;
+  if (BROAD_INDUSTRY_FRAGMENTS.has(trimmed) || trimmed.length < 3) return null;
+  for (const key of skillByIndustry.keys()) {
+    if (key.includes(trimmed)) {
       if (!best || key.length > best.length) best = key;
     }
   }

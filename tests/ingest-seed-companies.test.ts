@@ -76,3 +76,19 @@ test('isAnnouncementCodeForeignKeyError matches Postgres 23503 on announcements_
   );
   assert.equal(isAnnouncementCodeForeignKeyError(new Error('network down')), false);
 });
+
+
+test('companyFieldsFromSeedReport prefers monitor-pool industry over coarse seed-reports tag', () => {
+  const smic = companyFieldsFromSeedReport({
+    code: '688981',
+    company_name: '中芯国际',
+    industry: '电子',
+  });
+  assert.equal(smic.industry, '半导体');
+  const luxshare = companyFieldsFromSeedReport({
+    code: '002475',
+    company_name: '立讯精密',
+    industry: '电子',
+  });
+  assert.equal(luxshare.industry, '消费电子');
+});

@@ -70,6 +70,17 @@ docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select sta
 
 如果某个公开源短暂限流或变更格式，Worker 会保留失败原因并继续处理其他源；不要通过提高频率或伪造浏览器特征来规避限制。生产时先将域名 A/AAAA 记录指向 VM，再在 `.env` 设置 `DOMAIN=你的域名`、`COOKIE_SECURE=true`，执行 `docker compose up -d`；Caddy 会自动申请并续期 HTTPS 证书。以 IP + HTTP 做内网验证时可设置 `COOKIE_SECURE=false`，但不应作为公网正式环境的配置。可选设置 `ALERT_WEBHOOK_URL` 接收任务或数据源失败告警。
 
+
+## 行业标签纠偏（可选）
+
+监控池以 `data/companies.json` 的二级行业为准（如中芯国际 `688981` → `半导体`）。若库里仍是粗标签「电子」导致深度归因徽章错成「消费电子视角」，可在 VM 上执行：
+
+```bash
+docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "UPDATE companies SET industry='半导体', updated_at=NOW() WHERE code='688981';"
+```
+
+然后对该公司最新报告 **重新智析**。Worker / `bootstrapLiveData` 也会在下次种子同步时用监控池行业覆盖粗标签。
+
 ## 后续平移边界
 
 应用只有两处基础设施适配：`lib/db.ts`（PostgreSQL 连接）和 `lib/storage.ts`（本地文件系统）。迁移到公司 PostgreSQL 与 S3 时替换这些适配层、迁移数据目录即可；采集、解析、API 和页面不需要重写。

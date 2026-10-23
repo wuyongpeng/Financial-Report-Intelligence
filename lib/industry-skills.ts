@@ -81,7 +81,7 @@ export function resetIndustrySkillCache() {
   skillCache = null;
 }
 
-/** Exact, then longest skill industry contained in / containing the label. */
+/** Exact, then longest skill contained in the label; reverse match skips broad fragments. */
 export function resolveIndustrySkillKey(industry: string | null | undefined): string | null {
   if (!industry || industry === '待分类') return null;
   const trimmed = industry.trim();
@@ -90,12 +90,15 @@ export function resolveIndustrySkillKey(industry: string | null | undefined): st
   if (skills.has(trimmed)) return trimmed;
   let best: string | null = null;
   for (const key of skills.keys()) {
-    if (trimmed.includes(key) || key.includes(trimmed)) {
+    if (trimmed.includes(key)) {
       if (!best || key.length > best.length) best = key;
     }
   }
-  // Seed map may still resolve when disk is empty of a renamed skill
-  return best ?? resolveIndustrySkillKeyFromSeed(industry);
+  if (best) return best;
+  // Prefer seed resolver (same broad-fragment guard) before reverse contains.
+  const fromSeed = resolveIndustrySkillKeyFromSeed(industry);
+  if (fromSeed) return fromSeed;
+  return null;
 }
 
 export function getIndustrySkill(industry: string | null | undefined): IndustrySkill | null {

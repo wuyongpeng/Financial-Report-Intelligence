@@ -1649,7 +1649,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                     <div>
                       <h3>{label}{headline.text ? <span className="cd-module-lead">{headline.text}</span> : null}</h3>
                       {headline.sourceRef.length > 0 && <div className="cd-module-cites">{headline.sourceRef.map((c, i) => citationLink(c, `${id}-${i}`))}</div>}
-                      {!headline.text && <p className="cd-module-empty">暂无可靠结论</p>}
+                      {!headline.text && <p className="cd-module-empty">本期该维度披露有限</p>}
                     </div>
                   </div>
                 ) : (
@@ -1679,7 +1679,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                     </div>
                     {open && <div className="cd-module-content" id={`cd-content-${id}`}>
                       {headline.sourceRef.length > 0 && <div className="cd-module-cites">{headline.sourceRef.map((c, i) => citationLink(c, `${id}-${i}`))}</div>}
-                      {!hasBody && !headline.text && <p className="cd-module-empty">暂无可靠结论</p>}
+                      {!hasBody && !headline.text && <p className="cd-module-empty">本期该维度披露有限</p>}
                       {!industryDepthMode && id==='history' && history.length >= 2 && <div className="cd-table-scroll"><table><thead><tr><th>报告期</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{history.map(r=><tr key={r.id}><th><button onClick={()=>selectReport(r)}>{period(r)}</button></th>{metricNames.map(m=><td key={m}>{format(value(r,m),m)}</td>)}</tr>)}</tbody></table></div>}
                       {!industryDepthMode && id==='peers' && peerCodes.length > 0 && <><p className="cd-note">仅比较 {period(selected)} 同类型已入库报告，不是完整行业排名。</p><div className="cd-table-scroll"><table><thead><tr><th>公司</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{peerCodes.map(code=><tr key={code} className={code===selected.code?'cd-self':''}><th>{peers.find(p=>p.code===code)?.company_name}{code===selected.code?' · 本公司':''}</th>{metricNames.map(m=><td key={m}>{format(peers.find(p=>p.code===code&&p.metric===m)?.value,m)}</td>)}</tr>)}</tbody></table></div></>}
                     </div>}

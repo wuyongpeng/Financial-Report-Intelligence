@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acceptVerdictPayload, followupFromTitle, followupQuestions, parseReportVerdict, parseReportVerdictJson, targetedFollowups, unwrapModelJson, verdictTone, type ReportVerdict } from '../lib/report-verdict';
+import { acceptVerdictPayload, ensureAttributionModules, followupFromTitle, followupQuestions, parseReportVerdict, parseReportVerdictJson, targetedFollowups, unwrapModelJson, verdictTone, type ReportVerdict } from '../lib/report-verdict';
 import type { Citation } from '../lib/detail-model';
 
 const evidence: Citation[] = [
@@ -199,4 +199,61 @@ test('industry follow-ups use module titles', () => {
     targetedFollowups([], [{ id: 'volume', title: '量' }, { id: 'price', title: '价' }])[0],
     '本期「量」有哪些值得关注的变化？请引用原文。',
   );
+});
+
+
+test('keeps industry modules without explicit sourceRef when numbers exist', () => {
+  const raw = {
+    verdict: { label: '稳健增长', summary: '量价齐升。' },
+    changes: [],
+    modules: [
+      { id: 'structure', title: '结构', conclusion: '未单独披露产品结构，改用晶圆销量同比增14.9%。', sourceRef: [] },
+    ],
+  };
+  const parsed = parseReportVerdict(raw, evidence);
+  assert.ok(parsed);
+  assert.equal(parsed!.modules.length, 1);
+  assert.equal(parsed!.modules[0].id, 'structure');
+  assert.ok(parsed!.modules[0].sourceRef.length >= 1);
+});
+
+test('ensureAttributionModules fills every required industry dimension', () => {
+  const partial: ReportVerdict = {
+    verdict: { label: '稳健增长', summary: '盈利改善。' },
+    changes: [],
+    modules: [
+      { id: 'revenue_margin', title: '收入与毛利', conclusion: '营收386亿元同比增19.4%，毛利率23.2%。', sourceRef: [evidence[0]] },
+    ],
+  };
+  const filled = ensureAttributionModules(
+    partial,
+    [
+      { id: 'revenue_margin', title: '收入与毛利', hint: '' },
+      { id: 'structure', title: '结构', hint: '' },
+      { id: 'inventory_receivable', title: '存货与应收', hint: '' },
+      { id: 'expenses', title: '费用与现金流', hint: '' },
+      { id: 'd5', title: '季节性与新品节奏线索', hint: '' },
+    ],
+    {
+      structuredContext: [
+        '当前报告：中芯国际（688981），2026H1，行业 半导体。',
+        '营业收入：386.35亿元（同比 +19.4%）【E1】',
+        '毛利率：23.2%（同比 +1.3个百分点）',
+        '存货：120亿元',
+        '经营现金流净额：207.60亿元（同比 +252.0%）',
+        '晶圆销量：537.9万片（同比 +14.9%）',
+      ].join('\n'),
+      evidence,
+    },
+  );
+  assert.equal(filled.modules.length, 5);
+  assert.deepEqual(filled.modules.map((m) => m.id), [
+    'revenue_margin', 'structure', 'inventory_receivable', 'expenses', 'd5',
+  ]);
+  for (const row of filled.modules) {
+    assert.ok(row.conclusion);
+    assert.match(row.conclusion, /\d/);
+    assert.ok(row.title);
+  }
+  assert.match(filled.modules.find((m) => m.id === 'structure')!.conclusion, /未单独披露|结构|营收|销量/);
 });

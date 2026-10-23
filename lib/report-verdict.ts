@@ -193,6 +193,22 @@ function hasConcreteNumber(text: string) {
   return /\d/.test(text);
 }
 
+function bestEffortEvidence(conclusion: string, evidence: Citation[]): Citation[] {
+  if (!evidence.length) return [];
+  const digits = conclusion.match(/\d+(?:\.\d+)?%?/g) ?? [];
+  for (const dig of digits) {
+    const hit = evidence.find((entry) => entry.quote.includes(dig));
+    if (hit) return [hit];
+  }
+  const keywords = ['营收', '收入', '毛利', '存货', '应收', '现金流', '销量', '售价', 'ASP', '费用', '研发', '地区', '产品'];
+  for (const key of keywords) {
+    if (!conclusion.includes(key)) continue;
+    const hit = evidence.find((entry) => entry.quote.includes(key));
+    if (hit) return [hit];
+  }
+  return [evidence[0]];
+}
+
 function parseModule(raw: unknown, evidence: Citation[], seen: Set<string>): ModuleConclusion | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const row = raw as Record<string, unknown>;
@@ -202,7 +218,9 @@ function parseModule(raw: unknown, evidence: Citation[], seen: Set<string>): Mod
   const fallback = isFallbackModuleId(id);
   const industry = Boolean(title) && isIndustryModuleId(id);
   if ((!fallback && !industry) || seen.has(id) || !conclusion || !hasConcreteNumber(conclusion)) return null;
-  const sourceRef = resolveSourceRef(row.sourceRef, evidence);
+  let sourceRef = resolveSourceRef(row.sourceRef, evidence);
+  // Prefer fill over empty UI: keep numeric conclusions even when the model omitted citations.
+  if (!sourceRef.length) sourceRef = bestEffortEvidence(conclusion, evidence);
   if (!sourceRef.length) return null;
   seen.add(id);
   const out: ModuleConclusion = { id, conclusion, sourceRef };
@@ -309,6 +327,93 @@ export function acceptVerdictPayload(raw: unknown): ReportVerdict | null {
   const changes = (Array.isArray(payload.changes) ? payload.changes : []).map((row) => hydrateSourceRef(row, evidence));
   const modules = (Array.isArray(payload.modules) ? payload.modules : []).map((row) => hydrateSourceRef(row, evidence));
   return parseReportVerdict({ verdict: payload.verdict, changes, modules }, evidence);
+}
+
+
+const MODULE_PIVOT_KEYWORDS: Record<string, string[]> = {
+  volume: ['销量', '晶圆', '出货', '营收', '营业收入'],
+  price: ['平均售价', 'ASP', '售价', '单价', '毛利率'],
+  structure: ['地区', '产品', '分部', '结构', '占比', '应用', '尺寸', '营收', '营业收入'],
+  gross_margin: ['毛利率', '毛利', '营收', '营业收入'],
+  inventory_capex: ['存货', '跌价', '购建固定资产', '资本开支', '投资活动'],
+  revenue_margin: ['营业收入', '营收', '毛利率', '毛利'],
+  inventory_receivable: ['存货', '应收', '应收账款', '经营现金流'],
+  expenses: ['管理费用', '研发费用', '销售费用', '费用', '经营现金流', '现金流'],
+  d5: ['销量', '售价', '新品', '季节', '产品组合', '营收', '营业收入'],
+  business: ['营收', '营业收入', '分部', '产品', '地区'],
+  attribution: ['净利润', '归母', '净利'],
+  anomalies: ['同比', '异常', '大幅'],
+  history: ['同比', '营收', '净利润'],
+  peers: ['同行', '行业', 'ROE'],
+};
+
+function contextLinesWithNumbers(structuredContext: string): string[] {
+  return structuredContext
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length > 8 && /\d/.test(line));
+}
+
+function pickContextSnippet(structuredContext: string, keywords: string[]): string {
+  const lines = contextLinesWithNumbers(structuredContext);
+  for (const key of keywords) {
+    const hit = lines.find((line) => line.includes(key));
+    if (hit) {
+      // Drop trailing evidence tags like 【E1】 for cleaner prose.
+      return hit.replace(/【E\d+】/g, '').replace(/（来自本份财报同比增减列）/g, '').trim().slice(0, 120);
+    }
+  }
+  return lines[0]?.replace(/【E\d+】/g, '').trim().slice(0, 120) ?? '';
+}
+
+function synthesizeModuleConclusion(
+  def: AttributionModuleDef,
+  structuredContext: string,
+): string | null {
+  const keywords = MODULE_PIVOT_KEYWORDS[def.id]
+    ?? MODULE_PIVOT_KEYWORDS[def.title]
+    ?? [def.title, '营收', '营业收入', '毛利率'];
+  const snippet = pickContextSnippet(structuredContext, keywords);
+  if (!snippet || !hasConcreteNumber(snippet)) return null;
+  const disclosed = keywords.some((key) => snippet.includes(key));
+  if (disclosed) {
+    return `${def.title}方面可核验指标显示经营节奏需结合下列数字理解：${snippet}`;
+  }
+  return `未单独披露「${def.title}」明细，改用邻近已披露指标：${snippet}`;
+}
+
+/**
+ * Ensure every required industry (or fallback) module has a conclusion.
+ * Missing LLM rows are filled from structured metrics / context with best-effort citations.
+ */
+export function ensureAttributionModules(
+  verdict: ReportVerdict,
+  moduleDefs: AttributionModuleDef[],
+  opts: { structuredContext: string; evidence: Citation[] },
+): ReportVerdict {
+  if (!moduleDefs.length) return verdict;
+  const byId = new Map(verdict.modules.map((row) => [row.id, row]));
+  const ordered: ModuleConclusion[] = [];
+  for (const def of moduleDefs) {
+    const existing = byId.get(def.id);
+    if (existing?.conclusion && hasConcreteNumber(existing.conclusion)) {
+      ordered.push({
+        ...existing,
+        title: existing.title || def.title,
+        sourceRef: existing.sourceRef.length ? existing.sourceRef : bestEffortEvidence(existing.conclusion, opts.evidence),
+      });
+      continue;
+    }
+    const conclusion = synthesizeModuleConclusion(def, opts.structuredContext);
+    if (!conclusion) continue;
+    ordered.push({
+      id: def.id,
+      title: def.title,
+      conclusion,
+      sourceRef: bestEffortEvidence(conclusion, opts.evidence),
+    });
+  }
+  return { ...verdict, modules: ordered.slice(0, MAX_MODULES) };
 }
 
 export function followupFromTitle(title: string) {
