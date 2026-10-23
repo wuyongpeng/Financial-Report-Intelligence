@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { anomaliesConclusion, attributionConclusion, change, comparableHistory, sequentialHistory, historyConclusion, keyFindings, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodConclusion, priorYear, profitBridge, resolveMetricPrior, sourceRange, type Report } from '../lib/detail-model';
+import { anomaliesConclusion, attributionConclusion, change, comparableHistory, sequentialHistory, historyConclusion, keyFindings, metricYoyDetail, metricYoyHoverDetail, moduleForQuestion, peersConclusion, period, periodConclusion, priorYear, profitBridge, resolveMetricPrior, sourceRange, type Report } from '../lib/detail-model';
 import { describeYoy, resolveYoy } from '../lib/crawl-display';
 import { rankEvidence, unsupportedYears } from '../lib/chat-evidence';
 function report(id: string, period: string, value: number, type='annual', published='2026-04-01'): Report { return { id, code:'1',company_name:'测试',title:period,report_type:type,published_at:published,parsed_at:published,industry:'测试',status:'online',metrics:[{metric:'revenue',value,unit:'元',source_page:2,source_label:'营业收入',confidence:1,verified:1,period}] }; }
@@ -200,4 +200,20 @@ test('resolveMetricPrior prefers disclosed, then cross, then implied from YoY %'
   assert.equal(resolveMetricPrior(110, { disclosedYoyPct: 10, crossReportPrior: 90 }), 90);
   const implied = resolveMetricPrior(110, { disclosedYoyPct: 10 });
   assert.ok(implied !== undefined && Math.abs(implied! - 100) < 1e-9);
+});
+
+test('metricYoyHoverDetail matches card tooltip and skips without prior', () => {
+  assert.equal(
+    metricYoyHoverDetail('revenue', 121_089_000_000, {
+      disclosedPrior: 124_847_000_000,
+      disclosedYoyPct: -3.01,
+    }),
+    '本期 1,210.89 亿，上年同期 1,248.47 亿，变动 -37.58 亿',
+  );
+  assert.equal(
+    metricYoyHoverDetail('revenue', 121_089_000_000, { disclosedYoyPct: -3.01 }),
+    metricYoyDetail('revenue', 121_089_000_000, resolveMetricPrior(121_089_000_000, { disclosedYoyPct: -3.01 })),
+  );
+  assert.equal(metricYoyHoverDetail('eps', 0.58, {}), undefined);
+  assert.equal(metricYoyHoverDetail('net_profit', undefined, { disclosedPrior: 1 }), undefined);
 });

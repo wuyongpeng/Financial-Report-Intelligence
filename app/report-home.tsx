@@ -33,7 +33,7 @@ import {
   pickBestReport,
   type ParsedPeriod,
 } from '@/lib/home-search';
-import type { Report } from '@/lib/detail-model';
+import { metricYoyHoverDetail, type Report } from '@/lib/detail-model';
 import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
@@ -124,32 +124,33 @@ function metricResolvedYoy(metric: NonNullable<ReturnType<typeof metricByName>>)
   });
 }
 
-function primaryYoy(item: CrawlCompanyCoverage) {
+function metricYoyHoverTitle(metric: NonNullable<ReturnType<typeof metricByName>>) {
+  return metricYoyHoverDetail(metric.metric, metric.value, {
+    disclosedPrior: metric.disclosedPrior,
+    disclosedYoyPct: metric.disclosedYoyPct,
+    crossReportPrior: metric.prior,
+  });
+}
+
+function primaryYoyMetric(item: CrawlCompanyCoverage) {
   const revenue = metricByName(item, 'revenue');
-  if (revenue) {
-    const yoy = metricResolvedYoy(revenue);
-    if (yoy && !yoy.naPercent && yoy.pct !== undefined) return yoy.pct;
-  }
+  if (revenue && metricResolvedYoy(revenue)) return revenue;
   const profit = metricByName(item, 'net_profit');
-  if (profit) {
-    const yoy = metricResolvedYoy(profit);
-    if (yoy && !yoy.naPercent && yoy.pct !== undefined) return yoy.pct;
-  }
+  if (profit && metricResolvedYoy(profit)) return profit;
+  return undefined;
+}
+
+function primaryYoy(item: CrawlCompanyCoverage) {
+  const metric = primaryYoyMetric(item);
+  if (!metric) return undefined;
+  const yoy = metricResolvedYoy(metric);
+  if (yoy && !yoy.naPercent && yoy.pct !== undefined) return yoy.pct;
   return undefined;
 }
 
 function primaryYoyDesc(item: CrawlCompanyCoverage) {
-  const revenue = metricByName(item, 'revenue');
-  if (revenue) {
-    const yoy = metricResolvedYoy(revenue);
-    if (yoy) return yoy;
-  }
-  const profit = metricByName(item, 'net_profit');
-  if (profit) {
-    const yoy = metricResolvedYoy(profit);
-    if (yoy) return yoy;
-  }
-  return undefined;
+  const metric = primaryYoyMetric(item);
+  return metric ? metricResolvedYoy(metric) : undefined;
 }
 
 function readStoredView(): ViewMode {
@@ -902,10 +903,17 @@ export default function ReportHome() {
                       <td>{eps ? formatMetricValue('eps', eps.value) : '—'}</td>
                       <td>
                         {(() => {
-                          const desc = primaryYoyDesc(item);
+                          const metric = primaryYoyMetric(item);
+                          if (!metric) return '—';
+                          const desc = metricResolvedYoy(metric);
                           if (!desc) return '—';
                           const cls = yoyClass(desc);
-                          return cls ? <span className={cls}>{deltaLabel(desc)}</span> : <span>{deltaLabel(desc)}</span>;
+                          const hover = metricYoyHoverTitle(metric);
+                          return cls ? (
+                            <span className={cls} title={hover}>{deltaLabel(desc)}</span>
+                          ) : (
+                            <span title={hover}>{deltaLabel(desc)}</span>
+                          );
                         })()}
                       </td>
                       <td>{freshnessLabel(item.lastCrawlAt)}</td>
@@ -1040,7 +1048,7 @@ export default function ReportHome() {
                             ) : (
                               <small
                                 className={tone === 'up' ? 'rh-ashare-up' : tone === 'down' ? 'rh-ashare-down' : undefined}
-                                title={yoy.label}
+                                title={metricYoyHoverTitle(metric)}
                               >
                                 {tone === 'up' ? <Icon name="arrowUp" size={10} /> : null}
                                 {tone === 'down' ? <Icon name="arrowDown" size={10} /> : null}

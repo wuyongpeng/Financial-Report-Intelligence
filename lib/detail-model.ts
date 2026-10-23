@@ -155,6 +155,17 @@ export function resolveMetricPrior(
   return undefined;
 }
 
+/** Home/detail native `title` for YoY: same 本期/上年同期/变动 line as metric cards. */
+export function metricYoyHoverDetail(
+  metric: MetricName,
+  current: number | undefined,
+  opts: { disclosedPrior?: number | null; disclosedYoyPct?: number | null; crossReportPrior?: number | null },
+): string | undefined {
+  if (current === undefined || !Number.isFinite(current)) return undefined;
+  const prior = resolveMetricPrior(current, opts);
+  return metricYoyDetail(metric, current, prior, prior !== undefined ? current - prior : undefined);
+}
+
 // Findings are ranked restatements of parsed numbers, never new claims. Anything
 // that needs a missing input is simply not produced.
 export function keyFindings(reports: Report[], selected: Report): Finding[] {
