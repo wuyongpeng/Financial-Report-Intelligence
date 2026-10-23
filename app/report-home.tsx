@@ -37,6 +37,8 @@ import { metricYoyHoverDetail, type Report } from '@/lib/detail-model';
 import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
+import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
+import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
@@ -242,6 +244,10 @@ export default function ReportHome() {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [placeholders, setPlaceholders] = useState<string[]>(DEFAULT_HOME_PLACEHOLDERS);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
+  const [personalizedQuestions, setPersonalizedQuestions] = useState<string[]>([]);
+  const [showPersonalizedHint, setShowPersonalizedHint] = useState(false);
+  const coverageRef = useRef(coverage);
+  coverageRef.current = coverage;
 
   const coveragePlaceholderKey = useMemo(
     () => coverage.map((item) => `${item.code}:${item.reportPeriod ?? ''}`).sort().join('|'),
@@ -250,7 +256,10 @@ export default function ReportHome() {
   const [placeholderKey, setPlaceholderKey] = useState(coveragePlaceholderKey);
   if (coveragePlaceholderKey !== placeholderKey) {
     setPlaceholderKey(coveragePlaceholderKey);
-    setPlaceholders(buildHomePlaceholders(coverageToPlaceholderSeeds(coverage)));
+    setPlaceholders(prependPersonalizedPlaceholders(
+      personalizedQuestions,
+      buildHomePlaceholders(coverageToPlaceholderSeeds(coverage)),
+    ));
     setPlaceholderIndex(0);
   }
 
@@ -301,6 +310,33 @@ export default function ReportHome() {
     const timer = window.setTimeout(() => setWaitToast(null), 3200);
     return () => window.clearTimeout(timer);
   }, [waitToast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await ensureGuestCookie();
+      try {
+        const response = await fetch('/api/home/prompts', {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        if (!response.ok || cancelled) return;
+        const payload = await response.json() as { questions?: string[] };
+        const questions = Array.isArray(payload.questions)
+          ? payload.questions.filter((q): q is string => typeof q === 'string' && Boolean(q.trim()))
+          : [];
+        if (!questions.length || cancelled) return;
+        setPersonalizedQuestions(questions);
+        setShowPersonalizedHint(true);
+        const base = buildHomePlaceholders(coverageToPlaceholderSeeds(coverageRef.current));
+        setPlaceholders(prependPersonalizedPlaceholders(questions, base));
+        setPlaceholderIndex(0);
+      } catch {
+        /* guest mint / prompts optional for first paint */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const joinDialogKey = dialog?.kind === 'unrecognized' ? `${dialog.suggestedCode ?? ''}|${dialog.query}` : '';
   const [joinSyncedKey, setJoinSyncedKey] = useState(joinDialogKey);
@@ -466,10 +502,53 @@ export default function ReportHome() {
     router.push(url);
   }
 
-  async function onSearchSubmit(override?: string) {
+  function industryPeers(company: CrawlCompanyCoverage) {
+    return coverage
+      .filter((item) => item.code !== company.code
+        && item.industryGroup
+        && item.industryGroup === company.industryGroup
+        && item.name)
+      .slice(0, 6)
+      .map((item) => ({ code: item.code, name: item.name }));
+  }
+
+  /** Fire-and-forget: only for typed active asks, persist personalized home prompts. */
+  function rememberActiveAsk(question: string, company: CrawlCompanyCoverage) {
+    void (async () => {
+      try {
+        await ensureGuestCookie();
+        const response = await fetch('/api/home/prompts', {
+          method: 'POST',
+          credentials: 'same-origin',
+          keepalive: true,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            question,
+            companyCode: company.code,
+            companyName: company.name,
+            industryGroup: company.industryGroup,
+            peers: industryPeers(company),
+          }),
+        });
+        if (!response.ok) return;
+        const payload = await response.json() as { questions?: string[] };
+        const questions = Array.isArray(payload.questions)
+          ? payload.questions.filter((q): q is string => typeof q === 'string' && Boolean(q.trim()))
+          : [];
+        if (!questions.length) return;
+        setPersonalizedQuestions(questions);
+        setShowPersonalizedHint(true);
+      } catch {
+        /* personalization must not block navigation */
+      }
+    })();
+  }
+
+  async function onSearchSubmit(override?: string, opts?: { fromPlaceholder?: boolean }) {
     const raw = (override ?? search).trim();
     if (!raw || submitting) return;
     const parsed = parseHomeQuery(raw);
+    const isActiveTypedAsk = Boolean(parsed.hasQuestionIntent && !opts?.fromPlaceholder && search.trim());
 
     // Pure 6-digit code without question → open, join if listed, or offer code-join dialog
     if (/^\d{6}$/.test(raw) && !parsed.hasQuestionIntent) {
@@ -520,6 +599,7 @@ export default function ReportHome() {
         setDialog({ kind: 'missing-company', listed, query: raw });
         return;
       }
+      if (isActiveTypedAsk) rememberActiveAsk(raw, company);
       await navigateWithAsk(company, raw, parsed.period);
     } finally {
       setSubmitting(false);
@@ -725,9 +805,13 @@ export default function ReportHome() {
           aria-label={search.trim() ? '搜索' : '用当前示例提问'}
           title={search.trim() ? '搜索' : '发送示例问题'}
           onClick={() => {
-            const q = search.trim() || activePlaceholder;
-            if (!search.trim()) setSearch(q);
-            void onSearchSubmit(q);
+            if (!search.trim()) {
+              const q = activePlaceholder;
+              setSearch(q);
+              void onSearchSubmit(q, { fromPlaceholder: true });
+              return;
+            }
+            void onSearchSubmit(search.trim());
           }}
         >
           {submitting ? (
@@ -739,6 +823,11 @@ export default function ReportHome() {
           )}
         </button>
       </form>
+      {showPersonalizedHint ? (
+        <p className="rh-search-hint" role="status">已按你最近的提问定制示例</p>
+      ) : (
+        <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
+      )}
 
       {source === 'crawl-mock' && (
         <div className="rh-mock-banner" role="status">

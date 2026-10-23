@@ -52,5 +52,13 @@ async function migrate() {
     await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS prior_value DOUBLE PRECISION`;
     await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS yoy_pct DOUBLE PRECISION`;
     await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS yoy_source TEXT`;
+    await tx`CREATE TABLE IF NOT EXISTS guest_home_prompts (
+      owner_key TEXT PRIMARY KEY,
+      source_question TEXT NOT NULL,
+      questions JSONB NOT NULL,
+      industry TEXT,
+      company_code TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
   });
 }
