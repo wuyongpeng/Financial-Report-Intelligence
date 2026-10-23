@@ -290,6 +290,33 @@ export async function recoverStaleRuns() {
     WHERE status='parsing'
       AND updated_at < NOW() - INTERVAL '5 minutes'
   `;
+  // 并发超额：保留最新/有进度的 parseLimit 条，其余退回排队解析（修复批量 immediate 打满）
+  const parseLimit = getIngestSettings().parseLimit;
+  const liveParseIds = listIngestProgress()
+    .filter((item) => item.phase === 'parse')
+    .map((item) => item.id);
+  const reclaimed = await db<Array<{ id: string }>>`
+    WITH ranked AS (
+      SELECT id,
+        ROW_NUMBER() OVER (
+          ORDER BY
+            CASE WHEN id = ANY(${liveParseIds}::text[]) THEN 0 ELSE 1 END,
+            updated_at DESC
+        ) AS rn
+      FROM announcements
+      WHERE status = 'parsing'
+    )
+    UPDATE announcements a
+    SET status = 'downloaded',
+        parse_priority = 0,
+        parse_error = '并发超额，已退回排队解析',
+        updated_at = NOW()
+    FROM ranked r
+    WHERE a.id = r.id
+      AND r.rn > ${parseLimit}
+    RETURNING a.id
+  `;
+  for (const row of reclaimed) clearIngestProgress(row.id);
   // 体积搁置改为抽前 120 页重试，不再永久占「排队解析」
   await db`
     UPDATE announcements

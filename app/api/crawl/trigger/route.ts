@@ -23,6 +23,16 @@ function sanitizeCodes(raw: unknown): string[] {
     .slice(0, 10);
 }
 
+/** immediate / 单份重解析最多 10；queueOnly 批量入队可到 200。 */
+export function sanitizeAnnouncementIds(raw: unknown, limit: number): string[] {
+  const max = Math.max(1, Math.min(500, Math.floor(limit) || 10));
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    .map((id) => id.trim())
+    .slice(0, max);
+}
+
 export async function POST(request: Request) {
   const auth = authorized(request);
   if (!auth) return Response.json({ error: 'Unauthorized' }, { status: 401 });
@@ -39,9 +49,11 @@ export async function POST(request: Request) {
   const periods = Array.isArray(body.periods)
     ? body.periods.filter((p): p is string => typeof p === 'string' && /^20\d{2}(FY|H1|Q[1-3])$/i.test(p)).map((p) => p.toUpperCase()).slice(0, 8)
     : [];
-  const announcementIds = Array.isArray(body.announcementIds)
-    ? body.announcementIds.filter((id): id is string => typeof id === 'string' && id.length > 0).slice(0, 10)
-    : [];
+  const queueOnly = body.queueOnly === true;
+  const announcementIds = sanitizeAnnouncementIds(
+    body.announcementIds,
+    queueOnly ? 200 : 10,
+  );
   const control = await getIngestControl();
   const settings = getIngestSettings();
   const autoOn = control.autoCrawlEnabled;
@@ -92,9 +104,9 @@ export async function POST(request: Request) {
     }
 
     // Crawl-page manual parse with concrete announcement ids: run now (re-parse wrong metrics).
-    // Idle enqueue remains available via body.queueOnly === true for non-urgent bulk.
+    // Idle enqueue remains available via queueOnly for non-urgent bulk.
     if (parseOnly && (codes.length || announcementIds.length)) {
-      if (announcementIds.length && body.queueOnly !== true) {
+      if (announcementIds.length && !queueOnly) {
         const ids = announcementIds;
         after(async () => {
           try {
@@ -114,7 +126,7 @@ export async function POST(request: Request) {
           ok: true,
         }, { headers: { 'cache-control': 'no-store' } });
       }
-      if (announcementIds.length && body.queueOnly === true) {
+      if (announcementIds.length && queueOnly) {
         const queued = await enqueueParseFront(announcementIds);
         return Response.json({
           mode: 'parse-queue',
@@ -123,7 +135,7 @@ export async function POST(request: Request) {
           periods,
           announcementIds,
           queued,
-          note: queued ? `已插到解析队首 ${queued} 份，空闲时优先处理` : '没有可插队的已下载财报',
+          note: queued ? `已加入排队解析 ${queued} 份，将按并发上限领取` : '没有可入队的已下载财报',
           ok: true,
         }, { headers: { 'cache-control': 'no-store' } });
       }

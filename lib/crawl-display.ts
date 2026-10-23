@@ -376,6 +376,25 @@ export function canBatchParseFiling(row: { announcementId?: string | null; state
   return row.state === 'downloaded' || row.state === 'parsed' || row.state === 'parsed_partial' || row.state === 'failed';
 }
 
+/** Bulk 批量解析入队：每批最多这么多 announcementId（与 trigger queueOnly 上限一致）。 */
+export const BATCH_PARSE_QUEUE_CHUNK = 200;
+
+/** 构造批量解析请求体：只入队、不 immediate，避免 Promise.all 打满 parsing。 */
+export function buildBatchParseTriggerBodies(announcementIds: string[], chunkSize = BATCH_PARSE_QUEUE_CHUNK) {
+  const unique = [...new Set(announcementIds.map((id) => id.trim()).filter(Boolean))];
+  const size = Math.max(1, Math.floor(chunkSize) || BATCH_PARSE_QUEUE_CHUNK);
+  const bodies: Array<{ mode: 'parse'; parseOnly: true; queueOnly: true; announcementIds: string[] }> = [];
+  for (let i = 0; i < unique.length; i += size) {
+    bodies.push({
+      mode: 'parse',
+      parseOnly: true,
+      queueOnly: true,
+      announcementIds: unique.slice(i, i + size),
+    });
+  }
+  return bodies;
+}
+
 export function formatQueueLastError(raw: string | null | undefined) {
   if (!raw) return null;
   const text = raw.replace(/^Error:\s*/i, '').trim();

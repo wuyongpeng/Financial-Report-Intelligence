@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type AnimationEvent, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
+  buildBatchParseTriggerBodies,
   canBatchParseFiling,
   canFillVerdict,
   flattenCrawlFilings,
@@ -934,50 +935,64 @@ export default function CrawlOverview() {
     let done = 0;
     let failed = 0;
     try {
-      for (const item of jobs) {
-        try {
-          if (mode === 'verdict') {
-            await requestReportVerdict(
-              item.announcementId!,
-              item.verdictStatus === 'ready' ? { refresh: true } : { fill: true },
-            );
-          } else {
+      if (mode === 'parse') {
+        // 批量只入队：worker 按 parseLimit 领取，避免 Promise.all 把大量行标成 parsing
+        const ids = jobs.map((item) => item.announcementId).filter((id): id is string => Boolean(id));
+        const bodies = buildBatchParseTriggerBodies(ids);
+        for (const body of bodies) {
+          try {
             const response = await fetch('/api/crawl/trigger', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify(mode === 'crawl'
-                ? {
-                    mode: 'manual',
-                    codes: [item.code],
-                    fullHistory: false,
-                    periods: [item.period],
-                    ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
-                  }
-                : {
-                    mode: 'parse',
-                    codes: [item.code],
-                    parseOnly: true,
-                    periods: [item.period],
-                    immediate: Boolean(item.announcementId),
-                    ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
-                  }),
+              body: JSON.stringify(body),
             });
-            const payload = await response.json() as { ok?: boolean; error?: string };
+            const payload = await response.json() as { ok?: boolean; error?: string; queued?: number };
             if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
+            done += body.announcementIds.length;
+          } catch {
+            failed += body.announcementIds.length;
           }
-          done += 1;
-        } catch {
-          failed += 1;
-        } finally {
-          patchRowBusy(item.key, mode, false);
+          void refreshLive();
         }
-        void refreshLive();
+      } else {
+        for (const item of jobs) {
+          try {
+            if (mode === 'verdict') {
+              await requestReportVerdict(
+                item.announcementId!,
+                item.verdictStatus === 'ready' ? { refresh: true } : { fill: true },
+              );
+            } else {
+              const response = await fetch('/api/crawl/trigger', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  mode: 'manual',
+                  codes: [item.code],
+                  fullHistory: false,
+                  periods: [item.period],
+                  ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
+                }),
+              });
+              const payload = await response.json() as { ok?: boolean; error?: string };
+              if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
+            }
+            done += 1;
+          } catch {
+            failed += 1;
+          } finally {
+            patchRowBusy(item.key, mode, false);
+          }
+          void refreshLive();
+        }
       }
     } finally {
       for (const item of jobs) patchRowBusy(item.key, mode, false);
       setBatchBusy(false);
     }
-    setTriggerMsg(`完成。成功 ${done}，失败 ${failed}`);
+    setTriggerMsg(mode === 'parse'
+      ? `已入队解析。受理 ${done}，失败 ${failed}`
+      : `完成。成功 ${done}，失败 ${failed}`);
     window.setTimeout(() => setTriggerMsg(''), 6000);
     void refreshCoverage();
     void refreshLive();
@@ -995,8 +1010,8 @@ export default function CrawlOverview() {
       jobs,
       'parse',
       skipped
-        ? `将解析 ${jobs.length} 份已下载财报（跳过 ${skipped} 份未下载），已解析的会重新抽取。继续？`
-        : `将批量解析 ${jobs.length} 份财报，已解析的会重新抽取指标。继续？`,
+        ? `将把 ${jobs.length} 份已下载财报加入排队解析（跳过 ${skipped} 份未下载），按并发上限领取；已解析的会重新抽取。继续？`
+        : `将把 ${jobs.length} 份财报加入排队解析，按并发上限领取；已解析的会重新抽取指标。继续？`,
     );
   }
 
@@ -1823,10 +1838,10 @@ export default function CrawlOverview() {
 
   const queueCount = Math.max(live?.counts.pending_download ?? 0, downloadQueueItems.length);
   const downloadUsed = Math.max(live?.downloadSlots.used ?? 0, downloadingItems.length);
-  const parseUsed = Math.max(
-    live?.parseSlots.used ?? 0,
-    parsingItems.length,
-    all.filter((c) => c.parseStatus === 'parsing').length,
+  // 槽位占用：不超过并发上限（超额 zombie 由 worker reclaim，不在此用全表 COUNT 撑大）
+  const parseUsed = Math.min(
+    parseMax,
+    Math.max(live?.parseSlots.used ?? 0, parsingItems.length),
   );
   const parseQueueCount = Math.max(live?.counts.pending_parse ?? 0, parseQueueItems.length);
   const verdictMax = live?.verdictSlots?.max ?? live?.limits.verdictLimit ?? 3;

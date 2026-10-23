@@ -74,8 +74,10 @@ export async function GET() {
       used: Math.max(counts.downloading, progress.filter((p) => p.phase === 'download').length),
       max: settings.downloadLimit,
     };
+    // 槽位占用不超过并发上限；DB 里超额 zombie 由 recoverStaleRuns 收回
+    const progressParse = progress.filter((p) => p.phase === 'parse').length;
     const parseSlots = {
-      used: Math.max(counts.parsing, progress.filter((p) => p.phase === 'parse').length),
+      used: Math.min(settings.parseLimit, Math.max(progressParse, counts.parsing)),
       max: settings.parseLimit,
     };
 
