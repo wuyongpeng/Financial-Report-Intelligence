@@ -39,5 +39,32 @@
     "可转债当季报",
     "EPS 千元换算"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "volume_price",
+      "title": "量价",
+      "hint": "量价：主要金属销量与价格线索——有原文才写"
+    },
+    {
+      "id": "gross_margin",
+      "title": "毛利率",
+      "hint": "毛利率——有原文才写"
+    },
+    {
+      "id": "inventory_hedge",
+      "title": "存货与套期相关披露",
+      "hint": "存货与套期相关披露——有原文才写"
+    },
+    {
+      "id": "operating_cash",
+      "title": "经营现金流与资本开支",
+      "hint": "经营现金流与资本开支——有原文才写"
+    },
+    {
+      "id": "structure",
+      "title": "矿冶结构",
+      "hint": "矿冶结构——有原文才写；价格周期结论必须挂钩报表"
+    }
+  ]
 }

@@ -3,7 +3,7 @@
 ## 用途
 
 - 生成智析 / 深度归因时，按标的 `company.industry` 加载对应 `{行业}.json`。
-- 将 `systemAppend` 拼入 `report-verdict-llm` 的 system；`attributionSkeleton` / `moduleHints` / `retrievalKeywords` 指导模块结论与原文检索。
+- 将 `systemAppend` 拼入 `report-verdict-llm` 的 system；`attributionModules`（由 `attributionSkeleton` 派生）决定深度归因的模块标题与 id；无 `attributionModules` 时回落固定五块（主营/净利/异常/历史/同业）。`moduleHints` / `retrievalKeywords` 仍指导检索与措辞。
 - `{行业}.md` 给人审，不直接喂模型长文。
 
 ## 用户侧

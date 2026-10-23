@@ -37,5 +37,32 @@
     "可转债当季报",
     "EPS 千元换算"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "volume_price",
+      "title": "量价",
+      "hint": "量价：钢材销量与均价——有原文才写"
+    },
+    {
+      "id": "gross_margin",
+      "title": "毛利率",
+      "hint": "毛利率——有原文才写"
+    },
+    {
+      "id": "inventory",
+      "title": "存货",
+      "hint": "存货——有原文才写"
+    },
+    {
+      "id": "revenue_cost",
+      "title": "成本",
+      "hint": "成本：铁矿石/煤相关披露——有原文才写"
+    },
+    {
+      "id": "operating_cash",
+      "title": "经营现金流与资本开支",
+      "hint": "经营现金流与资本开支——有原文才写；量价与库存是核心，勿套成长股叙事"
+    }
+  ]
 }

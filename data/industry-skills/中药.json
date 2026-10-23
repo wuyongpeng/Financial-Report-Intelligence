@@ -36,5 +36,32 @@
     "可转债当季报",
     "EPS 千元换算"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "core_products",
+      "title": "核心品种",
+      "hint": "核心品种：收入与占比——有原文才写"
+    },
+    {
+      "id": "gross_margin",
+      "title": "毛利率",
+      "hint": "毛利率——有原文才写"
+    },
+    {
+      "id": "selling_expense",
+      "title": "销售费用率",
+      "hint": "销售费用率（学术推广）——有原文才写"
+    },
+    {
+      "id": "operating_cash",
+      "title": "经营现金流",
+      "hint": "经营现金流——有原文才写"
+    },
+    {
+      "id": "channel",
+      "title": "集采或渠道相关披露",
+      "hint": "集采或渠道相关披露——有原文才写；品种依赖要说清"
+    }
+  ]
 }

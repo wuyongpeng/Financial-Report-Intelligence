@@ -1,4 +1,5 @@
 import type { Citation } from './detail-model';
+import { FALLBACK_ATTRIBUTION_MODULES, type AttributionModuleDef } from './industry-skills-ui';
 
 export const VERDICT_LABELS = [
   '稳健增长',
@@ -13,12 +14,16 @@ export const VERDICT_LABELS = [
 
 export const CHANGE_TYPES = ['收入', '盈利', '成本费用', '现金流', '资产负债', '其他'] as const;
 export const CHANGE_DIRECTIONS = ['利好', '利空', '中性', '风险'] as const;
+/** @deprecated Prefer FALLBACK_MODULE_IDS / FALLBACK_ATTRIBUTION_MODULES */
 export const MODULE_IDS = ['business', 'attribution', 'anomalies', 'history', 'peers'] as const;
+export const FALLBACK_MODULE_IDS = MODULE_IDS;
 
 export type VerdictLabel = (typeof VERDICT_LABELS)[number];
 export type ChangeType = (typeof CHANGE_TYPES)[number];
 export type ChangeDirection = (typeof CHANGE_DIRECTIONS)[number];
-export type ModuleId = (typeof MODULE_IDS)[number];
+export type FallbackModuleId = (typeof FALLBACK_MODULE_IDS)[number];
+/** Fallback five ids, or industry-skill dimension ids (e.g. volume). */
+export type ModuleId = string;
 export type VerdictTone = 'up' | 'mid' | 'down';
 
 export type VerdictChange = {
@@ -31,6 +36,8 @@ export type VerdictChange = {
 
 export type ModuleConclusion = {
   id: ModuleId;
+  /** Present for industry-skill modules so UI can render without reloading the skill. */
+  title?: string;
   conclusion: string;
   sourceRef: Citation[];
 };
@@ -44,62 +51,86 @@ export type ReportVerdict = {
 const LABEL_SET = new Set<string>(VERDICT_LABELS);
 const TYPE_SET = new Set<string>(CHANGE_TYPES);
 const DIRECTION_SET = new Set<string>(CHANGE_DIRECTIONS);
-const MODULE_SET = new Set<string>(MODULE_IDS);
+const FALLBACK_MODULE_SET = new Set<string>(FALLBACK_MODULE_IDS);
+const MAX_MODULES = 6;
 
-export const VERDICT_JSON_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['verdict', 'changes', 'modules'],
-  properties: {
-    verdict: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['label', 'summary'],
-      properties: {
-        label: { type: 'string', enum: [...VERDICT_LABELS] },
-        summary: { type: 'string' },
-      },
-    },
-    changes: {
+export function isFallbackModuleId(id: string): id is FallbackModuleId {
+  return FALLBACK_MODULE_SET.has(id);
+}
+
+/** Accept industry ids like volume / inventory_capex; reject garbage. */
+function isIndustryModuleId(id: string): boolean {
+  return /^[a-z][a-z0-9_]{0,40}$/i.test(id) && !FALLBACK_MODULE_SET.has(id);
+}
+
+export function buildVerdictJsonSchema(moduleDefs?: AttributionModuleDef[] | null) {
+  const industryMode = Boolean(moduleDefs?.length);
+  const ids = industryMode ? moduleDefs!.map((m) => m.id) : [...FALLBACK_MODULE_IDS];
+  const moduleRequired = industryMode ? (['id', 'title', 'conclusion', 'sourceRef'] as const) : (['id', 'conclusion', 'sourceRef'] as const);
+  const moduleProps: Record<string, unknown> = {
+    id: { type: 'string', enum: ids },
+    conclusion: { type: 'string' },
+    sourceRef: {
       type: 'array',
-      minItems: 0,
-      maxItems: 3,
-      items: {
+      items: { type: 'string' },
+    },
+  };
+  if (industryMode) {
+    moduleProps.title = { type: 'string', enum: moduleDefs!.map((m) => m.title) };
+  } else {
+    moduleProps.title = { type: 'string' };
+  }
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['verdict', 'changes', 'modules'],
+    properties: {
+      verdict: {
         type: 'object',
         additionalProperties: false,
-        required: ['type', 'direction', 'title', 'description', 'sourceRef'],
+        required: ['label', 'summary'],
         properties: {
-          type: { type: 'string', enum: [...CHANGE_TYPES] },
-          direction: { type: 'string', enum: [...CHANGE_DIRECTIONS] },
-          title: { type: 'string' },
-          description: { type: 'string' },
-          sourceRef: {
-            type: 'array',
-            items: { type: 'string' },
+          label: { type: 'string', enum: [...VERDICT_LABELS] },
+          summary: { type: 'string' },
+        },
+      },
+      changes: {
+        type: 'array',
+        minItems: 0,
+        maxItems: 3,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['type', 'direction', 'title', 'description', 'sourceRef'],
+          properties: {
+            type: { type: 'string', enum: [...CHANGE_TYPES] },
+            direction: { type: 'string', enum: [...CHANGE_DIRECTIONS] },
+            title: { type: 'string' },
+            description: { type: 'string' },
+            sourceRef: {
+              type: 'array',
+              items: { type: 'string' },
+            },
           },
         },
       },
-    },
-    modules: {
-      type: 'array',
-      minItems: 0,
-      maxItems: 5,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['id', 'conclusion', 'sourceRef'],
-        properties: {
-          id: { type: 'string', enum: [...MODULE_IDS] },
-          conclusion: { type: 'string' },
-          sourceRef: {
-            type: 'array',
-            items: { type: 'string' },
-          },
+      modules: {
+        type: 'array',
+        minItems: 0,
+        maxItems: MAX_MODULES,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: [...moduleRequired],
+          properties: moduleProps,
         },
       },
     },
-  },
-} as const;
+  } as const;
+}
+
+/** Default schema (fallback five). Prefer buildVerdictJsonSchema(industryModules) at generation time. */
+export const VERDICT_JSON_SCHEMA = buildVerdictJsonSchema(null);
 
 export function verdictTone(label: VerdictLabel): VerdictTone {
   if (label === '稳健增长' || label === '增长加速' || label === '盈利改善') return 'up';
@@ -167,11 +198,16 @@ function parseModule(raw: unknown, evidence: Citation[], seen: Set<string>): Mod
   const row = raw as Record<string, unknown>;
   const id = asText(row.id);
   const conclusion = asText(row.conclusion);
-  if (!MODULE_SET.has(id) || seen.has(id) || !conclusion || !hasConcreteNumber(conclusion)) return null;
+  const title = asText(row.title);
+  const fallback = isFallbackModuleId(id);
+  const industry = Boolean(title) && isIndustryModuleId(id);
+  if ((!fallback && !industry) || seen.has(id) || !conclusion || !hasConcreteNumber(conclusion)) return null;
   const sourceRef = resolveSourceRef(row.sourceRef, evidence);
   if (!sourceRef.length) return null;
   seen.add(id);
-  return { id: id as ModuleId, conclusion, sourceRef };
+  const out: ModuleConclusion = { id, conclusion, sourceRef };
+  if (title) out.title = title;
+  return out;
 }
 
 /** Strict object validation. Invalid verdict fields fail the whole payload; invalid changes/modules are dropped. */
@@ -197,6 +233,7 @@ export function parseReportVerdict(raw: unknown, evidence: Citation[]): ReportVe
   for (const row of moduleRows) {
     const parsed = parseModule(row, evidence, seen);
     if (parsed) modules.push(parsed);
+    if (modules.length >= MAX_MODULES) break;
   }
   return { verdict: { label: label as VerdictLabel, summary }, changes, modules };
 }
@@ -295,7 +332,8 @@ export function followupQuestions(changes: Array<{ title: string }>) {
   return out;
 }
 
-export function followupFromModule(id: ModuleId) {
+export function followupFromModule(id: ModuleId, title?: string) {
+  if (title) return `本期「${title}」有哪些值得关注的变化？请引用原文。`;
   if (id === 'business') return '本期主营业务构成有哪些变化？请引用原文。';
   if (id === 'attribution') return '归母净利润变化的主要原因是什么？请引用原文。';
   if (id === 'anomalies') return '本期哪些指标波动最大？原因是什么？';
@@ -305,15 +343,20 @@ export function followupFromModule(id: ModuleId) {
 }
 
 /** Prefer change-specific questions; fill remaining slots from modules that actually have conclusions. */
-export function targetedFollowups(changes: Array<{ title: string }>, modules: Array<{ id: ModuleId }> = []) {
+export function targetedFollowups(
+  changes: Array<{ title: string }>,
+  modules: Array<{ id: ModuleId; title?: string }> = [],
+) {
   const out = followupQuestions(changes);
   const seen = new Set(out);
   for (const item of modules) {
     if (out.length >= 3) break;
-    const question = followupFromModule(item.id);
+    const question = followupFromModule(item.id, item.title);
     if (!question || seen.has(question)) continue;
     seen.add(question);
     out.push(question);
   }
   return out;
 }
+
+export { FALLBACK_ATTRIBUTION_MODULES };

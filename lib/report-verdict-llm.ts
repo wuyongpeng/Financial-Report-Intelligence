@@ -2,19 +2,27 @@ import { parseSse } from './answer';
 import type { Citation } from './detail-model';
 import { getDb } from './db';
 import {
+  industryAttributionModules,
   industryFromStructuredContext,
   industrySkillRetrievalKeywords,
   industrySkillSystemAppend,
+  type AttributionModuleDef,
 } from './industry-skills';
+import { FALLBACK_ATTRIBUTION_MODULES } from './industry-skills-ui';
 import { loadRagContext } from './rag';
-import { parseReportVerdictJson, unwrapModelJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
+import {
+  buildVerdictJsonSchema,
+  parseReportVerdictJson,
+  unwrapModelJson,
+  type ReportVerdict,
+} from './report-verdict';
 import { fetchChatCompletionsFrom, isLlmSlotBusyError, withLlmSlot, type LlmLane } from './llm-gate';
 import { llmConfigured, parseLlmProviders, type LlmProvider } from './llm-providers';
 import { formatLlmCallError, formatLlmHttpError } from './llm-error';
 
 export const VERDICT_QUESTION = '本期财报整体怎么看？营业收入、净利润、每股收益、净资产收益率、营业成本、毛利率、经营现金流、资产负债有哪些真正值得关注的同比变化？主营业务在产品、地区或分部上的收入结构有哪些原文明确写出的变化？管理层讨论与分析是否写了净利润变动原因？请结合原文中的具体数字。';
 
-const SYSTEM_PROMPT = `你是「财报智析 Eva」的速判模块。只根据本轮服务端提供的结构化指标、同比计算结果和带编号的财报原文作答。
+const SYSTEM_PROMPT_CORE = `你是「财报智析 Eva」的速判模块。只根据本轮服务端提供的结构化指标、同比计算结果和带编号的财报原文作答。
 枚举负责“说什么”，你只负责“怎么说”。必须输出严格符合 JSON Schema 的单个 JSON 对象，不要 Markdown、不要解释、不要额外字段。
 
 规则：
@@ -26,16 +34,48 @@ const SYSTEM_PROMPT = `你是「财报智析 Eva」的速判模块。只根据�
 6. changes[].description 1～2 句，尽量包含原文或结构化数据中已有的数字与同比/环比；不得编造数字或事实。
 7. 禁止推断财报未明确支持的因果关系。只有原文明确写了原因，才能使用“由于/主要原因/导致/驱动/受……影响”；否则用“同期出现/与……相关/增长/下降/值得关注”。
 8. changes[].sourceRef 与 modules[].sourceRef 必须填写本轮已提供的证据编号（如 E1）。没有可靠证据的条目不要输出。
-9. modules 是「深度归因」的落库结论，用来解释营收、利润、异常指标为什么变动，而不是复述指标卡。id 只能是 business、attribution、anomalies、history、peers。每条 conclusion 必须含具体数字，建议不超过 40 字。空话、套话、没有数字的定性一律不要写，宁缺毋滥。
-   - business：解释主营/分部收入结构为何变化；仅当原文明确给出业务/产品/地区收入结构或结构变化并带数字。
-   - attribution：解释净利润为何变动；仅当原文写了净利润变动的构成或原因并带数字；结构化同比已在上下文中，不要复述指标卡。
-   - anomalies：解释异常/大幅波动指标为何出现；仅当原文点名异常并带数字。
-   - history：仅当原文给出跨年/跨期趋势数字，且不是简单重复结构化同比。
-   - peers：仅当原文给出市场份额或行业地位数字。页面若已有同业样本排名会优先用计算值。
-   没有把握的模块不要输出。没有可写的模块时 modules 返回 []。
 10. 不要输出投资建议。`;
 
-function verdictUserPrompt(structuredContext: string, passages: Array<{ id: string; companyName: string; period: string; page: number; content: string }>, evidenceIds: string[]) {
+function isFallbackModuleDefs(moduleDefs: AttributionModuleDef[]): boolean {
+  return moduleDefs.length > 0 && moduleDefs[0].id === 'business' && moduleDefs[0].title === '主营业务';
+}
+
+function modulesSystemRule(moduleDefs: AttributionModuleDef[]): string {
+  const lines = moduleDefs.map((m) => `   - ${m.id}（标题必须写「${m.title}」）：${m.hint}`).join('\n');
+  const ids = moduleDefs.map((m) => m.id).join('、');
+  const titles = moduleDefs.map((m) => m.title).join('、');
+  if (!isFallbackModuleDefs(moduleDefs)) {
+    return `9. modules 是「深度归因」的落库结论，必须按本行业维度组织，而不是复述指标卡。
+   modules[].id 只能是：${ids}。
+   modules[].title 必须与 id 对应，只能是：${titles}。
+   每个维度有原文数字证据时写一条；没有证据的维度不要输出。禁止使用 business、attribution、anomalies、history、peers。
+   每条 conclusion 必须含具体数字，建议不超过 40 字。空话、套话一律不要写，宁缺毋滥。
+${lines}
+   没有把握的模块不要输出。没有可写的模块时 modules 返回 []。`;
+  }
+  return `9. modules 是「深度归因」的落库结论，用来解释营收、利润、异常指标为什么变动，而不是复述指标卡。id 只能是 business、attribution、anomalies、history、peers。每条 conclusion 必须含具体数字，建议不超过 40 字。空话、套话、没有数字的定性一律不要写，宁缺毋滥。
+${lines}
+   没有把握的模块不要输出。没有可写的模块时 modules 返回 []。`;
+}
+
+function buildSystemPrompt(moduleDefs: AttributionModuleDef[]): string {
+  return SYSTEM_PROMPT_CORE.replace(
+    '10. 不要输出投资建议。',
+    `${modulesSystemRule(moduleDefs)}\n10. 不要输出投资建议。`,
+  );
+}
+
+function verdictUserPrompt(
+  structuredContext: string,
+  passages: Array<{ id: string; companyName: string; period: string; page: number; content: string }>,
+  evidenceIds: string[],
+  moduleDefs: AttributionModuleDef[],
+) {
+  const industryMode = !isFallbackModuleDefs(moduleDefs);
+  const schema = buildVerdictJsonSchema(industryMode ? moduleDefs : null);
+  const moduleHint = industryMode
+    ? `modules（0～${moduleDefs.length} 条；深度归因按行业维度 ${moduleDefs.map((m) => m.title).join('/')}；id/title 必须与 Schema 枚举一致；没有数字证据的维度不要写）`
+    : 'modules（0～5 条；这是深度归因，要解释变动原因，没有数字证据的模块不要写）';
   return `请生成当前财报的 AI 速判 JSON。
 
 结构化数据（含已计算同比，不要重新计算核心指标）：
@@ -46,10 +86,10 @@ ${passages.map((p) => `【${p.id}】${p.companyName} ${p.period} PDF第${p.page}
 
 可用证据编号：${evidenceIds.join('、') || '无'}
 
-请同时给出 verdict、changes（1～3 条，可为空数组）和 modules（0～5 条；这是深度归因，要解释变动原因，没有数字证据的模块不要写）。
+请同时给出 verdict、changes（1～3 条，可为空数组）和 ${moduleHint}。
 
 JSON Schema：
-${JSON.stringify(VERDICT_JSON_SCHEMA)}`;
+${JSON.stringify(schema)}`;
 }
 
 /** Abort this provider if the first stream token (content or reasoning) has not arrived. */
@@ -363,10 +403,13 @@ export async function generateReportVerdict(
     || context.industry
     || industryFromStructuredContext(context.structuredContext);
   const skillAppend = industrySkillSystemAppend(resolvedIndustry);
-  const systemContent = skillAppend ? `${SYSTEM_PROMPT}\n\n${skillAppend}` : SYSTEM_PROMPT;
+  const skillModules = industryAttributionModules(resolvedIndustry);
+  const moduleDefs = skillModules?.length ? skillModules : FALLBACK_ATTRIBUTION_MODULES;
+  const systemPrompt = buildSystemPrompt(moduleDefs);
+  const systemContent = skillAppend ? `${systemPrompt}\n\n${skillAppend}` : systemPrompt;
   return completeJson([
     { role: 'system', content: systemContent },
-    { role: 'user', content: verdictUserPrompt(context.structuredContext, context.passages, context.evidence.map((item) => item.id)) },
+    { role: 'user', content: verdictUserPrompt(context.structuredContext, context.passages, context.evidence.map((item) => item.id), moduleDefs) },
   ], context.evidence, options);
 }
 

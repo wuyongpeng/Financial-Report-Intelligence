@@ -40,5 +40,32 @@
     "EPS 千元换算",
     "无原文的「AI 收入」"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "revenue_margin",
+      "title": "收入与毛利",
+      "hint": "收入与毛利：营收、毛利率同比——有原文才写"
+    },
+    {
+      "id": "product_structure",
+      "title": "产品结构",
+      "hint": "产品结构：服务器/部件等拆分；大客户依赖——有原文才写"
+    },
+    {
+      "id": "inventory_receivable",
+      "title": "存货与应收",
+      "hint": "存货与应收：存货、应收账款与经营现金流——有原文才写"
+    },
+    {
+      "id": "d4",
+      "title": "资本开支与产能",
+      "hint": "资本开支与产能：Capex/产能相关披露——有原文才写"
+    },
+    {
+      "id": "d5",
+      "title": "AI 相关收入若单列必须",
+      "hint": "AI 相关收入若单列必须引用原文口径，勿写成软件订阅叙事"
+    }
+  ]
 }

@@ -39,5 +39,32 @@
     "可转债当季报",
     "EPS 千元换算"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "cycle_volume_price",
+      "title": "周期量价",
+      "hint": "周期量价：收入与毛利率（存储周期属性）——有原文才写"
+    },
+    {
+      "id": "product_structure",
+      "title": "产品结构",
+      "hint": "产品结构：DDR/LPDDR/Niche 等若披露——有原文才写"
+    },
+    {
+      "id": "inventory_impairment",
+      "title": "存货与跌价",
+      "hint": "存货与跌价：存货及跌价准备——有原文才写"
+    },
+    {
+      "id": "rd",
+      "title": "研发投入",
+      "hint": "研发投入：研发费用率——有原文才写"
+    },
+    {
+      "id": "operating_cash",
+      "title": "经营现金流",
+      "hint": "经营现金流——有原文才写；点明周期位置须有数字支撑"
+    }
+  ]
 }

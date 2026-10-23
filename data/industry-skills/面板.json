@@ -39,5 +39,32 @@
     "可转债当季报",
     "EPS 千元换算"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "volume",
+      "title": "量",
+      "hint": "量：出货面积/出货量线索——有原文才写"
+    },
+    {
+      "id": "price",
+      "title": "价",
+      "hint": "价：面板均价线索——有原文才写"
+    },
+    {
+      "id": "gross_margin",
+      "title": "毛利",
+      "hint": "毛利：毛利率（价格敏感）——有原文才写"
+    },
+    {
+      "id": "inventory_impairment",
+      "title": "存货与跌价",
+      "hint": "存货与跌价：存货及跌价——有原文才写"
+    },
+    {
+      "id": "d5",
+      "title": "折旧与资本开支",
+      "hint": "折旧与资本开支：折旧、Capex、经营现金流——有原文才写"
+    }
+  ]
 }

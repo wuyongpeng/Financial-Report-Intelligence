@@ -36,5 +36,32 @@
     "可转债当季报",
     "EPS 千元换算"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "volume_price",
+      "title": "量价",
+      "hint": "量价：收入；吨价/结构——有原文才写"
+    },
+    {
+      "id": "gross_margin",
+      "title": "毛利",
+      "hint": "毛利：毛利率——有原文才写"
+    },
+    {
+      "id": "channel",
+      "title": "渠道",
+      "hint": "渠道：渠道库存线索、经销商与提价表述——有原文才写"
+    },
+    {
+      "id": "selling_expense",
+      "title": "销售费用率",
+      "hint": "销售费用率——有原文才写"
+    },
+    {
+      "id": "operating_cash",
+      "title": "经营现金流",
+      "hint": "经营现金流——有原文才写；关注提价能否落地与渠道消化"
+    }
+  ]
 }

@@ -38,5 +38,32 @@
     "可转债当季报",
     "EPS 千元换算"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "revenue_margin",
+      "title": "收入与毛利率",
+      "hint": "收入与毛利率——有原文才写"
+    },
+    {
+      "id": "downstream_mix",
+      "title": "下游行业结构",
+      "hint": "下游行业结构——有原文才写"
+    },
+    {
+      "id": "orders_contract",
+      "title": "订单/合同负债线索",
+      "hint": "订单/合同负债线索——有原文才写"
+    },
+    {
+      "id": "expenses",
+      "title": "研发费用率",
+      "hint": "研发费用率——有原文才写"
+    },
+    {
+      "id": "operating_cash",
+      "title": "经营现金流与应收",
+      "hint": "经营现金流与应收——有原文才写；制造业 Capex 敏感，结论须绑定报表数字"
+    }
+  ]
 }

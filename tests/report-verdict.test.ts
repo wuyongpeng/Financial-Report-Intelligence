@@ -173,3 +173,30 @@ test('stored verdict JSON round-trips without calling the model', () => {
   assert.equal(again?.changes[0].sourceRef[0].page, 7);
   assert.equal(again?.modules[0].conclusion, '海外收入同比增长32%。');
 });
+
+test('accepts industry-skill module ids when title is present', () => {
+  const raw = {
+    verdict: { label: '稳健增长', summary: '量价齐升带动盈利改善。' },
+    changes: [],
+    modules: [
+      { id: 'volume', title: '量', conclusion: '晶圆销量同比增14.9%至537.9万片。', sourceRef: ['E1'] },
+      { id: 'price', title: '价', conclusion: '平均售价升至6667元。', sourceRef: ['E1'] },
+      { id: 'mystery', conclusion: '无标题的自定义 id 应丢弃。', sourceRef: ['E1'] },
+      { id: '有中文', title: '非法', conclusion: '非 ASCII id 应丢弃。', sourceRef: ['E1'] },
+      { id: '1bad', title: '非法', conclusion: '非法 id 格式应丢弃。', sourceRef: ['E1'] },
+    ],
+  };
+  const parsed = parseReportVerdict(raw, evidence);
+  assert.ok(parsed);
+  assert.equal(parsed!.modules.length, 2);
+  assert.equal(parsed!.modules[0].id, 'volume');
+  assert.equal(parsed!.modules[0].title, '量');
+  assert.equal(parsed!.modules[1].id, 'price');
+});
+
+test('industry follow-ups use module titles', () => {
+  assert.equal(
+    targetedFollowups([], [{ id: 'volume', title: '量' }, { id: 'price', title: '价' }])[0],
+    '本期「量」有哪些值得关注的变化？请引用原文。',
+  );
+});

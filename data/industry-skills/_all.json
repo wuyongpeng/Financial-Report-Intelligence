@@ -45,7 +45,34 @@
       "EPS 千元换算",
       "宏观装机预测写成公司已实现收入"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume",
+        "title": "量",
+        "hint": "量：组件/硅片/电池出货量（按公司主业环节）——有原文才写"
+      },
+      {
+        "id": "price",
+        "title": "价",
+        "hint": "价：产品均价或硅料/组件价格线索——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：分环节或综合毛利率；价格战冲击——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货与减值",
+        "hint": "存货与减值：存货及跌价/资产减值——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "现金流与资本开支",
+        "hint": "现金流与资本开支：经营现金流、购建固定资产/净负债——有原文才写"
+      }
+    ]
   },
   {
     "id": "industry.ai-application",
@@ -91,7 +118,34 @@
       "算力硬件/IDC 公司套用本 Skill",
       "可转债当季报；EPS 千元换算"
     ],
-    "notes": "主锚是分产品表，不是 AI 叙事关键词。"
+    "notes": "主锚是分产品表，不是 AI 叙事关键词。",
+    "attributionModules": [
+      {
+        "id": "by_product",
+        "title": "分产品",
+        "hint": "分产品：谁增谁减（教育/开放平台/医疗/硬件等原文分部）——有原文才写"
+      },
+      {
+        "id": "by_product_margin",
+        "title": "分产品毛利",
+        "hint": "分产品毛利：高毛利 vs 低毛利产品消长对综合毛利含义——有原文才写"
+      },
+      {
+        "id": "contract_liability",
+        "title": "合同负债/回款",
+        "hint": "合同负债/回款：合同负债、合同额、销售回款与收入是否同向——有原文才写"
+      },
+      {
+        "id": "rd",
+        "title": "研发强度",
+        "hint": "研发强度：研发费用或研发投入占收比——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "其他关注",
+        "hint": "禁止写「AI 收入」单一口径；进展叙述≠已确认收入"
+      }
+    ]
   },
   {
     "id": "industry.home-appliance",
@@ -135,7 +189,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：内外销、品类收入拆分——有原文才写"
+      },
+      {
+        "id": "margin_expense",
+        "title": "毛利与费用率",
+        "hint": "毛利与费用率——有原文才写"
+      },
+      {
+        "id": "inventory_ocf",
+        "title": "存货与经营现金流",
+        "hint": "存货与经营现金流——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "成本与竞争",
+        "hint": "成本与竞争：原材料成本 vs 内销竞争谁主导——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "地产链或出口相关披露",
+        "hint": "地产链或出口相关披露——有原文才写；勿空谈消费升级"
+      }
+    ]
   },
   {
     "id": "industry.coal",
@@ -179,7 +260,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price",
+        "title": "量价",
+        "hint": "量价：销量与均价线索——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流（高现金流行业）——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "资本开支与分红相关披露",
+        "hint": "资本开支与分红相关披露——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "长协与现货、资产减值",
+        "hint": "长协与现货、资产减值——有原文才写；价格下行时看成本与产量"
+      }
+    ]
   },
   {
     "id": "industry.baijiu",
@@ -224,7 +332,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price_mix",
+        "title": "量价结构",
+        "hint": "量价结构：收入；吨价/高端占比（有则写）——有原文才写"
+      },
+      {
+        "id": "margin_net",
+        "title": "毛利与净利率",
+        "hint": "毛利与净利率——有原文才写"
+      },
+      {
+        "id": "contract_liability",
+        "title": "合同负债/预收款",
+        "hint": "合同负债/预收款：渠道信心——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写"
+      },
+      {
+        "id": "price",
+        "title": "经销与批价相关表述仅限披",
+        "hint": "经销与批价相关表述仅限披露；区分主动控货与需求走弱的证据"
+      }
+    ]
   },
   {
     "id": "industry.bank",
@@ -274,7 +409,34 @@
       "EPS 千元换算",
       "无 NIM 数字时硬套利息收入/资产错分母"
     ],
-    "notes": "部分银行 PDF 文本层可能损坏，抽取失败≠指标未披露。"
+    "notes": "部分银行 PDF 文本层可能损坏，抽取失败≠指标未披露。",
+    "attributionModules": [
+      {
+        "id": "nim",
+        "title": "息差/NIM",
+        "hint": "息差/NIM：净利息收益率、净利差及资产收益率/负债成本——有原文才写"
+      },
+      {
+        "id": "scale",
+        "title": "规模",
+        "hint": "规模：贷款或生息资产增速；利息净收入量价因素（有则写）"
+      },
+      {
+        "id": "non_interest",
+        "title": "非息",
+        "hint": "非息：非利息净收入及手续费结构（财富/银行卡等）——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "不良与拨备",
+        "hint": "不良与拨备：不良贷款率、拨备覆盖率、信用减值对利润影响——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "其他关注",
+        "hint": "禁止制造业毛利/存货话术；拨备少提推高利润必须点明"
+      }
+    ]
   },
   {
     "id": "industry.ai-chip",
@@ -319,7 +481,34 @@
       "EPS 千元换算",
       "「AI 收入」虚构口径"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_structure",
+        "title": "收入与结构",
+        "hint": "收入与结构：产品/客户收入拆分——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率与产品组合——有原文才写"
+      },
+      {
+        "id": "rd_tapeout",
+        "title": "研发与流片",
+        "hint": "研发与流片：研发费用率；流片/迭代相关披露（进展≠收入）——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货与减值",
+        "hint": "存货与减值：存货及跌价——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "大客户依赖与现金流",
+        "hint": "大客户依赖与现金流：客户集中度、经营现金流——有原文才写"
+      }
+    ]
   },
   {
     "id": "industry.tcm",
@@ -359,7 +548,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "core_products",
+        "title": "核心品种",
+        "hint": "核心品种：收入与占比——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "selling_expense",
+        "title": "销售费用率",
+        "hint": "销售费用率（学术推广）——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写"
+      },
+      {
+        "id": "channel",
+        "title": "集采或渠道相关披露",
+        "hint": "集采或渠道相关披露——有原文才写；品种依赖要说清"
+      }
+    ]
   },
   {
     "id": "industry.transportation",
@@ -402,7 +618,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "ops_volume",
+        "title": "运营量",
+        "hint": "运营量：客运量/货运量/吞吐量等（按公司主业）——有原文才写"
+      },
+      {
+        "id": "freight_fare",
+        "title": "运价/票价相关",
+        "hint": "运价/票价相关——有原文才写"
+      },
+      {
+        "id": "revenue_cost",
+        "title": "收入与毛利或营业成本率",
+        "hint": "收入与毛利或营业成本率——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "折旧与资本开支",
+        "hint": "折旧与资本开支——有原文才写；按主业选运营指标，勿混用铁路/港口口径"
+      }
+    ]
   },
   {
     "id": "industry.optical-comms",
@@ -446,7 +689,34 @@
       "EPS 千元换算",
       "空谈算力需求替代公司数字"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price",
+        "title": "量价",
+        "hint": "量价：收入同比；均价/速率升级线索（有披露）——关注「量增价跌」"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率变动——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：产品速率/品类结构——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货与减值",
+        "hint": "存货与减值：存货及价格波动相关跌价——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "客户集中与现金流",
+        "hint": "客户集中与现金流：前五大客户、经营现金流——有原文才写"
+      }
+    ]
   },
   {
     "id": "industry.defense",
@@ -488,7 +758,34 @@
       "EPS 千元换算",
       "把国防预算宏观故事当公司业绩"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_margin",
+        "title": "收入与毛利率",
+        "hint": "收入与毛利率——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：产品/主机配套（有披露）——有原文才写"
+      },
+      {
+        "id": "settlement",
+        "title": "结算节奏",
+        "hint": "结算节奏：合同负债/预收款与应收——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写"
+      },
+      {
+        "id": "rd",
+        "title": "研发投入",
+        "hint": "研发投入——有原文才写；保密导致信息少时明确「未披露」，禁止臆测订单金额"
+      }
+    ]
   },
   {
     "id": "industry.agri",
@@ -532,7 +829,34 @@
       "EPS 千元换算",
       "无数字空喊周期反转"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price",
+        "title": "量价",
+        "hint": "量价：出栏量/均重/猪价等线索（按公司主业）——有原文才写"
+      },
+      {
+        "id": "cost_margin",
+        "title": "成本与毛利",
+        "hint": "成本与毛利：养殖成本或毛利率——有原文才写"
+      },
+      {
+        "id": "biological_inventory",
+        "title": "生物资产存货",
+        "hint": "生物资产存货：消耗性生物资产等——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "现金流与扩产",
+        "hint": "现金流与扩产：经营现金流、资本开支——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "周期位置须有数字；禁止把",
+        "hint": "周期位置须有数字；禁止把行业涨价预期写成利润已兑现"
+      }
+    ]
   },
   {
     "id": "industry.brokerage",
@@ -577,7 +901,34 @@
       "EPS 千元换算",
       "制造业毛利/存货话术"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_structure",
+        "title": "收入结构",
+        "hint": "收入结构：经纪/投行/资管/信用/投资等拆分——有原文才写"
+      },
+      {
+        "id": "drivers",
+        "title": "驱动",
+        "hint": "驱动：市场交投 vs 自营投资收益谁主导同比——有原文才写"
+      },
+      {
+        "id": "profitability",
+        "title": "盈利",
+        "hint": "盈利：净利润与 ROE——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "杠杆与风险",
+        "hint": "杠杆与风险：经营杠杆、风险敞口相关披露——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写；自营波动大时勿把短期投资收益外推为趋势"
+      }
+    ]
   },
   {
     "id": "industry.semiconductor",
@@ -623,7 +974,34 @@
       "EPS 因「千元」表头换算",
       "空泛科普先进制程"
     ],
-    "notes": "稼动率仅作检索加分词，不进默认用户可见承诺。"
+    "notes": "稼动率仅作检索加分词，不进默认用户可见承诺。",
+    "attributionModules": [
+      {
+        "id": "volume",
+        "title": "量",
+        "hint": "量：晶圆销量（折合英寸等原文口径）同比——有原文才写"
+      },
+      {
+        "id": "price",
+        "title": "价",
+        "hint": "价：平均售价（ASP）同比——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：地区收入占比、应用/尺寸结构消长——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率变动与量价/组合归因是否一致——有原文才写"
+      },
+      {
+        "id": "inventory_capex",
+        "title": "存货与资本开支",
+        "hint": "存货与资本开支：存货及跌价；购建固定资产现金流作 Capex 代理——有原文才写"
+      }
+    ]
   },
   {
     "id": "industry.memory",
@@ -666,7 +1044,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "cycle_volume_price",
+        "title": "周期量价",
+        "hint": "周期量价：收入与毛利率（存储周期属性）——有原文才写"
+      },
+      {
+        "id": "product_structure",
+        "title": "产品结构",
+        "hint": "产品结构：DDR/LPDDR/Niche 等若披露——有原文才写"
+      },
+      {
+        "id": "inventory_impairment",
+        "title": "存货与跌价",
+        "hint": "存货与跌价：存货及跌价准备——有原文才写"
+      },
+      {
+        "id": "rd",
+        "title": "研发投入",
+        "hint": "研发投入：研发费用率——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写；点明周期位置须有数字支撑"
+      }
+    ]
   },
   {
     "id": "industry.oil-petro",
@@ -709,7 +1114,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "business_mix",
+        "title": "业务结构",
+        "hint": "业务结构：油气销售 / 炼化等拆分——有原文才写"
+      },
+      {
+        "id": "oil_profit_bridge",
+        "title": "油价与利润桥",
+        "hint": "油价与利润桥：原油价格敏感的利润说明——有原文才写"
+      },
+      {
+        "id": "production_reserves",
+        "title": "产量/储量线索",
+        "hint": "产量/储量线索——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流与资本开支",
+        "hint": "经营现金流与资本开支——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "减值",
+        "hint": "减值——有原文才写；区分上游与炼化价差逻辑"
+      }
+    ]
   },
   {
     "id": "industry.lithium-battery",
@@ -755,7 +1187,34 @@
       "EPS 千元换算",
       "无披露的「产能利用率」默认承诺"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume",
+        "title": "量",
+        "hint": "量：电池出货量/装机相关披露——有原文才写"
+      },
+      {
+        "id": "price",
+        "title": "价",
+        "hint": "价：售价或原材料（碳酸锂等）成本线索——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：动力/储能等产品或客户（车企）集中度——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率与量增价跌是否并存——有原文才写"
+      },
+      {
+        "id": "inventory_capex",
+        "title": "存货与资本开支",
+        "hint": "存货与资本开支：存货、经营现金流、扩产 Capex——有原文才写"
+      }
+    ]
   },
   {
     "id": "industry.ai-compute",
@@ -799,7 +1258,34 @@
       "EPS 千元换算",
       "无原文的「AI 收入」"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_margin",
+        "title": "收入与毛利",
+        "hint": "收入与毛利：营收、毛利率同比——有原文才写"
+      },
+      {
+        "id": "product_structure",
+        "title": "产品结构",
+        "hint": "产品结构：服务器/部件等拆分；大客户依赖——有原文才写"
+      },
+      {
+        "id": "inventory_receivable",
+        "title": "存货与应收",
+        "hint": "存货与应收：存货、应收账款与经营现金流——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "资本开支与产能",
+        "hint": "资本开支与产能：Capex/产能相关披露——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "AI 相关收入若单列必须",
+        "hint": "AI 相关收入若单列必须引用原文口径，勿写成软件订阅叙事"
+      }
+    ]
   },
   {
     "id": "industry.cxo",
@@ -841,7 +1327,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_orders",
+        "title": "收入与订单",
+        "hint": "收入与订单：营收；在手/新签订单（有则写）——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "customer_geo",
+        "title": "客户与地缘",
+        "hint": "客户与地缘：客户结构及地缘相关披露——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "现金流与产能",
+        "hint": "现金流与产能：经营现金流、实验室/产能 Capex——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "汇率影响",
+        "hint": "汇率影响——有原文才写；订单前景勿脱离原文"
+      }
+    ]
   },
   {
     "id": "industry.dairy",
@@ -881,7 +1394,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：液奶/奶粉等收入拆分——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率（原奶成本敏感）——有原文才写"
+      },
+      {
+        "id": "expenses",
+        "title": "费用",
+        "hint": "费用：销售费用率（营销投放）——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "现金流与应收",
+        "hint": "现金流与应收——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "成本与促销对利润影响要分",
+        "hint": "成本与促销对利润影响要分开说；市占/渠道有则写"
+      }
+    ]
   },
   {
     "id": "industry.insurance",
@@ -925,7 +1465,34 @@
       "EPS 千元换算",
       "把投资收益当可持续承保增长"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "premium_income",
+        "title": "保费与服务收入",
+        "hint": "保费与服务收入：原保费/保险服务收入等原文口径——有原文才写"
+      },
+      {
+        "id": "embedded_value",
+        "title": "价值",
+        "hint": "价值：新业务价值或内含价值相关（有则写，勿编造）"
+      },
+      {
+        "id": "investment",
+        "title": "投资端",
+        "hint": "投资端：投资收益波动对利润影响——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "偿付能力",
+        "hint": "偿付能力：偿付能力充足率——有原文才写"
+      },
+      {
+        "id": "volume",
+        "title": "归母净利质量",
+        "hint": "归母净利质量：区分承保与投资；禁止用银行不良率框架硬套"
+      }
+    ]
   },
   {
     "id": "industry.duty-free",
@@ -965,7 +1532,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_margin",
+        "title": "收入与毛利",
+        "hint": "收入与毛利——有原文才写"
+      },
+      {
+        "id": "traffic_ticket",
+        "title": "客流/客单或渠道结构线索",
+        "hint": "客流/客单或渠道结构线索——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货",
+        "hint": "存货——有原文才写"
+      },
+      {
+        "id": "expenses",
+        "title": "费用与经营现金流",
+        "hint": "费用与经营现金流——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "政策与口岸相关表述仅限原",
+        "hint": "政策与口岸相关表述仅限原文；勿把旅游复苏预测写成已实现业绩"
+      }
+    ]
   },
   {
     "id": "industry.innovative-drug",
@@ -1007,7 +1601,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_structure",
+        "title": "收入结构",
+        "hint": "收入结构：产品销售 / 授权 / 合作收入——有原文才写"
+      },
+      {
+        "id": "rd",
+        "title": "研发",
+        "hint": "研发：研发费用与管线进展（进展≠收入）——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：产品毛利率——有原文才写"
+      },
+      {
+        "id": "inventory_ocf",
+        "title": "现金",
+        "hint": "现金：经营现金流与现金储备——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "授权收入是否一次性必须说",
+        "hint": "授权收入是否一次性必须说清；禁止把临床进展写成已上市放量"
+      }
+    ]
   },
   {
     "id": "industry.chemical",
@@ -1050,7 +1671,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price",
+        "title": "量价",
+        "hint": "量价：主要产品销量与价格——有原文才写"
+      },
+      {
+        "id": "margin_spread",
+        "title": "毛利与价差",
+        "hint": "毛利与价差——有原文才写"
+      },
+      {
+        "id": "utilization_inventory",
+        "title": "开工率/存货",
+        "hint": "开工率/存货——有原文才写（开工率无%则写未披露）"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流与资本开支",
+        "hint": "经营现金流与资本开支——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "新材料/一体化结构",
+        "hint": "新材料/一体化结构——有原文才写；避免宏观化工景气空谈"
+      }
+    ]
   },
   {
     "id": "industry.med-device",
@@ -1091,7 +1739,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：产品线收入拆分（设备 vs 耗材若可分）——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "region",
+        "title": "区域",
+        "hint": "区域：国内/国际——有原文才写"
+      },
+      {
+        "id": "contract_liability",
+        "title": "回款",
+        "hint": "回款：经营现金流与应收——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "集采影响",
+        "hint": "集采影响——有原文才写；耗材与设备勿混为一谈（若可分）"
+      }
+    ]
   },
   {
     "id": "industry.med-service",
@@ -1132,7 +1807,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume",
+        "title": "量",
+        "hint": "量：门诊/手术量或院区扩张线索——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "收入与毛利、费用率",
+        "hint": "收入与毛利、费用率——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写"
+      },
+      {
+        "id": "d4",
+        "title": "扩张",
+        "hint": "扩张：资本开支、租赁/新院区——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "医保政策相关仅限披露；关",
+        "hint": "医保政策相关仅限披露；关注扩张期利润与现金流是否背离"
+      }
+    ]
   },
   {
     "id": "industry.semi-equipment",
@@ -1176,7 +1878,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_orders",
+        "title": "收入与订单",
+        "hint": "收入与订单：营收同比；新签/在手订单（有则写）——有原文才写"
+      },
+      {
+        "id": "margin_structure",
+        "title": "毛利与结构",
+        "hint": "毛利与结构：毛利率；前道/零部件等产品结构——有原文才写"
+      },
+      {
+        "id": "rd_qualification",
+        "title": "研发与验证",
+        "hint": "研发与验证：研发费用率；客户验证/导入节奏线索——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货与发出商品、回款",
+        "hint": "存货与发出商品、回款——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "对下游资本开支景气的表述",
+        "hint": "对下游资本开支景气的表述仅限本文披露；勿与代工稼动率主叙事混用"
+      }
+    ]
   },
   {
     "id": "industry.beer",
@@ -1216,7 +1945,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price",
+        "title": "量价",
+        "hint": "量价：销量与吨价线索——有原文才写"
+      },
+      {
+        "id": "mix_upgrade",
+        "title": "结构升级",
+        "hint": "结构升级：产品结构（高端化）——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率——有原文才写"
+      },
+      {
+        "id": "selling_expense",
+        "title": "销售费用",
+        "hint": "销售费用——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写；区分结构升级与总量下滑"
+      }
+    ]
   },
   {
     "id": "industry.industrial-robot",
@@ -1258,7 +2014,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_margin",
+        "title": "收入与毛利率",
+        "hint": "收入与毛利率——有原文才写"
+      },
+      {
+        "id": "downstream_mix",
+        "title": "下游行业结构",
+        "hint": "下游行业结构——有原文才写"
+      },
+      {
+        "id": "orders_contract",
+        "title": "订单/合同负债线索",
+        "hint": "订单/合同负债线索——有原文才写"
+      },
+      {
+        "id": "expenses",
+        "title": "研发费用率",
+        "hint": "研发费用率——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流与应收",
+        "hint": "经营现金流与应收——有原文才写；制造业 Capex 敏感，结论须绑定报表数字"
+      }
+    ]
   },
   {
     "id": "industry.construction-machinery",
@@ -1299,7 +2082,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：内销/出口收入拆分——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货与按揭/融资租赁风险",
+        "hint": "存货与按揭/融资租赁风险披露——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "下游基建地产线索仅限原文",
+        "hint": "下游基建地产线索仅限原文；出口高增时看可持续性证据"
+      }
+    ]
   },
   {
     "id": "industry.nev",
@@ -1343,7 +2153,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume",
+        "title": "量",
+        "hint": "量：汽车销量（新能源/分车型若披露）——有原文才写"
+      },
+      {
+        "id": "price",
+        "title": "价",
+        "hint": "价：单车均价或 ASP 线索——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：国内/海外、车型或业务（整车/电池等）——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利与费用",
+        "hint": "毛利与费用：整车毛利率；研发/销售费用率——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货与现金流",
+        "hint": "存货与现金流：存货、减值、经营现金流——有原文才写"
+      }
+    ]
   },
   {
     "id": "industry.nonferrous",
@@ -1386,7 +2223,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price",
+        "title": "量价",
+        "hint": "量价：主要金属销量与价格线索——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "inventory_hedge",
+        "title": "存货与套期相关披露",
+        "hint": "存货与套期相关披露——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流与资本开支",
+        "hint": "经营现金流与资本开支——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "矿冶结构",
+        "hint": "矿冶结构——有原文才写；价格周期结论必须挂钩报表"
+      }
+    ]
   },
   {
     "id": "industry.consumer-electronics",
@@ -1427,7 +2291,34 @@
       "EPS 千元换算",
       "无披露的市占默认承诺"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_margin",
+        "title": "收入与毛利",
+        "hint": "收入与毛利：营收、毛利率同比——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：大客户/产品线占比——有原文才写"
+      },
+      {
+        "id": "inventory_receivable",
+        "title": "存货与应收",
+        "hint": "存货与应收：存货、应收账款——有原文才写"
+      },
+      {
+        "id": "expenses",
+        "title": "费用与现金流",
+        "hint": "费用与现金流：费用率、经营现金流——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "季节性与新品节奏线索",
+        "hint": "季节性与新品节奏线索——有原文才写；若实为供应链勿夸大品牌零售叙事"
+      }
+    ]
   },
   {
     "id": "industry.vaccine",
@@ -1467,7 +2358,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "core_product_revenue",
+        "title": "核心品种收入",
+        "hint": "核心品种收入——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "selling_expense",
+        "title": "销售费用",
+        "hint": "销售费用——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货与批签发/渠道库存线",
+        "hint": "存货与批签发/渠道库存线索——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写；重磅品种放量与去库存要有数字"
+      }
+    ]
   },
   {
     "id": "industry.condiment",
@@ -1507,7 +2425,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price",
+        "title": "量价",
+        "hint": "量价：收入；吨价/结构——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率——有原文才写"
+      },
+      {
+        "id": "channel",
+        "title": "渠道",
+        "hint": "渠道：渠道库存线索、经销商与提价表述——有原文才写"
+      },
+      {
+        "id": "selling_expense",
+        "title": "销售费用率",
+        "hint": "销售费用率——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流",
+        "hint": "经营现金流——有原文才写；关注提价能否落地与渠道消化"
+      }
+    ]
   },
   {
     "id": "industry.rail-equipment",
@@ -1548,7 +2493,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：车辆/维保等收入拆分——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "orders_contract",
+        "title": "订单与合同负债线索",
+        "hint": "订单与合同负债线索——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流与应收",
+        "hint": "经营现金流与应收——有原文才写"
+      },
+      {
+        "id": "inventory_capex",
+        "title": "资本开支",
+        "hint": "资本开支——有原文才写；项目验收节奏对利润影响要写清"
+      }
+    ]
   },
   {
     "id": "industry.telecom-equipment",
@@ -1589,7 +2561,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "revenue_profit",
+        "title": "收入与盈利",
+        "hint": "收入与盈利：营收、毛利率/净利率——有原文才写"
+      },
+      {
+        "id": "structure",
+        "title": "结构",
+        "hint": "结构：运营商/政企/国际等收入拆分——有原文才写"
+      },
+      {
+        "id": "contract_collections",
+        "title": "合同负债与回款",
+        "hint": "合同负债与回款：合同负债、应收、经营现金流——有原文才写"
+      },
+      {
+        "id": "rd",
+        "title": "研发强度",
+        "hint": "研发强度：研发费用率——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "汇兑与项目验收影响",
+        "hint": "汇兑与项目验收影响——有原文才写；5G/6G 口号须有报表证据"
+      }
+    ]
   },
   {
     "id": "industry.steel",
@@ -1630,7 +2629,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume_price",
+        "title": "量价",
+        "hint": "量价：钢材销量与均价——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利率",
+        "hint": "毛利率——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货",
+        "hint": "存货——有原文才写"
+      },
+      {
+        "id": "revenue_cost",
+        "title": "成本",
+        "hint": "成本：铁矿石/煤相关披露——有原文才写"
+      },
+      {
+        "id": "operating_cash",
+        "title": "经营现金流与资本开支",
+        "hint": "经营现金流与资本开支——有原文才写；量价与库存是核心，勿套成长股叙事"
+      }
+    ]
   },
   {
     "id": "industry.lithium-mining",
@@ -1674,7 +2700,34 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "price",
+        "title": "价",
+        "hint": "价：锂化合物售价或均价线索（锂价敏感）——有原文才写"
+      },
+      {
+        "id": "volume",
+        "title": "量",
+        "hint": "量：销量/产量——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率与成本曲线——有原文才写"
+      },
+      {
+        "id": "inventory",
+        "title": "存货与减值",
+        "hint": "存货与减值：存货及跌价/资产减值——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "现金流与资源",
+        "hint": "现金流与资源：经营现金流；产能建设/资源量相关披露——有原文才写"
+      }
+    ]
   },
   {
     "id": "industry.panel",
@@ -1717,6 +2770,33 @@
       "可转债当季报",
       "EPS 千元换算"
     ],
-    "notes": ""
+    "notes": "",
+    "attributionModules": [
+      {
+        "id": "volume",
+        "title": "量",
+        "hint": "量：出货面积/出货量线索——有原文才写"
+      },
+      {
+        "id": "price",
+        "title": "价",
+        "hint": "价：面板均价线索——有原文才写"
+      },
+      {
+        "id": "gross_margin",
+        "title": "毛利",
+        "hint": "毛利：毛利率（价格敏感）——有原文才写"
+      },
+      {
+        "id": "inventory_impairment",
+        "title": "存货与跌价",
+        "hint": "存货与跌价：存货及跌价——有原文才写"
+      },
+      {
+        "id": "d5",
+        "title": "折旧与资本开支",
+        "hint": "折旧与资本开支：折旧、Capex、经营现金流——有原文才写"
+      }
+    ]
   }
 ]

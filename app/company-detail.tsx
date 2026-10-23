@@ -22,7 +22,12 @@ import { AnswerFeedback } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
-import { industrySkillUserFacing } from '@/lib/industry-skills-ui';
+import {
+  depthAttributionLead,
+  industryAttributionModules,
+  industrySkillUserFacing,
+  FALLBACK_ATTRIBUTION_MODULES,
+} from '@/lib/industry-skills-ui';
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import './company-detail.css';
@@ -44,8 +49,6 @@ type Message = {
 };
 type Clip = { id: string; kind: FocusKind; quote: string; page?: number; title?: string };
 const emptyOutline: Outline = { indexedPages: 0, pages: [], outline: [] };
-const moduleLabels = { business: '主营业务', attribution: '净利润变动', anomalies: '异常指标提示', history: '历史趋势详情', peers: '同业对比' };
-const compactModuleIds = new Set(['business', 'attribution', 'anomalies']);
 const starterAsks = [
   { label: '营收增长主因', question: '营业收入变动的主要原因是什么？请引用原文。' },
   { label: '净利润增长主因', question: '归母净利润变动的主要原因是什么？请引用原文。' },
@@ -735,11 +738,20 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const verdictChanges = verdict?.changes ?? [];
   const verdictGenerating = verdictStatus === 'loading' || verdictRefreshing;
   const flaggedMoves = changes.filter(d => Math.abs(d.amount!) >= 30);
+  const skillDepthModules = industryAttributionModules(selected.industry);
+  const depthModuleDefs = skillDepthModules?.length ? skillDepthModules : FALLBACK_ATTRIBUTION_MODULES;
+  const industryDepthMode = Boolean(skillDepthModules?.length);
+  const compactModuleIds = new Set(
+    industryDepthMode
+      ? depthModuleDefs.map((m) => m.id)
+      : ['business', 'attribution', 'anomalies'],
+  );
   function aiModule(id: string) {
     const ai = verdict?.modules.find(m => m.id === id);
     return ai?.conclusion ? { text: ai.conclusion, sourceRef: ai.sourceRef } : { text: '', sourceRef: [] as Citation[] };
   }
   function computedHeadline(id: string) {
+    if (industryDepthMode) return { text: '', sourceRef: [] as Citation[] };
     if (id === 'attribution' && bridge) {
       const cite = metricCitation('net_profit');
       return { text: attributionConclusion(bridge), sourceRef: cite ? [cite] : [] };
@@ -767,15 +779,22 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   function moduleHeadline(id: string) {
     const ai = aiModule(id);
     const computed = computedHeadline(id);
-    if (compactModuleIds.has(id)) return ai.text ? ai : computed;
+    if (industryDepthMode || compactModuleIds.has(id)) return ai.text ? ai : computed;
     return computed.text ? computed : ai;
   }
   function moduleHasBody(id: string) {
+    if (industryDepthMode) return false;
     if (id === 'history') return history.length >= 2;
     if (id === 'peers') return peerCodes.length > 0;
     return false;
   }
-  function pickedCard(id: string) {
+  function moduleLabel(id: string) {
+    const fromSkill = depthModuleDefs.find((m) => m.id === id)?.title;
+    if (fromSkill) return fromSkill;
+    const fromVerdict = verdict?.modules.find((m) => m.id === id)?.title;
+    return fromVerdict || id;
+  }
+    function pickedCard(id: string) {
     return overviewPick?.cardId === id ? ' cd-focus-picked' : '';
   }
   const leverage = debtRatio(selected), conversion = cashConversion(selected), margin = grossMargin(selected);
@@ -1597,13 +1616,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             <div className="cd-more-title">
               <div>
                 <h3>深度归因{industrySkillBadge(selected.industry)}</h3>
-                <p className="cd-more-lead">解释营收、利润与异常指标为何变动</p>
+                <p className="cd-more-lead">{depthAttributionLead(selected.industry)}</p>
               </div>
             </div>
-            {Object.entries(moduleLabels).map(([id,label],index)=>{
+            {depthModuleDefs.map((def,index)=>{
+              const id = def.id;
+              const label = moduleLabel(id);
               const headline = moduleHeadline(id);
               const hasBody = moduleHasBody(id);
-              const compact = compactModuleIds.has(id);
+              const compact = industryDepthMode || compactModuleIds.has(id);
               const open = !compact && expanded.includes(id);
               const moduleQuote = [label, headline.text].filter(Boolean).join('：') || label;
               return <section
@@ -1653,8 +1674,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                     {open && <div className="cd-module-content" id={`cd-content-${id}`}>
                       {headline.sourceRef.length > 0 && <div className="cd-module-cites">{headline.sourceRef.map((c, i) => citationLink(c, `${id}-${i}`))}</div>}
                       {!hasBody && !headline.text && <p className="cd-module-empty">暂无可靠结论</p>}
-                      {id==='history' && history.length >= 2 && <div className="cd-table-scroll"><table><thead><tr><th>报告期</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{history.map(r=><tr key={r.id}><th><button onClick={()=>selectReport(r)}>{period(r)}</button></th>{metricNames.map(m=><td key={m}>{format(value(r,m),m)}</td>)}</tr>)}</tbody></table></div>}
-                      {id==='peers' && peerCodes.length > 0 && <><p className="cd-note">仅比较 {period(selected)} 同类型已入库报告，不是完整行业排名。</p><div className="cd-table-scroll"><table><thead><tr><th>公司</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{peerCodes.map(code=><tr key={code} className={code===selected.code?'cd-self':''}><th>{peers.find(p=>p.code===code)?.company_name}{code===selected.code?' · 本公司':''}</th>{metricNames.map(m=><td key={m}>{format(peers.find(p=>p.code===code&&p.metric===m)?.value,m)}</td>)}</tr>)}</tbody></table></div></>}
+                      {!industryDepthMode && id==='history' && history.length >= 2 && <div className="cd-table-scroll"><table><thead><tr><th>报告期</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{history.map(r=><tr key={r.id}><th><button onClick={()=>selectReport(r)}>{period(r)}</button></th>{metricNames.map(m=><td key={m}>{format(value(r,m),m)}</td>)}</tr>)}</tbody></table></div>}
+                      {!industryDepthMode && id==='peers' && peerCodes.length > 0 && <><p className="cd-note">仅比较 {period(selected)} 同类型已入库报告，不是完整行业排名。</p><div className="cd-table-scroll"><table><thead><tr><th>公司</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{peerCodes.map(code=><tr key={code} className={code===selected.code?'cd-self':''}><th>{peers.find(p=>p.code===code)?.company_name}{code===selected.code?' · 本公司':''}</th>{metricNames.map(m=><td key={m}>{format(peers.find(p=>p.code===code&&p.metric===m)?.value,m)}</td>)}</tr>)}</tbody></table></div></>}
                     </div>}
                   </>
                 )}

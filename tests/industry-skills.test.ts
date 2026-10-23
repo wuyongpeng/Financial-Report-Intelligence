@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  FALLBACK_ATTRIBUTION_MODULES,
   getIndustrySkill,
+  industryAttributionModules,
   industryFromStructuredContext,
   industrySkillSystemAppend,
   industrySkillUserFacing,
@@ -50,4 +52,23 @@ test('银行 skill uses NIM framing', () => {
   const append = industrySkillSystemAppend('银行');
   assert.match(append, /息差|NIM/);
   assert.match(append, /不良|拨备/);
+});
+
+test('半导体 attributionModules expose volume/price/structure/gross/inventory', () => {
+  resetIndustrySkillCache();
+  const mods = industryAttributionModules('半导体');
+  assert.ok(mods);
+  assert.equal(mods!.length, 5);
+  assert.deepEqual(mods!.map((m) => m.title), ['量', '价', '结构', '毛利', '存货与资本开支']);
+  assert.deepEqual(mods!.map((m) => m.id), ['volume', 'price', 'structure', 'gross_margin', 'inventory_capex']);
+  assert.equal(industryAttributionModules('待分类'), null);
+  assert.equal(industryAttributionModules('不存在的行业XYZ'), null);
+  assert.equal(FALLBACK_ATTRIBUTION_MODULES[0].id, 'business');
+});
+
+test('fuzzy industry label still resolves 半导体 skill', () => {
+  resetIndustrySkillCache();
+  assert.equal(getIndustrySkill('半导体及元件')?.industry, '半导体');
+  assert.equal(industrySkillUserFacing('半导体及元件')?.badge, '半导体视角');
+  assert.ok(industryAttributionModules('半导体及元件')?.length);
 });

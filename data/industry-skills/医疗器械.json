@@ -37,5 +37,32 @@
     "可转债当季报",
     "EPS 千元换算"
   ],
-  "notes": ""
+  "notes": "",
+  "attributionModules": [
+    {
+      "id": "structure",
+      "title": "结构",
+      "hint": "结构：产品线收入拆分（设备 vs 耗材若可分）——有原文才写"
+    },
+    {
+      "id": "gross_margin",
+      "title": "毛利率",
+      "hint": "毛利率——有原文才写"
+    },
+    {
+      "id": "region",
+      "title": "区域",
+      "hint": "区域：国内/国际——有原文才写"
+    },
+    {
+      "id": "contract_liability",
+      "title": "回款",
+      "hint": "回款：经营现金流与应收——有原文才写"
+    },
+    {
+      "id": "d5",
+      "title": "集采影响",
+      "hint": "集采影响——有原文才写；耗材与设备勿混为一谈（若可分）"
+    }
+  ]
 }

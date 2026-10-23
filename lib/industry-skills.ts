@@ -2,11 +2,17 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import seedAll from '@/data/industry-skills/_all.json';
 import badgesSeed from '@/data/industry-skills/badges.json';
+import {
+  FALLBACK_ATTRIBUTION_MODULES,
+  depthAttributionLead,
+  industryAttributionModules as industryAttributionModulesFromSeed,
+  resolveIndustrySkillKey as resolveIndustrySkillKeyFromSeed,
+  type AttributionModuleDef,
+  type IndustrySkillUserFacing,
+} from './industry-skills-ui';
 
-export type IndustrySkillUserFacing = {
-  badge: string;
-  hover: string;
-};
+export type { AttributionModuleDef, IndustrySkillUserFacing };
+export { FALLBACK_ATTRIBUTION_MODULES, depthAttributionLead };
 
 export type IndustrySkill = {
   id: string;
@@ -16,6 +22,7 @@ export type IndustrySkill = {
   userFacing: IndustrySkillUserFacing;
   systemAppend: string;
   attributionSkeleton?: string[];
+  attributionModules?: AttributionModuleDef[];
   retrievalKeywords?: string[];
   moduleHints?: Record<string, string>;
   forbidden?: string[];
@@ -74,9 +81,27 @@ export function resetIndustrySkillCache() {
   skillCache = null;
 }
 
-export function getIndustrySkill(industry: string | null | undefined): IndustrySkill | null {
+/** Exact, then longest skill industry contained in / containing the label. */
+export function resolveIndustrySkillKey(industry: string | null | undefined): string | null {
   if (!industry || industry === '待分类') return null;
-  return loadSkills().get(industry) ?? null;
+  const trimmed = industry.trim();
+  if (!trimmed) return null;
+  const skills = loadSkills();
+  if (skills.has(trimmed)) return trimmed;
+  let best: string | null = null;
+  for (const key of skills.keys()) {
+    if (trimmed.includes(key) || key.includes(trimmed)) {
+      if (!best || key.length > best.length) best = key;
+    }
+  }
+  // Seed map may still resolve when disk is empty of a renamed skill
+  return best ?? resolveIndustrySkillKeyFromSeed(industry);
+}
+
+export function getIndustrySkill(industry: string | null | undefined): IndustrySkill | null {
+  const key = resolveIndustrySkillKey(industry);
+  if (!key) return null;
+  return loadSkills().get(key) ?? null;
 }
 
 export function industrySkillSystemAppend(industry: string | null | undefined): string {
@@ -88,12 +113,25 @@ export function industrySkillUserFacing(industry: string | null | undefined): In
   const fromSkill = getIndustrySkill(industry)?.userFacing;
   if (fromSkill?.badge) return fromSkill;
   const badges = badgesSeed as BadgeMap;
-  return badges[industry] ?? null;
+  if (badges[industry]) return badges[industry];
+  const key = resolveIndustrySkillKey(industry);
+  if (key && badges[key]) return badges[key];
+  return null;
 }
 
 /** Prefer these keywords when building a retrieval question (caller decides how). */
 export function industrySkillRetrievalKeywords(industry: string | null | undefined): string[] {
   return getIndustrySkill(industry)?.retrievalKeywords ?? [];
+}
+
+/**
+ * Industry skill attribution dimensions for 深度归因.
+ * null → caller must use FALLBACK_ATTRIBUTION_MODULES.
+ */
+export function industryAttributionModules(industry: string | null | undefined): AttributionModuleDef[] | null {
+  const fromDisk = getIndustrySkill(industry)?.attributionModules;
+  if (fromDisk?.length) return fromDisk;
+  return industryAttributionModulesFromSeed(industry);
 }
 
 /** Parse「行业 X」from structuredContext lines produced by retrieve-context. */
