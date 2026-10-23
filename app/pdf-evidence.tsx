@@ -22,6 +22,8 @@ function PageCanvas({
   slot,
   highlightQuote,
   highlightPage,
+  searchQuote,
+  searchPage,
   onHighlightY,
   onReady,
 }: {
@@ -29,6 +31,8 @@ function PageCanvas({
   slot: PageSlot;
   highlightQuote: string;
   highlightPage: number;
+  searchQuote: string;
+  searchPage: number;
   onHighlightY: (page: number, y: number | null) => void;
   onReady: (page: number, patch: Partial<PageSlot>) => void;
 }) {
@@ -68,12 +72,13 @@ function PageCanvas({
           nextBoxes.push({ str: item.str, left: x, top: y - h, width: w, height: h * 1.25 });
         }
         let firstHighlightY: number | null = null;
-        if (highlightQuote && slot.page === highlightPage) {
-          const full = items.map((item) => normalized(item.str)).join('');
-          const needle = normalized(highlightQuote);
+        const full = items.map((item) => normalized(item.str)).join('');
+        const paintHits = (rawNeedle: string, color: string, recordY: boolean) => {
+          const needle = normalized(rawNeedle);
+          if (!needle) return;
           const at = full.indexOf(needle);
           let offset = 0;
-          ctx.fillStyle = 'rgba(255, 194, 38, 0.35)';
+          ctx.fillStyle = color;
           for (const item of items) {
             const str = normalized(item.str);
             const hit = at >= 0
@@ -84,10 +89,15 @@ function PageCanvas({
             const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
             const h = Math.max(Math.abs(item.height) * viewport.scale, 8);
             const top = y - h;
-            if (firstHighlightY === null || top < firstHighlightY) firstHighlightY = top;
+            if (recordY && (firstHighlightY === null || top < firstHighlightY)) firstHighlightY = top;
             ctx.fillRect(x, top, Math.max(Math.abs(item.width) * viewport.scale, 6), h * 1.25);
           }
-        }
+        };
+        // Cite (yellow) and in-page search (blue) stay separate; parent clears one when the other jumps.
+        const citeActive = Boolean(highlightQuote && slot.page === highlightPage);
+        const searchActive = Boolean(searchQuote && slot.page === searchPage);
+        if (searchActive) paintHits(searchQuote, 'rgba(48, 100, 219, 0.28)', !citeActive);
+        if (citeActive) paintHits(highlightQuote, 'rgba(255, 194, 38, 0.35)', true);
         if (!active) return;
         setBoxes(nextBoxes);
         onHighlightY(slot.page, firstHighlightY);
@@ -109,7 +119,7 @@ function PageCanvas({
     return () => { active = false; };
     // Re-render when this page's cite highlight changes — not when the toolbar page follows scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdf, slot.page, highlightQuote, highlightQuote ? highlightPage : 0]);
+  }, [pdf, slot.page, highlightQuote, highlightQuote ? highlightPage : 0, searchQuote, searchQuote ? searchPage : 0]);
 
   const w = slot.width > 0 ? slot.width : 1;
   const h = slot.height > 0 ? slot.height : 1;
@@ -122,7 +132,7 @@ function PageCanvas({
         <canvas
           ref={canvasRef}
           className="cd-pdf-canvas"
-          aria-label={`PDF 第 ${slot.page} 页${highlightQuote && slot.page === highlightPage ? '，黄色区域为引用原文' : ''}`}
+          aria-label={`PDF 第 ${slot.page} 页${highlightQuote && slot.page === highlightPage ? '，黄色区域为引用原文' : ''}${searchQuote && slot.page === searchPage ? '，蓝色区域为页内搜索命中' : ''}`}
         />
         <div
           ref={layerRef}
@@ -148,10 +158,13 @@ function PageCanvas({
 }
 
 /** Continuous multi-page PDF viewer (NotebookLM-like vertical scroll). */
-export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onResolvePage, onTextPick, onVisiblePage }: {
+export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, searchQuote = '', searchPage = 0, onResolvePage, onTextPick, onVisiblePage }: {
   reportId: string; page: number; quote: string;
   /** Bumped only on cite / toolbar jump — scroll-follow must NOT bump this or the viewport yanks back. */
   jumpNonce?: number;
+  /** In-page search highlight — independent from cite `quote`; never written into cite state by this viewer. */
+  searchQuote?: string;
+  searchPage?: number;
   onResolvePage?: (resolved: number) => void;
   onTextPick?: (text: string, page: number) => void;
   /** Fired when continuous scroll changes the page under the reading line (not during cite jumps). */
@@ -482,6 +495,8 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, onRe
                 slot={slot}
                 highlightQuote={quote}
                 highlightPage={quote ? (shifted ?? lockedCitePage.current) : 0}
+                searchQuote={searchQuote}
+                searchPage={searchQuote ? searchPage : 0}
                 onHighlightY={onHighlightY}
                 onReady={onReady}
               />

@@ -224,6 +224,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [sourcePage, setSourcePage] = useState(1);
   const [pdfJumpNonce, setPdfJumpNonce] = useState(0);
   const [highlight, setHighlight] = useState('');
+  const [pdfSearch, setPdfSearch] = useState('');
+  const [pdfSearchHits, setPdfSearchHits] = useState<{ page: number; snippet: string }[]>([]);
+  const [pdfSearchOpen, setPdfSearchOpen] = useState(false);
+  const [searchHighlight, setSearchHighlight] = useState<{ page: number; quote: string } | null>(null);
   const [reportListOpen, setReportListOpen] = useState(false);
   const [sourceDrawerOpen, setSourceDrawerOpen] = useState(false);
   // Source pane starts expanded (NotebookLM-like), not the thin rail.
@@ -299,6 +303,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     activeId.current = report.id;
     setSelected(report); onSelect(report.id); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
     setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setFocused(null);
+    setPdfSearch(''); setPdfSearchHits([]); setPdfSearchOpen(false); setSearchHighlight(null);
     setVerdict(null); setVerdictStatus('loading'); setVerdictRefreshing(false); setVerdictError('');
   }
   useEffect(() => {
@@ -523,6 +528,23 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [jumpAsk]);
+  useEffect(() => {
+    if (!pdfSearchOpen) return;
+    function onDoc(event: MouseEvent) {
+      const target = event.target;
+      if (target instanceof Element && target.closest('.cd-pdf-search')) return;
+      setPdfSearchOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setPdfSearchOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [pdfSearchOpen]);
   useLayoutEffect(() => {
     const el = questionRef.current;
     if (!el) return;
@@ -537,7 +559,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       else sourceRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [sourcePage, highlight, sourceMode]);
+  }, [sourcePage, highlight, searchHighlight, sourceMode]);
 
   useEffect(() => {
     const root = sourceRef.current;
@@ -791,8 +813,63 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     else widenSourceForPdf(SOURCE_WIDE);
   }
 
+  function clearPdfSearchHighlight() {
+    setSearchHighlight(null);
+    setPdfSearchOpen(false);
+  }
+  function runPdfSearch(raw: string) {
+    setPdfSearch(raw);
+    const needle = raw.trim();
+    if (!needle) {
+      setPdfSearchHits([]);
+      setPdfSearchOpen(false);
+      setSearchHighlight(null);
+      return;
+    }
+    const norm = (s: string) => s.replace(/\s/g, '').toLowerCase();
+    const n = norm(needle);
+    const hits: { page: number; snippet: string }[] = [];
+    for (const p of outline.pages) {
+      const content = p.content || '';
+      if (!content) continue;
+      const matched = content.includes(needle) || norm(content).includes(n);
+      if (!matched) continue;
+      let snippet: string;
+      const idx = content.indexOf(needle);
+      if (idx >= 0) {
+        const start = Math.max(0, idx - 18);
+        const end = Math.min(content.length, idx + needle.length + 18);
+        snippet = `${start > 0 ? '…' : ''}${content.slice(start, end).replace(/\s+/g, ' ').trim()}${end < content.length ? '…' : ''}`;
+      } else {
+        snippet = content.replace(/\s+/g, ' ').trim().slice(0, 42) + (content.length > 42 ? '…' : '');
+      }
+      hits.push({ page: p.page, snippet });
+      if (hits.length >= 40) break;
+    }
+    setPdfSearchHits(hits);
+    setPdfSearchOpen(true);
+  }
+  function goPdfSearchHit(hit: { page: number; snippet: string }) {
+    const quote = pdfSearch.trim();
+    if (!quote) return;
+    readingPosition.current = null;
+    scrollPageSync.current = false;
+    // Search must not enter cite queue — clear cite paint only so blue search mark is visible.
+    setHighlight('');
+    setCitedMetric(null);
+    setResolvedPage(null);
+    setSourcePage(hit.page);
+    setPdfJumpNonce((n) => n + 1);
+    setSearchHighlight({ page: hit.page, quote });
+    setPdfSearchOpen(false);
+    widenSourceForPdf(SOURCE_WIDE);
+    if (sourceMode === 'text') {
+      window.setTimeout(() => sourceRef.current?.querySelector('mark')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80);
+    }
+  }
   function cite(c: Citation, expand = false, metric: MetricName | null = null) {
     readingPosition.current = null; scrollPageSync.current = false;
+    clearPdfSearchHighlight();
     setSourcePage(c.page); setPdfJumpNonce((n) => n + 1); setHighlight(c.quote); setResolvedPage(null); setCitedMetric(metric);
     widenSourceForPdf(SOURCE_WIDE);
     if (sourceMode === 'text' || !c.quote) {
@@ -1315,7 +1392,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   function onGutterUp() { dragRef.current = null; }
 
   const sourceText = outline.pages.find(p => p.page === sourcePage)?.content;
-  const highlightRange = sourceText ? sourceRange(sourceText, highlight) : null;
+  const textHighlight = highlight || (searchHighlight && searchHighlight.page === sourcePage ? searchHighlight.quote : '');
+  const highlightRange = sourceText && textHighlight ? sourceRange(sourceText, textHighlight) : null;
   return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''}`} >
     <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div>{onApprove && selected.status !== 'online' && <div className="cd-head-actions"><button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button></div>}</header>
     {error && <div role="alert" className="cd-error">{error}</div>}
@@ -1323,11 +1401,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     <div className="cd-columns" ref={columnsRef}>
       <div id="cd-source-panel" className={`cd-source-slot ${mobilePane==='sources'?'mobile-active':''}`} style={!sourceCollapsed ? { flex: `${colRatios.source} 1 0%`, minWidth: 200 } : undefined}>
       <aside className={`cd-sources cd-pane ${sourceDrawerOpen?'cd-source-drawer':''}`} role={sourceDrawerOpen?'dialog':undefined} aria-modal={sourceDrawerOpen?false:undefined} aria-label={sourceDrawerOpen?'财报原文阅读抽屉':'财报来源'} ref={sourcePaneRef}>
-        <div className="cd-pane-head cd-source-head"><h2><span>◇</span> 来源</h2><div className="cd-pane-tools"><button type="button" className="cd-dock cd-source-width" aria-label={colRatios.source > SOURCE_DEFAULT + 2 ? '恢复默认宽度' : '加宽来源栏'} title={colRatios.source > SOURCE_DEFAULT + 2 ? '快速回到默认宽度（约25%）' : '加宽到来源阅读宽度（约40%）'} onClick={toggleSourceWidth}><Icon name={colRatios.source > SOURCE_DEFAULT + 2 ? 'chevronsLeft' : 'chevronsRight'} size={16} /></button><button className="cd-dock" aria-label="收起来源栏" title="收起来源栏（可用中间分隔条再调宽）" aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="left" /></button></div></div>
+        <div className="cd-pane-head cd-source-head"><h2><span>◇</span> 来源</h2><div className="cd-pane-tools"><div className="cd-pdf-search"><input type="search" className="cd-pdf-search-input" value={pdfSearch} placeholder="搜原文" aria-label="页内搜索原文" aria-expanded={pdfSearchOpen} aria-controls="cd-pdf-search-results" onChange={e=>runPdfSearch(e.target.value)} onFocus={()=>{ if (pdfSearch.trim()) setPdfSearchOpen(true); }} onKeyDown={e=>{ if (e.key==='Enter' && pdfSearchHits[0]) { e.preventDefault(); goPdfSearchHit(pdfSearchHits[0]); } }} /><button type="button" className="cd-pdf-search-clear" hidden={!pdfSearch} aria-label="清空搜索" title="清空搜索" onClick={()=>{ setPdfSearch(''); setPdfSearchHits([]); setPdfSearchOpen(false); setSearchHighlight(null); }}>×</button>{pdfSearchOpen && pdfSearch.trim() ? <div id="cd-pdf-search-results" className="cd-pdf-search-results" role="listbox" aria-label="搜索命中页">{pdfSearchHits.length===0 ? <div className="cd-pdf-search-empty" role="status">无命中</div> : pdfSearchHits.map(hit=><button key={hit.page} type="button" role="option" className={searchHighlight?.page===hit.page?'is-active':''} onClick={()=>goPdfSearchHit(hit)}><b>{pageLabel(hit.page)}</b><small>{hit.snippet}</small></button>)}</div> : null}</div><button type="button" className="cd-dock cd-source-width" aria-label={colRatios.source > SOURCE_DEFAULT + 2 ? '恢复默认宽度' : '加宽来源栏'} title={colRatios.source > SOURCE_DEFAULT + 2 ? '快速回到默认宽度（约25%）' : '加宽到来源阅读宽度（约40%）'} onClick={toggleSourceWidth}><Icon name={colRatios.source > SOURCE_DEFAULT + 2 ? 'chevronsLeft' : 'chevronsRight'} size={16} /></button><button className="cd-dock" aria-label="收起来源栏" title="收起来源栏（可用中间分隔条再调宽）" aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="left" /></button></div></div>
         <details className="cd-outline"><summary><svg className="cd-outline-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg><b>提纲导航</b><span>{outline.outline.length} 个章节</span></summary><nav>{outline.outline.map(o=><button key={o.id} onClick={()=>cite({page:o.page,quote:o.highlight})}><b>{o.title}</b><span className="cd-outline-page">{pageLabel(o.page)}</span></button>)}</nav></details>
         <div className="cd-source-toolbar">
           <label><select aria-label="原文模式" value={sourceMode} onChange={e=>{const m=e.target.value as 'pdf'|'text';setSourceMode(m);if(m==='pdf')pageEnter.current='start';}}><option value="pdf">原始PDF</option><option value="text">原文文本</option></select></label>
-          <label><select aria-label="跳转原文页码" value={sourcePage} onChange={e=>{readingPosition.current=null;pageEnter.current='start';scrollPageSync.current=false;setSourcePage(Number(e.target.value));setPdfJumpNonce((n)=>n+1);setHighlight('');}}>{[...new Set([1,sourcePage,...(pageLabels.length?pageLabels:outline.pages).map(p=>p.page)])].sort((a,b)=>a-b).map(p=><option key={p} value={p}>{pageLabel(p)}</option>)}</select></label>
+          <label><select aria-label="跳转原文页码" value={sourcePage} onChange={e=>{readingPosition.current=null;pageEnter.current='start';scrollPageSync.current=false;setSourcePage(Number(e.target.value));setPdfJumpNonce((n)=>n+1);setHighlight('');setSearchHighlight(null);}}>{[...new Set([1,sourcePage,...(pageLabels.length?pageLabels:outline.pages).map(p=>p.page)])].sort((a,b)=>a-b).map(p=><option key={p} value={p}>{pageLabel(p)}</option>)}</select></label>
           <span className="cd-pdf-pick-hint" tabIndex={0}>
             划词智析
             <span className="cd-pdf-pick-tip" role="tooltip">
@@ -1344,6 +1422,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </div>
           </div>}
           {highlight && <div className="cd-source-hit">已定位 · {pageDescription(sourcePage)}{resolvedPage!==null&&resolvedPage!==sourcePage?` · 已按引用原文校正至 PDF 第 ${resolvedPage} 页`:''}<small>{highlight.slice(0,100)}</small></div>}
+          {!highlight && searchHighlight && <div className="cd-source-hit cd-source-hit-search">搜索定位 · {pageDescription(searchHighlight.page)}<small>{searchHighlight.quote}</small></div>}
           {citedMetric && <div className="cd-verify">
             <div><b>正在核验：{labels[citedMetric]}</b><small>{format(value(selected,citedMetric),citedMetric)}{citedCaveat?` · ${citedCaveat}`:' · 已通过人工复核'}</small></div>
             <div className="cd-verify-actions">
@@ -1353,7 +1432,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {feedbackError && <small className="cd-verify-hint cd-verify-error">{feedbackError}</small>}
             {feedback[citedMetric] && <small className="cd-verify-hint">{feedback[citedMetric]==='correct'?'已记录你的确认，累计确认会进入复核队列。':'已记录异议，该指标会被优先人工复核。'}</small>}
           </div>}
-          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
+          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} searchQuote={searchHighlight?.quote ?? ''} searchPage={searchHighlight?.page ?? 0} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark className={highlight?'':'cd-search-mark'}>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
         </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF <Icon name="external" size={12} /></a><button onClick={()=>{draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
       </aside>
       </div>
