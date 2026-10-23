@@ -47,6 +47,29 @@ test('scales 千元 summary pages and ignores EPS/ROE footnote markers', () => {
   assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 3.65);
 });
 
+
+test('Midea-style unit inside metric key scales 千元 to 元 without page unit', () => {
+  // 美的集团等：单位写进指标名，表头不一定再写「单位：千元」。
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 营业收入（千元） 260,042,490 250,000,000 4.02% 归属于上市公司股东的净利润（千元） 20,123,456 基本每股收益（元/股） 2.35 加权平均净资产收益率 12.50%',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'revenue')?.value, 260_042_490_000);
+  assert.equal(metrics.find((item) => item.metric === 'revenue')?.priorValue, 250_000_000_000);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 20_123_456_000);
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 2.35);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 12.5);
+});
+
+test('metric-name unit wins over conflicting table unit and still skips EPS/ROE scale', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：人民币元 营业收入（千元） 260,042,490 归属于上市公司股东的净利润（万元） 1,234.5 基本每股收益 2.35 加权平均净资产收益率 12.50%',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'revenue')?.value, 260_042_490_000);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 12_345_000);
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 2.35);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 12.5);
+});
+
 test('detects 千元 inside parenthetical unit notes like bank pages', () => {
   const metrics = parseCoreMetricPages([
     '主要会计数据（人民币千元，特别注明除外）营业总收入 10,000 归属于上市公司股东的净利润 500 基本每股收益 0.12 加权平均净资产收益率 2.50%',

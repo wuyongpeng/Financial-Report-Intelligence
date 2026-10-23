@@ -52,6 +52,43 @@ function pageCurrencyUnit(text: string) {
     ?? '';
 }
 
+/** Unit written into the metric key itself, e.g. 营业收入（千元） / 营业收入(万元). */
+function labelCurrencyUnit(afterLabel: string) {
+  const head = afterLabel.slice(0, 48);
+  return head.match(/^\s*[（(]\s*(?:人民币\s*)?(亿元|百万元|万元|千元|元)\s*[)）]/)?.[1]
+    ?? head.match(/^\s*[：:]\s*(?:人民币\s*)?(亿元|百万元|万元|千元|元)(?!\s*\/)/)?.[1]
+    ?? '';
+}
+
+function isMoneyUnit(unit: string) {
+  return unit === '亿元' || unit === '百万元' || unit === '万元' || unit === '千元' || unit === '元';
+}
+
+/**
+ * Amount rows store 元. Priority: unit in metric name > unit on the number > table default.
+ * On conflict, trust the metric-name unit and warn. EPS/ROE never call this path.
+ */
+function resolveCurrencyScaleUnit(input: {
+  metric: string;
+  sourceLabel: string;
+  labelUnit: string;
+  valueUnit: string;
+  tableUnit: string;
+}) {
+  const valueUnit = isMoneyUnit(input.valueUnit) ? input.valueUnit : '';
+  const tableUnit = isMoneyUnit(input.tableUnit) ? input.tableUnit : '';
+  const labelUnit = isMoneyUnit(input.labelUnit) ? input.labelUnit : '';
+
+  if (labelUnit && tableUnit && labelUnit !== tableUnit) {
+    console.warn(`[parser] unit conflict for ${input.metric} (${input.sourceLabel}): label=${labelUnit} table=${tableUnit}; trusting label`);
+  }
+  if (labelUnit && valueUnit && labelUnit !== valueUnit) {
+    console.warn(`[parser] unit conflict for ${input.metric} (${input.sourceLabel}): label=${labelUnit} value=${valueUnit}; trusting label`);
+  }
+
+  return labelUnit || valueUnit || tableUnit || '元';
+}
+
 function scaleCurrency(value: number, unit: string) {
   const scaled = unit === '亿元' ? value * 100000000
     : unit === '百万元' ? value * 1000000
@@ -106,6 +143,7 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
   const index = pageText.indexOf(label);
   if (index < 0) return null;
   let nearby = pageText.slice(index + label.length, index + label.length + 220).replace(/[,，]/g, '').replace(/（/g, '(').replace(/）/g, ')');
+  const labelUnit = currencyMetrics.has(definition.metric) ? labelCurrencyUnit(nearby) : '';
   // Ratio/per-share rows often look like `基本每股收益（元/股）(1) 0.58`. Strip
   // small numeric footnotes anywhere before the real value. Parenthesized
   // currency amounts stay intact — those are negative values, not footnotes.
@@ -116,6 +154,9 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
       // Bare footnote without parens: `基本每股收益（元/股）1 0.58`.
       // Only strip when another numeric token follows so a lone integer EPS like `2` is kept.
       .replace(/(?:^|\s)([1-9]\d{0,2})(?=\s+-?\d+(?:\.\d+)?)/g, ' ');
+  } else if (labelUnit) {
+    // Drop `（千元）` from the key so the amount parser sees the number cleanly.
+    nearby = nearby.replace(/^\s*\(\s*(?:人民币\s*)?(亿元|百万元|万元|千元|元)\s*\)/, ' ');
   }
   // Prefer an explicit percent token for ROE (avoids bare leading integers).
   if (definition.metric === 'roe') {
@@ -147,7 +188,16 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
   let value = parseSignedNumber(valueMatch[2], valueMatch[1], valueMatch[3]);
   if (value === null) return null;
   const detectedUnit = valueMatch[4] ?? '';
-  const scaleUnit = detectedUnit || fallbackCurrencyUnit || pageCurrencyUnit(pageText) || '元';
+  const tableUnit = fallbackCurrencyUnit || pageCurrencyUnit(pageText) || '';
+  const scaleUnit = currencyMetrics.has(definition.metric)
+    ? resolveCurrencyScaleUnit({
+      metric: definition.metric,
+      sourceLabel: label,
+      labelUnit,
+      valueUnit: detectedUnit,
+      tableUnit,
+    })
+    : detectedUnit || tableUnit || '元';
 
   if (currencyMetrics.has(definition.metric)) {
     value = scaleCurrency(value, scaleUnit);
@@ -166,7 +216,7 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
       priorValue = undefined;
     }
   }
-  return { value, detectedUnit, priorValue, yoyPct };
+  return { value, detectedUnit: labelUnit || detectedUnit, priorValue, yoyPct };
 }
 
 function allLabelPositions(text: string, label: string) {
