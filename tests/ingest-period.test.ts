@@ -64,6 +64,25 @@ test('pending download skips non-reports and already-ingested periods', () => {
   }, covered), null);
 });
 
+test('earnings preannouncements / flash reports are not full Q1/H1/Q3/FY filings', () => {
+  const yanhu = '青海盐湖工业股份有限公司2026 年前三季度业绩预';
+  assert.equal(classifyReportTitle(yanhu), 'other');
+  assert.equal(isFullFinancialReport(yanhu), false);
+  assert.equal(canonicalPeriodFromTitle(yanhu, '2026-10-15'), null);
+  assert.equal(isFullFinancialReport('某某公司2026年前三季度业绩预告'), false);
+  assert.equal(isFullFinancialReport('某某公司2026年第三季度业绩快报'), false);
+  assert.equal(isFullFinancialReport('某某公司2025年度业绩预告'), false);
+  // Formal four filings still pass
+  assert.equal(isFullFinancialReport('美的集团2026年一季度报告'), true);
+  assert.equal(isFullFinancialReport('美的集团2026年半年度报告'), true);
+  assert.equal(isFullFinancialReport('美的集团2026年第三季度报告'), true);
+  assert.equal(isFullFinancialReport('美的集团2025年年度报告'), true);
+  assert.equal(canonicalPeriodFromTitle('美的集团2026年一季度报告', '2026-04-29'), '2026Q1');
+  assert.equal(canonicalPeriodFromTitle('美的集团2026年半年度报告', '2026-08-27'), '2026H1');
+  assert.equal(canonicalPeriodFromTitle('美的集团2026年第三季度报告', '2026-10-30'), '2026Q3');
+  assert.equal(canonicalPeriodFromTitle('美的集团2025年年度报告', '2026-03-27'), '2025FY');
+});
+
 test('convertible-bond and offering titles are not full financial reports', () => {
   const luxshareBond = '立讯精密工业股份有限公司2026年第三季度可转换公司债券转股结果暨股份变动公告';
   assert.equal(classifyReportTitle(luxshareBond), 'other');

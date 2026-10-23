@@ -18,7 +18,8 @@ function compactTitle(title: string) {
   return String(title ?? '').replace(/\s+/g, '');
 }
 
-/** Classify A-share filing titles. Check 半年/季度 before 年度 — 「一季度报告」must not become 年报. */
+/** Classify A-share filing titles. Check 半年/季度 before 年度 — 「一季度报告」must not become 年报.
+ * Only formal Q1 / H1 / Q3 / FY filings — 业绩预告/快报等非正式件一律 other. */
 export function classifyReportTitle(title: string): FilingReportType {
   const t = compactTitle(title);
   if (/摘要/.test(t) && !/更正/.test(t)) {
@@ -27,16 +28,19 @@ export function classifyReportTitle(title: string): FilingReportType {
   // Bond / equity offerings often mention 季度/年度 in the title but are not full reports.
   if (/可转债|可转换公司债券|转换公司债券|公司债券|债券募集|募集说明书|配股说明书|增发|非公开发行/.test(t)) return 'other';
   if (/业绩说明会|投资者说明会|主要经营数据|经营数据公告|H股公告|责任追究|管理办法|资本管理|第三支柱/.test(t)) return 'other';
+  // Earnings preannouncements / flash reports (e.g. 「前三季度业绩预」) — not full filings.
+  if (/业绩预[告增减盈亏]|业绩预$|业绩快报|盈利预告|亏损预告/.test(t)) return 'other';
   if (/半年度报告|半年报|中期报告/.test(t)) return 'semiannual';
-  if (/第[一二两三123]季度|[一二三]季度|[一二三]季报|Q[1-3]报告|季度报告|季报/.test(t)) return 'quarterly';
+  // Require 报告/季报 so bare 「三季度」in 业绩预 titles cannot match.
+  if (/第[一二两三123]季度报告|[一二三]季度报告|[一二三]季报|Q[1-3]报告|季度报告/.test(t)) return 'quarterly';
   if (/年度报告/.test(t) || (/(?<!半)年报/.test(t) && !/信息披露|制度/.test(t))) return 'annual';
   return 'other';
 }
 
-/** True for the actual 年报/中报/季报 PDF, not 说明会 / 经营数据 / 摘要. */
+/** True for the actual 年报/中报/季报 PDF, not 说明会 / 经营数据 / 摘要 / 业绩预告. */
 export function isFullFinancialReport(title: string) {
   const t = compactTitle(title);
-  if (/摘要|取消|英文版/.test(t)) return false;
+  if (/摘要|取消|英文版|业绩预|业绩快报/.test(t)) return false;
   return classifyReportTitle(title) !== 'other';
 }
 
@@ -109,6 +113,6 @@ export function pendingDownloadSkipReason(
 }
 
 export function pendingDownloadSkipMessage(reason: PendingDownloadSkip) {
-  if (reason === 'not-report') return '非完整财报（说明会/经营数据/摘要/债券或增发等），跳过下载';
+  if (reason === 'not-report') return '非完整财报（业绩预告/快报/说明会/经营数据/摘要/债券或增发等），跳过下载';
   return '同期货报已从其他来源入库，跳过重复下载';
 }
