@@ -136,17 +136,6 @@ export async function GET() {
         published_at DESC
       LIMIT 40
     `;
-    const parseParked = await db<Array<{
-      code: string; company_name: string; status: string; title: string; published_at: string;
-      parse_error: string | null; pdf_key: string | null; source: string;
-    }>>`
-      SELECT code, company_name, status, title, published_at, parse_error, pdf_key, source
-      FROM announcements ann
-      WHERE status = 'parse_parked'
-        AND EXISTS (SELECT 1 FROM companies c WHERE c.code=ann.code AND c.enabled=true)
-      ORDER BY updated_at DESC
-      LIMIT 20
-    `;
     const parsingRows = await db<Array<{
       id: string; code: string; company_name: string; status: string; title: string; published_at: string;
       source: string; updated_at: string; parse_error: string | null;
@@ -229,6 +218,7 @@ export async function GET() {
         else if (i === 0) reason = '即将解析';
         else reason = `排队第 ${i + 1} 位`;
         return {
+          id: row.id,
           code: row.code,
           name: row.company_name,
           label,
@@ -243,27 +233,11 @@ export async function GET() {
           rawStatus: row.status,
           source: row.source,
           lastError: row.parse_error,
-        };
-      }),
-      ...parseParked.map((row, i) => {
-        const { period, label } = queueLabel(row.company_name, row.title, row.published_at);
-        return {
-          code: row.code,
-          name: row.company_name,
-          label,
-          period,
-          status: 'parked',
-          stage: 'parse' as const,
-          position: parseQueue.length + i + 1,
-          title: row.title,
-          parseError: row.parse_error,
-          pdfKey: row.pdf_key,
-          reason: row.parse_error ?? '已搁置，不占用待解析',
-          rawStatus: row.status,
-          source: row.source,
+          abortable: true,
         };
       }),
     ];
+    // parse_parked 只计入 counts.parse_parked，不并进排队解析列表
 
     const progressById = new Map(progress.map((p) => [p.id, p]));
     const activeDownload = downloadingRows.map((row, i) => {
@@ -290,6 +264,7 @@ export async function GET() {
       const mem = progressById.get(row.id);
       const ageMs = Math.max(0, Date.now() - new Date(row.updated_at).getTime());
       return {
+        id: row.id,
         code: row.code,
         name: row.company_name,
         label,
@@ -302,6 +277,7 @@ export async function GET() {
         progress: mem?.detail ?? `正在解析 · 已 ${formatParseElapsed(ageMs)} / 限 5分钟`,
         startedAt: mem?.startedAt ?? row.updated_at,
         ageMs,
+        abortable: true,
       };
     });
     const activeParseIds = new Set(parsingRows.map((r) => r.id));
@@ -322,7 +298,8 @@ export async function GET() {
         ageMs: Math.max(0, Date.now() - new Date(p.startedAt).getTime()),
       }));
     const activeItems = [...activeDownload, ...activeParseFromDb, ...activeParseFromMem];
-    const pendingParseItems = queueItems.filter((q) => q.stage === 'parse');
+    // 仅 status=downloaded 的排队项（queueItems 的 parse stage）；不含 parse_parked
+    const pendingParseItems = queueItems.filter((q) => q.stage === 'parse' && q.rawStatus !== 'parse_parked');
     const activeParseItems = [...activeParseFromDb, ...activeParseFromMem];
 
     const coverageBootstrap = getGapScanState();

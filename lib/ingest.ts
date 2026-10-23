@@ -31,6 +31,16 @@ import {
 } from './ingest-progress';
 import { getIngestSettings } from './ingest-settings';
 import { PARSE_PRIORITY_MANUAL } from './parse-queue';
+import {
+  abortParseRun,
+  consumeParseAbort,
+  emptyTextParkMessage,
+  hasParseAbortRequest,
+  PARSE_ABORT_MESSAGE,
+  registerParseRun,
+  releaseParseRun,
+  requestParseAbort,
+} from './parse-abort';
 import { isPdfBytes, looksLikeBlockedPdf, pdfUrlCandidates, pickCninfoFallback } from './pdf-download';
 
 const companies = companiesJson as Company[];
@@ -386,6 +396,29 @@ export async function enqueueParseFront(ids: string[]) {
   return result.count;
 }
 
+export async function abortParseAnnouncements(ids: string[]) {
+  await ensureBackendSchema();
+  const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+  if (!unique.length) return { aborted: 0, abortedNow: 0 };
+  const db = getDb();
+  let abortedNow = 0;
+  for (const id of unique) {
+    requestParseAbort(id);
+    if (abortParseRun(id)) abortedNow += 1;
+  }
+  const result = await db`
+    UPDATE announcements
+    SET status='parse_parked',
+        parse_priority=0,
+        parse_error=${PARSE_ABORT_MESSAGE},
+        updated_at=NOW()
+    WHERE id=ANY(${unique}::text[])
+      AND status IN ('downloaded', 'parsing', 'parse_partial')
+  `;
+  for (const id of unique) clearIngestProgress(id);
+  return { aborted: result.count, abortedNow };
+}
+
 export async function countManualParsePriority() {
   await ensureBackendSchema();
   const [row] = await getDb()<Array<{ n: number }>>`
@@ -410,7 +443,8 @@ async function parseStoredAnnouncement(
   const claimed = await db<Array<{ id: string }>>`
     UPDATE announcements
     SET status='parsing', parse_error=NULL, parse_priority=0, updated_at=${parseStarted}
-    WHERE id=${record.id} AND status <> 'parsing'
+    WHERE id=${record.id}
+      AND status IN ('downloaded', 'parse_partial', 'review', 'online')
     RETURNING id
   `;
   if (!claimed.length) return 'skipped';
@@ -425,8 +459,11 @@ async function parseStoredAnnouncement(
     detail: '解析正文与指标…',
     startedAt: parseStarted,
   });
-  const parseController = new AbortController();
+  const parseController = registerParseRun(record.id);
   const parseTimer = setTimeout(() => parseController.abort(), 5 * 60 * 1000);
+  const abortPoll = setInterval(() => {
+    if (hasParseAbortRequest(record.id)) parseController.abort();
+  }, 500);
   try {
     let payload = bytes;
     if (!payload && filePath && !(onDiskBytes != null && shouldExtractTextExternally(onDiskBytes))) {
@@ -444,19 +481,33 @@ async function parseStoredAnnouncement(
       parseCoreMetrics(parseBytes, { filePath }),
       new Promise<never>((_, reject) => {
         parseController.signal.addEventListener('abort', () => {
-          reject(new Error('解析超时（5分钟）'));
+          reject(new Error(hasParseAbortRequest(record.id) ? PARSE_ABORT_MESSAGE : '解析超时（5分钟）'));
         }, { once: true });
       }),
     ]);
-    if (!extracted.metrics.length && !extracted.chunks.length) {
+    if (hasParseAbortRequest(record.id) || parseController.signal.aborted) {
+      consumeParseAbort(record.id);
       clearIngestProgress(record.id);
       await db`
         UPDATE announcements
         SET status='parse_parked',
             parse_priority=0,
-            parse_error='未能抽取正文（扫描件或无法读出文字），已搁置',
+            parse_error=${PARSE_ABORT_MESSAGE},
             updated_at=NOW()
-        WHERE id=${record.id}
+        WHERE id=${record.id} AND status='parsing'
+      `;
+      return 'parked';
+    }
+    if (!extracted.metrics.length && !extracted.chunks.length) {
+      clearIngestProgress(record.id);
+      const parkMsg = emptyTextParkMessage(record.title);
+      await db`
+        UPDATE announcements
+        SET status='parse_parked',
+            parse_priority=0,
+            parse_error=${parkMsg},
+            updated_at=NOW()
+        WHERE id=${record.id} AND status='parsing'
       `;
       return 'parked';
     }
@@ -495,7 +546,7 @@ async function parseStoredAnnouncement(
           parsed_at=${createdAt}, parse_priority=0,
           parse_error=${coreOk ? null : '指标不完整（已解析，仅标注，不自动重试）'},
           updated_at=${createdAt}
-        WHERE id=${record.id}
+        WHERE id=${record.id} AND status='parsing'
       `;
     });
     clearIngestProgress(record.id);
@@ -503,16 +554,28 @@ async function parseStoredAnnouncement(
   } catch (error) {
     clearIngestProgress(record.id);
     const message = String(error).replace(/^Error:\s*/i, '');
+    const userAborted = hasParseAbortRequest(record.id) || /用户手动中止|手动中止/.test(message);
+    if (userAborted) {
+      consumeParseAbort(record.id);
+      await db`
+        UPDATE announcements
+        SET status='parse_parked', parse_priority=0, parse_error=${PARSE_ABORT_MESSAGE}, updated_at=${new Date().toISOString()}
+        WHERE id=${record.id} AND status IN ('parsing', 'downloaded')
+      `;
+      return 'parked';
+    }
     const timedOut = /aborted|AbortError|超时/i.test(message);
     const parseError = timedOut ? '解析超时（5分钟），已排到队尾' : message;
     await db`
       UPDATE announcements
       SET status='downloaded', parse_priority=0, parse_error=${parseError}, updated_at=${new Date().toISOString()}
-      WHERE id=${record.id}
+      WHERE id=${record.id} AND status='parsing'
     `;
     return 'failed';
   } finally {
+    clearInterval(abortPoll);
     clearTimeout(parseTimer);
+    releaseParseRun(record.id);
   }
 }
 

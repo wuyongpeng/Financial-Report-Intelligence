@@ -614,6 +614,7 @@ export default function CrawlOverview() {
   const verdictActiveBtnRef = useRef<HTMLButtonElement>(null);
   const verdictSkipBtnRef = useRef<HTMLButtonElement>(null);
   const [verdictAbortingId, setVerdictAbortingId] = useState<string | null>(null);
+  const [parseAbortingId, setParseAbortingId] = useState<string | null>(null);
   const [verdictElapsedTick, setVerdictElapsedTick] = useState(0);
   const [verdictSkips, setVerdictSkips] = useState<Array<{
     id: string;
@@ -1562,8 +1563,10 @@ export default function CrawlOverview() {
   }, [optimisticJobs, live?.queueItems, queueWaitTick]);
 
   const parseQueueItems = useMemo(() => {
-    const list = live?.pendingParseItems ?? live?.queueItems?.filter((q) => q.stage === 'parse') ?? [];
+    const list = (live?.pendingParseItems ?? live?.queueItems?.filter((q) => q.stage === 'parse') ?? [])
+      .filter((q) => q.status !== 'parked' && q.rawStatus !== 'parse_parked');
     const rest = list.map((q) => ({
+      id: q.id,
       code: q.code,
       name: q.name,
       label: queueDisplayName(q),
@@ -1572,10 +1575,12 @@ export default function CrawlOverview() {
       status: q.status,
       source: q.source,
       reason: q.reason,
+      abortable: Boolean(q.id),
     }));
     const extra = optimisticJobs
       .filter((job) => job.stage === 'parse' && job.bucket === 'queue' && !jobCovered(job, rest))
       .map((job, i) => ({
+        id: undefined as string | undefined,
         code: job.code,
         name: job.name,
         label: job.label,
@@ -1583,6 +1588,7 @@ export default function CrawlOverview() {
         position: i + 1,
         status: 'queued',
         reason: '已插到解析队首，空闲时优先',
+        abortable: false,
       }));
     return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
   }, [optimisticJobs, live?.pendingParseItems, live?.queueItems]);
@@ -1625,6 +1631,7 @@ export default function CrawlOverview() {
         ? `正在解析 · 已 ${formatParseElapsed(ageMs)} / 限 5分钟`
         : q.progress;
       return {
+        id: q.id,
         code: q.code,
         name: q.name,
         label: queueDisplayName(q),
@@ -1635,11 +1642,13 @@ export default function CrawlOverview() {
         reason: q.reason,
         progress,
         startedAt,
+        abortable: Boolean(q.id),
       };
     });
     const extra = optimisticJobs
       .filter((job) => job.stage === 'parse' && job.bucket === 'active' && !jobCovered(job, rest))
       .map((job, i) => ({
+        id: undefined as string | undefined,
         code: job.code,
         name: job.name,
         label: job.label,
@@ -1649,6 +1658,7 @@ export default function CrawlOverview() {
         reason: '正在解析指定财报…',
         progress: '正在解析指定财报…',
         startedAt: undefined as string | undefined,
+        abortable: false,
       }));
     return [...extra, ...rest.map((item, i) => ({ ...item, position: extra.length + i + 1 }))];
   }, [optimisticJobs, live?.activeParseItems, live?.activeItems, parseElapsedTick]);
@@ -1739,6 +1749,27 @@ export default function CrawlOverview() {
       setTriggerMsg(`网络异常：${String(err)}`);
     } finally {
       setVerdictAbortingId(null);
+      window.setTimeout(() => setTriggerMsg(''), 6000);
+    }
+  }
+
+  async function abortParse(id: string, label: string) {
+    if (!window.confirm(`中止「${label}」的排队解析？\n\n该份会退出自动解析队列（搁置）。需要时可在详情页再点「解析」重新入队。`)) return;
+    setParseAbortingId(id);
+    setTriggerMsg('');
+    try {
+      const response = await fetch('/api/crawl/parse-queue', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'abort', id }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; note?: string };
+      setTriggerMsg(!response.ok ? (payload.error ?? '中止失败') : (payload.note ?? `已中止 ${label}`));
+      await refreshLive();
+    } catch (err) {
+      setTriggerMsg(`网络异常：${String(err)}`);
+    } finally {
+      setParseAbortingId(null);
       window.setTimeout(() => setTriggerMsg(''), 6000);
     }
   }
@@ -1930,7 +1961,10 @@ export default function CrawlOverview() {
                 title="排队解析"
                 items={parseQueueItems}
                 empty="暂无排队解析"
-                note="闲时单队列。手动点「解析」插到队首；超时或失败会记下错误并排到队尾。详情页打开会立即并发解析，不进这支队列。"
+                note="闲时单队列。点「中止」退出排队（搁置）；稍后详情页再点「解析」可重新入队。超时/失败记错误排队尾；已搁置不再占队首。"
+                onAbort={(id, label) => void abortParse(id, label)}
+                abortingId={parseAbortingId}
+                actionTitle="中止本份：退出自动排队解析（搁置）。稍后可手动再解析。"
                 onClose={() => setQueuePopover(null)}
                 anchorRef={parseQueueBtnRef}
               />
@@ -1954,8 +1988,11 @@ export default function CrawlOverview() {
                 items={parsingItems}
                 empty={parseQueueCount > 0 ? '解析槽空闲，排队等待领取' : '当前无解析任务'}
                 note={parsingItems[0]
-                  ? `当前：${parsingItems[0].label} · ${parsingItems[0].progress ?? '计时中'}`
+                  ? `当前：${parsingItems[0].label} · ${parsingItems[0].progress ?? '计时中'}。可点「中止」退出。`
                   : (paused ? '自动抓取已关：已下载 PDF 仍会继续解析。' : undefined)}
+                onAbort={(id, label) => void abortParse(id, label)}
+                abortingId={parseAbortingId}
+                actionTitle="中止本份：停止解析并退出队列（搁置）。稍后可手动再解析。"
                 onClose={() => setQueuePopover(null)}
                 anchorRef={parseActiveBtnRef}
               />
