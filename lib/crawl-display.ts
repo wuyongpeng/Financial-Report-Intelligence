@@ -395,6 +395,51 @@ export function buildBatchParseTriggerBodies(announcementIds: string[], chunkSiz
   return bodies;
 }
 
+
+/** Bulk 批量智析入队：每批最多这么多（与 verdict-queue enqueue 上限一致）。 */
+export const BATCH_VERDICT_QUEUE_CHUNK = 200;
+
+export type BatchVerdictEnqueueItem = { id: string; refresh?: boolean };
+
+/** 构造批量智析入队请求体：只入队，不逐份 POST+轮询。 */
+export function buildBatchVerdictEnqueueBodies(
+  items: Array<{ id: string; refresh?: boolean }>,
+  chunkSize = BATCH_VERDICT_QUEUE_CHUNK,
+) {
+  const byId = new Map<string, BatchVerdictEnqueueItem>();
+  for (const item of items) {
+    const id = typeof item.id === 'string' ? item.id.trim() : '';
+    if (!id) continue;
+    const prev = byId.get(id);
+    byId.set(id, { id, refresh: Boolean(item.refresh) || Boolean(prev?.refresh) });
+  }
+  const unique = [...byId.values()];
+  const size = Math.max(1, Math.floor(chunkSize) || BATCH_VERDICT_QUEUE_CHUNK);
+  const bodies: Array<{ action: 'enqueue'; items: BatchVerdictEnqueueItem[] }> = [];
+  for (let i = 0; i < unique.length; i += size) {
+    bodies.push({
+      action: 'enqueue',
+      items: unique.slice(i, i + size),
+    });
+  }
+  return bodies;
+}
+
+/** 「排队智析(n)」= 尚未开始跑的排队份数（含 bulk 文件队列），不是全库待补 − 智析中。 */
+export function resolveVerdictQueuedBadge(input: {
+  pending: number;
+  used: number;
+  bulkPending: number;
+  queuedItemCount: number;
+}) {
+  return Math.max(
+    Math.max(0, input.bulkPending),
+    Math.max(0, input.queuedItemCount),
+    Math.max(0, input.pending - input.used),
+  );
+}
+
+
 export function formatQueueLastError(raw: string | null | undefined) {
   if (!raw) return null;
   const text = raw.replace(/^Error:\s*/i, '').trim();

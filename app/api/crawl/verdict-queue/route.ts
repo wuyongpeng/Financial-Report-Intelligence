@@ -11,7 +11,9 @@ import {
   requestVerdictAbort,
 } from '@/lib/verdict-abort';
 import { enqueuePriorityVerdict } from '@/lib/verdict-priority';
+import { enqueueBulkReportVerdicts } from '@/lib/verdict-bulk-queue';
 import { getVerdictQueueState } from '@/lib/verdict-queue';
+import { BATCH_VERDICT_QUEUE_CHUNK } from '@/lib/crawl-display';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,17 +57,54 @@ export async function GET() {
 }
 
 /**
+ * action=enqueue 批量入队智析（chunk ≤ 200），worker 领取；不触发 Next after()。
  * action=abort  中止一份正在智析的报告。语义唯一：**跳过并标记**。
  *   该份立即从「排队智析」计数中扣除，不会在下一 tick 被重新领取；
  *   空出的槽位由排队队列最前面的任务补位。
  * action=retry  撤销跳过标记并插队，让它重新智析。
  * action=retryAll 撤销全部跳过标记。
  */
+function sanitizeBulkEnqueueItems(body: {
+  items?: unknown;
+  announcementIds?: unknown;
+  refreshIds?: unknown;
+}, limit = BATCH_VERDICT_QUEUE_CHUNK) {
+  const cap = Math.max(1, Math.min(Math.floor(limit) || BATCH_VERDICT_QUEUE_CHUNK, BATCH_VERDICT_QUEUE_CHUNK));
+  const refreshIds = new Set<string>();
+  if (Array.isArray(body.refreshIds)) {
+    for (const raw of body.refreshIds) {
+      if (typeof raw === 'string' && raw.trim()) refreshIds.add(raw.trim());
+    }
+  }
+  const out: Array<{ id: string; refresh: boolean }> = [];
+  const seen = new Set<string>();
+  const push = (id: string, refresh: boolean) => {
+    const key = id.trim();
+    if (!key || seen.has(key) || out.length >= cap) return;
+    seen.add(key);
+    out.push({ id: key, refresh: refresh || refreshIds.has(key) });
+  };
+  if (Array.isArray(body.items)) {
+    for (const raw of body.items) {
+      if (!raw || typeof raw !== 'object') continue;
+      const row = raw as { id?: unknown; refresh?: unknown };
+      if (typeof row.id !== 'string') continue;
+      push(row.id, row.refresh === true);
+    }
+  }
+  if (Array.isArray(body.announcementIds)) {
+    for (const raw of body.announcementIds) {
+      if (typeof raw === 'string') push(raw, false);
+    }
+  }
+  return out;
+}
+
 export async function POST(request: Request) {
   const auth = authorized(request);
   if (!auth) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  let body: { action?: unknown; id?: unknown } = {};
+  let body: { action?: unknown; id?: unknown; items?: unknown; announcementIds?: unknown; refreshIds?: unknown } = {};
   try {
     body = await request.json();
   } catch {
@@ -74,6 +113,25 @@ export async function POST(request: Request) {
 
   const action = typeof body.action === 'string' ? body.action : 'abort';
   const id = typeof body.id === 'string' ? body.id.trim() : '';
+
+  if (action === 'enqueue' || action === 'enqueueBatch') {
+    const items = sanitizeBulkEnqueueItems(body);
+    if (!items.length) {
+      return Response.json({ error: '需要 items 或 announcementIds' }, { status: 400 });
+    }
+    const result = await enqueueBulkReportVerdicts(items);
+    return Response.json(
+      {
+        ok: true,
+        auth,
+        action: 'enqueue',
+        queued: result.queued,
+        skipped: result.skipped,
+        note: `已入队智析 ${result.queued} 份` + (result.skipped ? `，跳过 ${result.skipped}` : ''),
+      },
+      { headers: { 'cache-control': 'no-store' } },
+    );
+  }
 
   if (action === 'retryAll') {
     const removed = clearAllVerdictSkips();

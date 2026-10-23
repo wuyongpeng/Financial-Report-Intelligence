@@ -396,6 +396,12 @@ async function releaseQueueClaim(reportId: string, previous: VerdictRow | null) 
   `;
 }
 
+
+/** Pure gate: ready rows are skipped unless force (bulk/manual refresh). */
+export function queuedVerdictReadySkip(status: string | null | undefined, force?: boolean) {
+  return status === 'ready' && force !== true;
+}
+
 export type QueuedVerdictOutcome = 'ok' | 'fail' | 'busy' | 'skip' | 'aborted';
 
 function isAbortError(error: unknown) {
@@ -408,10 +414,13 @@ export async function runQueuedVerdict(
   options: VerdictGenerateOptions & { force?: boolean } = {},
 ): Promise<{ outcome: QueuedVerdictOutcome; error: string | null }> {
   const previous = await loadRow(reportId);
-  if (previous?.status === 'ready') return { outcome: 'skip', error: null };
+  if (queuedVerdictReadySkip(previous?.status, options.force)) return { outcome: 'skip', error: null };
   if (inflight.has(reportId)) return { outcome: 'busy', error: 'LLM 正被占用，稍后重试。' };
   if (!options.force && previous?.status === 'pending' && !isStale(previous)) return { outcome: 'skip', error: null };
   if (!(await reportExists(reportId))) return { outcome: 'skip', error: null };
+
+  // force 覆盖重算：失败/中止时尽量恢复旧 ready（payload 在 mark pending 后通常仍在）。
+  const retainReady = options.force ? asVerdict(previous?.payload) : null;
 
   const db = getDb();
   await db`
@@ -419,11 +428,20 @@ export async function runQueuedVerdict(
     VALUES (${reportId}, 'pending', NOW(), NOW())
     ON CONFLICT (announcement_id) DO UPDATE SET status='pending', error=NULL, updated_at=NOW()
   `;
+
+  async function releaseOrRestore() {
+    if (retainReady) {
+      await markReady(reportId, retainReady);
+      return;
+    }
+    await releaseQueueClaim(reportId, previous);
+  }
+
   try {
     const generated = await generateWithHeartbeat(reportId, options);
     // 用户中止：不写 failed（那会污染失败率与熔断），只释放 pending 占位，由调用方落 skip 标记。
     if (options.signal?.aborted) {
-      await releaseQueueClaim(reportId, previous);
+      await releaseOrRestore();
       return { outcome: 'aborted', error: '已手动中止' };
     }
     if (generated.ok) {
@@ -431,17 +449,26 @@ export async function runQueuedVerdict(
       return { outcome: 'ok', error: null };
     }
     if (generated.retryLater) {
-      await releaseQueueClaim(reportId, previous);
+      await releaseOrRestore();
       return { outcome: 'busy', error: generated.error };
     }
-    await markFailed(reportId, publicVerdictError(generated.error));
-    return { outcome: 'fail', error: publicVerdictError(generated.error) };
+    const message = publicVerdictError(generated.error);
+    if (retainReady) {
+      await markReady(reportId, retainReady);
+      return { outcome: 'fail', error: message };
+    }
+    await markFailed(reportId, message);
+    return { outcome: 'fail', error: message };
   } catch (error) {
     if (options.signal?.aborted || isAbortError(error)) {
-      await releaseQueueClaim(reportId, previous);
+      await releaseOrRestore();
       return { outcome: 'aborted', error: '已手动中止' };
     }
     const message = publicVerdictError(error instanceof Error ? error.message : String(error));
+    if (retainReady) {
+      await markReady(reportId, retainReady);
+      return { outcome: 'fail', error: message };
+    }
     await markFailed(reportId, message);
     return { outcome: 'fail', error: message };
   }

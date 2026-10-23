@@ -5,6 +5,7 @@ import { getIngestSettings, llmTotalSlots } from './ingest-settings';
 import { llmConfigured } from './llm-providers';
 import { periodFromTitle } from './ingest-period';
 import { enqueuePriorityVerdict, takePriorityVerdict } from './verdict-priority';
+import { countBulkVerdicts, listBulkVerdicts, requeueBulkVerdictsFront, takeBulkVerdicts, type BulkVerdictItem } from './verdict-bulk-queue';
 import {
   consumeVerdictAbort,
   countVerdictSkips,
@@ -19,6 +20,7 @@ import {
   getVerdictQueueJob,
   listDueVerdictJobs,
   listReportsNeedingVerdict,
+  listVerdictJobsByIds,
   peekReportVerdict,
   runQueuedVerdict,
   type VerdictQueueJob,
@@ -261,11 +263,20 @@ export type VerdictQueueViewItem = {
   abortable?: boolean;
 };
 
+
+/** Badge/pending floor: never smaller than in-flight + bulk file-queue waiting. */
+export function resolveVerdictQueuePending(needing: number, runningCount: number, bulkPending: number) {
+  return Math.max(Math.max(0, needing), Math.max(0, runningCount) + Math.max(0, bulkPending));
+}
+
 export async function loadVerdictQueueView(enabled: boolean) {
   const stored = getVerdictQueueState();
   const settings = getIngestSettings();
   const skipped = skippedVerdictIds();
-  const pending = await countReportsNeedingVerdict(skipped).catch(() => stored.pending);
+  const bulkList = listBulkVerdicts();
+  const bulkPending = bulkList.length;
+  const needing = await countReportsNeedingVerdict(skipped).catch(() => stored.pending);
+  const pending = resolveVerdictQueuePending(needing, stored.running.length, bulkPending);
   const due = await countDueVerdictJobs(VERDICT_FAIL_BACKOFF_MS, skipped).catch(() => 0);
   const preview = await listReportsNeedingVerdict(16, skipped).catch(() => [] as VerdictQueueJob[]);
   const dueJobs = await listDueVerdictJobs(16, VERDICT_FAIL_BACKOFF_MS, skipped).catch(() => [] as VerdictQueueJob[]);
@@ -289,6 +300,44 @@ export async function loadVerdictQueueView(enabled: boolean) {
       startedAt: active.startedAt,
       abortable: true,
     });
+  }
+  // Bulk file-queue waiting (manual 批量智析), after running / before auto preview.
+  const bulkJobs = await listVerdictJobsByIds(bulkList.map((item) => item.id)).catch(() => [] as VerdictQueueJob[]);
+  const bulkById = new Map(bulkJobs.map((job) => [job.id, job]));
+  for (const bulk of bulkList) {
+    if (seen.has(bulk.id)) continue;
+    seen.add(bulk.id);
+    const job = bulkById.get(bulk.id);
+    if (job) {
+      const item = asItem(job);
+      items.push({
+        id: job.id,
+        code: job.code,
+        name: job.company_name,
+        label: `${item.name} ${item.period}`,
+        period: item.period,
+        status: 'queued',
+        stage: 'verdict',
+        position: items.length + 1,
+        title: job.title,
+        reason: '批量智析排队',
+        abortable: false,
+      });
+    } else {
+      items.push({
+        id: bulk.id,
+        code: '',
+        name: bulk.id,
+        label: bulk.id,
+        period: '',
+        status: 'queued',
+        stage: 'verdict',
+        position: items.length + 1,
+        title: bulk.id,
+        reason: '批量智析排队',
+        abortable: false,
+      });
+    }
   }
   for (const job of preview) {
     if (seen.has(job.id)) continue;
@@ -324,6 +373,7 @@ export async function loadVerdictQueueView(enabled: boolean) {
     ...stored,
     enabled,
     pending,
+    bulkPending,
     due,
     note,
     items,
@@ -514,7 +564,9 @@ export async function claimVerdictJobs(want: number, busyIds: Iterable<string> =
   }
 
   const priorityId = takePriorityVerdict();
-  if (!priorityId && !control.autoVerdictEnabled) {
+  const bulkWaiting = countBulkVerdicts();
+  // 手动插队 / 批量入队在自动智析关闭时仍要跑。
+  if (!priorityId && bulkWaiting <= 0 && !control.autoVerdictEnabled) {
     await snapshot({
       enabled: false,
       status: 'paused',
@@ -529,8 +581,8 @@ export async function claimVerdictJobs(want: number, busyIds: Iterable<string> =
   }
 
   const cooldownUntil = prev.cooldownUntil ? Date.parse(prev.cooldownUntil) : NaN;
-  if (!priorityId && Number.isFinite(cooldownUntil) && cooldownUntil > Date.now()) {
-    if (priorityId) enqueuePriorityVerdict(priorityId);
+  // 批量/插队绕过冷却；仅自动队列在冷却期停。
+  if (!priorityId && bulkWaiting <= 0 && Number.isFinite(cooldownUntil) && cooldownUntil > Date.now()) {
     const remain = cooldownUntil - Date.now();
     await snapshot({
       enabled: true,
@@ -542,28 +594,55 @@ export async function claimVerdictJobs(want: number, busyIds: Iterable<string> =
   }
 
   const cap = Math.max(1, Math.floor(want));
-  let jobs: VerdictQueueJob[] = control.autoVerdictEnabled
-    ? await listDueVerdictJobs(Math.max(12, cap * 4), VERDICT_FAIL_BACKOFF_MS, skipped)
-    : [];
-  const forceIds = new Set<string>();
+  const claims: VerdictClaim[] = [];
+  const claimedIds = new Set<string>();
+
+  async function tryClaim(id: string, force: boolean) {
+    if (claims.length >= cap) return false;
+    if (!id || busy.has(id) || claimedIds.has(id) || skipped.has(id)) return false;
+    const job = await getVerdictQueueJob(id);
+    if (!job) return false;
+    claims.push({ job, force });
+    claimedIds.add(id);
+    return true;
+  }
+
+  // 1) 单份插队：pending 且未过期 → 认定 Next after() 已接手，不抢。
   if (priorityId) {
     const peek = await peekReportVerdict(priorityId);
     if (peek.status === 'pending' && !peek.stale) {
       enqueuePriorityVerdict(priorityId);
     } else if (peek.status !== 'ready') {
-      const extra = await getVerdictQueueJob(priorityId);
-      if (extra) {
-        forceIds.add(extra.id);
-        jobs = [extra, ...jobs.filter((item) => item.id !== extra.id)];
-      }
+      await tryClaim(priorityId, true);
     }
   }
 
-  const claims: VerdictClaim[] = [];
-  for (const job of jobs) {
-    if (claims.length >= cap) break;
-    if (busy.has(job.id)) continue;
-    claims.push({ job, force: forceIds.has(job.id) });
+  // 2) 批量队列：worker 自有，含刚 mark 的 pending（含 refresh force）。
+  const bulkNeed = Math.max(0, cap - claims.length);
+  if (bulkNeed > 0) {
+    const batch = takeBulkVerdicts(bulkNeed);
+    const deferred: BulkVerdictItem[] = [];
+    for (const item of batch) {
+      if (busy.has(item.id) || claimedIds.has(item.id)) {
+        deferred.push(item);
+        continue;
+      }
+      if (skipped.has(item.id)) continue;
+      await tryClaim(item.id, item.force);
+    }
+    if (deferred.length) requeueBulkVerdictsFront(deferred);
+  }
+
+  // 3) 自动 due（无/失败冷却到期/陈旧 pending）
+  let dueJobs: VerdictQueueJob[] = [];
+  if (control.autoVerdictEnabled && claims.length < cap) {
+    dueJobs = await listDueVerdictJobs(Math.max(12, cap * 4), VERDICT_FAIL_BACKOFF_MS, skipped);
+    for (const job of dueJobs) {
+      if (claims.length >= cap) break;
+      if (busy.has(job.id) || claimedIds.has(job.id)) continue;
+      claims.push({ job, force: false });
+      claimedIds.add(job.id);
+    }
   }
 
   const pending = await countReportsNeedingVerdict(skipped);
@@ -580,8 +659,8 @@ export async function claimVerdictJobs(want: number, busyIds: Iterable<string> =
     return { claims: [], delay: verdictQueueDelay('empty'), reason: 'empty' };
   }
 
-  const upcoming = jobs
-    .filter((item) => !claims.some((claim) => claim.job.id === item.id))
+  const upcoming = dueJobs
+    .filter((item) => !claimedIds.has(item.id))
     .slice(0, 8)
     .map((item) => asItem(item));
   for (const claim of claims) {

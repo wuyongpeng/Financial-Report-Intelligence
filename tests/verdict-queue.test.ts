@@ -13,6 +13,7 @@ import {
   composeVerdictQueueNote,
   pruneStuckRunning,
   pushVerdictWindow,
+  resolveVerdictQueuePending,
   shouldOpenVerdictCircuit,
   verdictQueueDelay,
   verdictWindowFailRate,
@@ -117,3 +118,10 @@ test('pruneStuckRunning 丢掉超时或缺失起始时间的幽灵任务', () =>
   const alive = pruneStuckRunning([fresh, stale, noStart], now);
   assert.deepEqual(alive.map((item) => item.id), ['a']);
 });
+
+test('resolveVerdictQueuePending floors at running + bulk', () => {
+  assert.equal(resolveVerdictQueuePending(1, 1, 5), 6);
+  assert.equal(resolveVerdictQueuePending(100, 2, 3), 100);
+  assert.equal(resolveVerdictQueuePending(0, 0, 4), 4);
+});
+

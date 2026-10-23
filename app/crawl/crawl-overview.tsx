@@ -4,6 +4,8 @@ import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type AnimationEvent, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
   buildBatchParseTriggerBodies,
+  buildBatchVerdictEnqueueBodies,
+  resolveVerdictQueuedBadge,
   canBatchParseFiling,
   canFillVerdict,
   flattenCrawlFilings,
@@ -94,6 +96,8 @@ type LivePayload = {
     enabled: boolean;
     status: string;
     pending: number;
+    /** Bulk file-queue waiting (批量智析尚未被 worker claim). */
+    bulkPending?: number;
     due?: number;
     note: string;
     nextAt: string | null;
@@ -954,29 +958,46 @@ export default function CrawlOverview() {
           }
           void refreshLive();
         }
+      } else if (mode === 'verdict') {
+        // 批量只入队：worker 按 verdictLimit 领取；覆盖重算带 refresh，不逐份 after()+轮询
+        const items = jobs
+          .map((item) => item.announcementId
+            ? { id: item.announcementId, refresh: item.verdictStatus === 'ready' }
+            : null)
+          .filter((row): row is { id: string; refresh: boolean } => Boolean(row));
+        const bodies = buildBatchVerdictEnqueueBodies(items);
+        for (const body of bodies) {
+          try {
+            const response = await fetch('/api/crawl/verdict-queue', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            const payload = await response.json() as { ok?: boolean; error?: string; queued?: number; skipped?: number };
+            if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
+            done += Number(payload.queued) || body.items.length;
+            failed += Number(payload.skipped) || 0;
+          } catch {
+            failed += body.items.length;
+          }
+          void refreshLive();
+        }
       } else {
         for (const item of jobs) {
           try {
-            if (mode === 'verdict') {
-              await requestReportVerdict(
-                item.announcementId!,
-                item.verdictStatus === 'ready' ? { refresh: true } : { fill: true },
-              );
-            } else {
-              const response = await fetch('/api/crawl/trigger', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({
-                  mode: 'manual',
-                  codes: [item.code],
-                  fullHistory: false,
-                  periods: [item.period],
-                  ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
-                }),
-              });
-              const payload = await response.json() as { ok?: boolean; error?: string };
-              if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
-            }
+            const response = await fetch('/api/crawl/trigger', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                mode: 'manual',
+                codes: [item.code],
+                fullHistory: false,
+                periods: [item.period],
+                ...(item.announcementId ? { announcementIds: [item.announcementId] } : {}),
+              }),
+            });
+            const payload = await response.json() as { ok?: boolean; error?: string };
+            if (!response.ok || payload.ok === false) throw new Error(payload.error ?? String(response.status));
             done += 1;
           } catch {
             failed += 1;
@@ -992,7 +1013,9 @@ export default function CrawlOverview() {
     }
     setTriggerMsg(mode === 'parse'
       ? `已入队解析。受理 ${done}，失败 ${failed}`
-      : `完成。成功 ${done}，失败 ${failed}`);
+      : mode === 'verdict'
+        ? `已入队智析。受理 ${done}，失败 ${failed}`
+        : `完成。成功 ${done}，失败 ${failed}`);
     window.setTimeout(() => setTriggerMsg(''), 6000);
     void refreshCoverage();
     void refreshLive();
@@ -1846,7 +1869,12 @@ export default function CrawlOverview() {
   const parseQueueCount = Math.max(live?.counts.pending_parse ?? 0, parseQueueItems.length);
   const verdictMax = live?.verdictSlots?.max ?? live?.limits.verdictLimit ?? 3;
   const verdictUsed = Math.max(live?.verdictSlots?.used ?? 0, verdictActiveItems.length);
-  const verdictPending = Math.max(0, (live?.verdictQueue?.pending ?? 0) - verdictUsed);
+  const verdictPending = resolveVerdictQueuedBadge({
+    pending: live?.verdictQueue?.pending ?? 0,
+    used: verdictUsed,
+    bulkPending: live?.verdictQueue?.bulkPending ?? 0,
+    queuedItemCount: verdictQueuedItems.length,
+  });
   const verdictSkippedCount = Math.max(live?.verdictQueue?.skippedCount ?? 0, verdictSkips.length);
 
   return (
