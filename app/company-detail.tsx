@@ -265,8 +265,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [metric, setMetric] = useState<HeadlineMetric>('revenue');
   const [overlay, setOverlay] = useState<HeadlineMetric | null>(null);
   const [expanded, setExpanded] = useState<string[]>([]);
-  /** 深度归因整块默认折叠，点标题展开。 */
-  const [depthOpen, setDepthOpen] = useState(false);
+  /** 深度归因默认展开，可点标题折叠。 */
+  const [depthOpen, setDepthOpen] = useState(true);
   const [focused, setFocused] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState('');
@@ -1600,46 +1600,43 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             )) : <span className="cd-ratio-empty">缺必要科目，暂不计算</span>}
           </section>
 
+          {disclosureFlags.length > 0 ? (
           <section className="cd-disclosure-flags" aria-label="披露排雷" id="cd-disclosure">
             <div className="cd-disclosure-head">
               <h3>披露排雷</h3>
-              <span>基于结构化指标自动提示 · 不下投资结论</span>
             </div>
-            {disclosureFlags.length === 0 ? (
-              <p className="cd-disclosure-empty">本报告未触发关注项</p>
-            ) : (
-              <ul className="cd-disclosure-list">
-                {disclosureFlags.map((flag) => {
-                  const cite = flag.metric ? metricCitation(flag.metric) : null;
-                  const quote = [flag.title, flag.phenomenon, flag.why].filter(Boolean).join(' · ');
-                  return (
-                    <li
-                      key={flag.id}
-                      className={`cd-disclosure-card cd-focus-card${pickedCard(`flag-${flag.id}`)}`}
-                      data-focus-card
-                      data-focus-id={`flag-${flag.id}`}
-                      data-focus-kind="finding"
-                      data-focus-title={flag.title}
-                      data-focus-quote={quote}
-                      {...(cite?.page ? { 'data-focus-page': String(cite.page) } : {})}
-                    >
-                      <div className="cd-disclosure-main">
-                        <b>{flag.title}</b>
-                        <p className="cd-disclosure-phenomenon">
-                          <span className="cd-disclosure-k">现象</span>
-                          {flag.phenomenon}
-                          {flag.metric ? footnote(flag.metric) : null}
-                        </p>
-                        <p className="cd-disclosure-why"><span className="cd-disclosure-k">为何值得看</span>{flag.why}</p>
-                        <p className="cd-disclosure-where"><span className="cd-disclosure-k">可选去哪查</span>{flag.where}</p>
-                      </div>
-                      {cite ? <span className="cd-disclosure-cites">{citationLink(cite, flag.id)}</span> : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <ul className="cd-disclosure-list">
+              {disclosureFlags.map((flag) => {
+                const cite = flag.metric ? metricCitation(flag.metric) : null;
+                const quote = [flag.title, flag.phenomenon, flag.why].filter(Boolean).join(' · ');
+                return (
+                  <li
+                    key={flag.id}
+                    className={`cd-disclosure-card cd-focus-card${pickedCard(`flag-${flag.id}`)}`}
+                    data-focus-card
+                    data-focus-id={`flag-${flag.id}`}
+                    data-focus-kind="finding"
+                    data-focus-title={flag.title}
+                    data-focus-quote={quote}
+                    {...(cite?.page ? { 'data-focus-page': String(cite.page) } : {})}
+                  >
+                    <div className="cd-disclosure-main">
+                      <b>{flag.title}</b>
+                      <p className="cd-disclosure-phenomenon">
+                        <span className="cd-disclosure-k">现象</span>
+                        {flag.phenomenon}
+                        {flag.metric ? footnote(flag.metric) : null}
+                      </p>
+                      <p className="cd-disclosure-why"><span className="cd-disclosure-k">为何值得看</span>{flag.why}</p>
+                      <p className="cd-disclosure-where"><span className="cd-disclosure-k">可选去哪查</span>{flag.where}</p>
+                    </div>
+                    {cite ? <span className="cd-disclosure-cites">{citationLink(cite, flag.id)}</span> : null}
+                  </li>
+                );
+              })}
+            </ul>
           </section>
+          ) : null}
 
           <section className={`cd-more-analysis${depthOpen ? '' : ' cd-more-collapsed'}`} id="cd-more">
             <div className="cd-more-title">
@@ -1652,7 +1649,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
               >
                 <div>
                   <h3>深度归因{industrySkillBadge(selected.industry)} <span className="cd-more-chevron" aria-hidden="true">{depthOpen ? '▾' : '▸'}</span></h3>
-                  <p className="cd-more-lead">{depthAttributionLead(selected.industry)}{depthOpen ? '' : ' · 点击展开'}</p>
                 </div>
               </button>
             </div>

@@ -219,19 +219,17 @@
 .cd-verdict-down .cd-verdict-dot{background:#dc2626}
 .cd-verdict-down .cd-brief-title{color:#9b2c2c}
 
-/* 披露排雷：概览自动提示，提示不下结论 */
-.cd-disclosure-flags{margin:10px 0 14px;border:1px solid #ead9c8;border-radius:10px;background:linear-gradient(180deg,#fffaf5,#fff);padding:12px 14px 10px}
+/* 披露排雷：有命中才展示；色系与概览其它卡片一致 */
+.cd-disclosure-flags{margin:10px 0 14px;border:1px solid var(--cd-line);border-radius:10px;background:#fff;padding:12px 14px 10px}
 .cd-disclosure-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 8px}
-.cd-disclosure-head h3{margin:0;font-size:14px;font-weight:600;color:#7a4e1e}
-.cd-disclosure-head>span{font-size:11px;color:#a08a72;white-space:nowrap}
-.cd-disclosure-empty{margin:0;font-size:12px;color:#9a8b78;line-height:1.6;padding:4px 0 2px}
+.cd-disclosure-head h3{margin:0;font-size:14px;font-weight:600;color:#5b6d86}
 .cd-disclosure-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-.cd-disclosure-card{display:flex;align-items:flex-start;gap:8px;border:1px solid #f0e2d2;border-radius:10px;background:#fff;padding:10px 12px}
+.cd-disclosure-card{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--cd-line);border-radius:10px;background:#fff;padding:10px 12px}
 .cd-disclosure-main{flex:1;min-width:0}
-.cd-disclosure-main b{display:block;font-size:13px;font-weight:600;color:#5a3a18;margin:0 0 6px}
+.cd-disclosure-main b{display:block;font-size:13px;font-weight:600;color:#24364f;margin:0 0 6px}
 .cd-disclosure-main p{margin:0 0 5px;font-size:12px;line-height:1.65;color:#6b7a8d}
 .cd-disclosure-main p:last-child{margin-bottom:0}
-.cd-disclosure-k{display:inline-block;min-width:4.5em;margin-right:6px;font-size:11px;font-weight:600;color:#b07a3a;letter-spacing:.02em}
+.cd-disclosure-k{display:inline-block;min-width:4.5em;margin-right:6px;font-size:11px;font-weight:600;color:#8a97ab;letter-spacing:.02em}
 .cd-disclosure-cites{flex-shrink:0;display:flex;flex-wrap:wrap;gap:4px;padding-top:2px}
 .cd-more-toggle{display:block;width:100%;border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit}
 .cd-more-toggle:hover h3{color:#3064db}
@@ -279,7 +277,7 @@
 .cd-chat-lead{font-size:13px;line-height:1.75;color:#73849c;margin:0 0 16px}
 
 .cd-more-title h3{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.cd-industry-skill-badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;border:1px solid #e2e8f2;background:#f5f7fb;color:#7a879b;font-size:11px;font-weight:500;letter-spacing:.02em;cursor:help;white-space:nowrap}
+.cd-industry-skill-badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;border:1px solid #e2e8f2;background:#f5f7fb;color:#7a879b;font-size:11px;font-weight:500;letter-spacing:.02em;cursor:pointer;white-space:nowrap}
 .cd-more-lead{margin:4px 0 0;font-size:12px;font-weight:400;color:#8a97ab;line-height:1.45}
 .cd-module-static{display:flex;align-items:flex-start;gap:12px;padding:12px 14px}
 .cd-module-static>div{min-width:0;flex:1}
