@@ -679,6 +679,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (item?.printed != null) return `P${item.printed}`;
     return printedKnown && item ? item.label : `PDF ${page}`;
   }
+  /** Quiet chip label for overview cites — always [Pxx], never "PDF n". */
+  function pageChip(page: number) {
+    const item = pageLabels.find(p => p.page === page);
+    return `P${item?.printed ?? page}`;
+  }
   function pageDescription(page: number) {
     const item = pageLabels.find(p=>p.page===page);
     return item?.printed != null ? `正文第 ${item.printed} 页（PDF 第 ${page} 页）` : `${item?.label ?? `PDF ${page}`}（PDF 第 ${page} 页）`;
@@ -910,7 +915,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
   }
   function metricCitation(m: MetricName, report = selected) { const item = report.metrics.find(x => x.metric === m); return item?.source_page ? { page: item.source_page, quote: item.source_label ?? labels[m] } : null; }
-  function footnote(m: MetricName) { const c = metricCitation(m); return c && <button className="cd-cite" onClick={(e) => { e.stopPropagation(); cite(c, false, m); }} onDoubleClick={(e) => { e.stopPropagation(); cite(c, true, m); }} title={`单击定位原文（来源栏加宽至约40%），${pageDescription(c.page)}`}>[{pageLabel(c.page)}]</button>; }
+  function footnote(m: MetricName) { const c = metricCitation(m); return c && <button className="cd-cite" onClick={(e) => { e.stopPropagation(); cite(c, false, m); }} onDoubleClick={(e) => { e.stopPropagation(); cite(c, true, m); }} title={`单击定位原文（来源栏加宽至约40%），${pageDescription(c.page)}`}>[{pageChip(c.page)}]</button>; }
   const citedItem = citedMetric ? selected.metrics.find(m => m.metric === citedMetric) : undefined;
   // Low confidence or an unverified value must be visible before the reader trusts it.
   const citedCaveat = citedItem && (citedItem.confidence < 0.8 || !citedItem.verified)
@@ -1622,11 +1627,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                           <button
                             type="button"
                             key={`${card.id}-${c.metric ?? i}-${c.page}`}
-                            className="cd-focus-hl-cite"
+                            className="cd-cite"
                             title={`定位原文，${pageDescription(c.page)}`}
                             onClick={() => cite({ page: c.page, quote: c.quote }, false, c.metric ?? null)}
                           >
-                            [{pageLabel(c.page)}]
+                            [{pageChip(c.page)}]
                           </button>
                         ))}
                       </div>
