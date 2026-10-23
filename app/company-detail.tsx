@@ -22,6 +22,7 @@ import { AnswerFeedback } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
+import { industrySkillUserFacing } from '@/lib/industry-skills-ui';
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import './company-detail.css';
@@ -212,6 +213,13 @@ async function waitForParsedReport(code: string, id: string, signal: AbortSignal
   if (signal.aborted) return null;
   const reports = await loadCompanyReports(code).catch(() => [] as Report[]);
   return reports.find((item) => item.id === id && reportIsParsed(item)) ?? null;
+}
+
+
+function industrySkillBadge(industry: string | null | undefined) {
+  const skillUi = industrySkillUserFacing(industry);
+  if (!skillUi) return null;
+  return <span className="cd-industry-skill-badge" title={skillUi.hover}>{skillUi.badge}</span>;
 }
 
 export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null, preferredCite = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null; preferredCite?: { page: number; quote: string } | null }) {
@@ -1588,7 +1596,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           <section className="cd-more-analysis" id="cd-more">
             <div className="cd-more-title">
               <div>
-                <h3>深度归因</h3>
+                <h3>深度归因{industrySkillBadge(selected.industry)}</h3>
                 <p className="cd-more-lead">解释营收、利润与异常指标为何变动</p>
               </div>
             </div>

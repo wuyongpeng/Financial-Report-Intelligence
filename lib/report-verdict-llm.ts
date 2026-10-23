@@ -1,5 +1,11 @@
 import { parseSse } from './answer';
 import type { Citation } from './detail-model';
+import { getDb } from './db';
+import {
+  industryFromStructuredContext,
+  industrySkillRetrievalKeywords,
+  industrySkillSystemAppend,
+} from './industry-skills';
 import { loadRagContext } from './rag';
 import { parseReportVerdictJson, unwrapModelJson, VERDICT_JSON_SCHEMA, type ReportVerdict } from './report-verdict';
 import { fetchChatCompletionsFrom, isLlmSlotBusyError, withLlmSlot, type LlmLane } from './llm-gate';
@@ -344,12 +350,38 @@ export async function generateReportVerdict(
   options: VerdictGenerateOptions = {},
 ): Promise<VerdictGenerateResult> {
   if (!llmConfigured()) return { ok: false, error: '未配置 AI 接口，本次没有调用模型。' };
-  const context = await loadRagContext(reportId, VERDICT_QUESTION, []);
+  const industry = await resolveReportIndustry(reportId);
+  const keywords = industrySkillRetrievalKeywords(industry).slice(0, 8);
+  const question = keywords.length
+    ? `${VERDICT_QUESTION} 优先关注原文中的：${keywords.join('、')}。`
+    : VERDICT_QUESTION;
+  const context = await loadRagContext(reportId, question, []);
   if (!context.metrics.length && !context.passages.length) {
     return { ok: false, error: '本期缺少可分析的指标和原文，未调用 AI。' };
   }
+  const resolvedIndustry = industry
+    || context.industry
+    || industryFromStructuredContext(context.structuredContext);
+  const skillAppend = industrySkillSystemAppend(resolvedIndustry);
+  const systemContent = skillAppend ? `${SYSTEM_PROMPT}\n\n${skillAppend}` : SYSTEM_PROMPT;
   return completeJson([
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemContent },
     { role: 'user', content: verdictUserPrompt(context.structuredContext, context.passages, context.evidence.map((item) => item.id)) },
   ], context.evidence, options);
+}
+
+async function resolveReportIndustry(reportId: string): Promise<string | null> {
+  try {
+    const [row] = await getDb()<Array<{ industry: string | null }>>`
+      SELECT c.industry
+      FROM announcements a
+      JOIN companies c ON c.code = a.code
+      WHERE a.id = ${reportId}
+    `;
+    const industry = row?.industry?.trim();
+    if (!industry || industry === '待分类') return null;
+    return industry;
+  } catch {
+    return null;
+  }
 }

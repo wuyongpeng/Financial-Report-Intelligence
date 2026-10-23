@@ -23,7 +23,10 @@ COPY . ./
 RUN npm run build \
   && mkdir -p .next/standalone/.next \
   && cp -r .next/static .next/standalone/.next/static \
-  && if [ -d public ]; then cp -r public .next/standalone/public; fi
+  && if [ -d public ]; then cp -r public .next/standalone/public; fi \
+  && mkdir -p .next/standalone/data \
+  && cp -r data/industry-skills .next/standalone/data/industry-skills \
+  && if [ -f data/companies.json ]; then cp data/companies.json .next/standalone/data/companies.json; fi
 
 EXPOSE 3000
 CMD ["node", ".next/standalone/server.js"]

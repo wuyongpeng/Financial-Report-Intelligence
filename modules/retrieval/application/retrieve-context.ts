@@ -224,6 +224,7 @@ export async function retrieveContext(input: {
     question: input.question,
     retrievalQuestion: plan.retrievalQuestion,
     structuredContext,
+    industry: target.industry || '',
     evidence,
     passages,
     fallback,

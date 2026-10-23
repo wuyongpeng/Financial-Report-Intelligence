@@ -46,6 +46,8 @@ next-env.d.ts
 !/data/golden-questions.json
 !/data/metric-ground-truth.json
 !/data/ashare-universe.json
+!/data/industry-skills/
+!/data/industry-skills/**
 
 # Contest submission materials (PII) — keep outside the repo
 *.docx

@@ -55,7 +55,7 @@ test('SSE parser handles chunk boundaries and missing final delimiter', () => {
 });
 
 const context: RagContext = {
-  question: '为什么？', retrievalQuestion: '利润为什么变化', structuredContext: '利润=10',
+  question: '为什么？', retrievalQuestion: '利润为什么变化', structuredContext: '利润=10', industry: '',
   evidence: [{ id: 'E1', reportId: 'test', companyName: '样本', period: '2026H1', page: 2, quote: '净利润增加' }],
   passages: [], fallback: '原文：净利润增加【E1】', mode: 'evidence-retrieval', metrics: [], peers: [],
 };

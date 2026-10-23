@@ -62,6 +62,8 @@ export type RetrievalContext = {
   question: string;
   retrievalQuestion: string;
   structuredContext: string;
+  /** Target company industry from companies table (may be empty). */
+  industry: string;
   evidence: Evidence[];
   passages: RetrievedPassage[];
   fallback: string;

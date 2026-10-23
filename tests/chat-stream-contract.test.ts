@@ -6,7 +6,7 @@ import type { RagContext } from '../lib/rag';
 const context: RagContext = {
   question: '净利润为什么变化？',
   retrievalQuestion: '净利润变化原因',
-  structuredContext: '净利润：10【E1】',
+  structuredContext: '净利润：10【E1】', industry: '',
   evidence: [
     { id: 'E1', reportId: 'report-1', companyName: '样本公司', period: '2026H1', page: 8, quote: '净利润增加' },
   ],
