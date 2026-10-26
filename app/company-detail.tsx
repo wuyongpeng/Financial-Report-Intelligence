@@ -1585,6 +1585,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const sourceText = outline.pages.find(p => p.page === sourcePage)?.content;
   const textHighlight = highlight || (searchHighlight && searchHighlight.page === sourcePage ? searchHighlight.quote : '');
   const highlightRange = sourceText && textHighlight ? sourceRange(sourceText, textHighlight) : null;
+  // Trailing control: send arrow as soon as there is typed text or any AI-analysis clip.
+  const canSend = question.trim().length > 0 || clips.length > 0;
   return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''}`} >
     <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div>{onApprove && selected.status !== 'online' && <div className="cd-head-actions"><button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button></div>}</header>
     {error && <div role="alert" className="cd-error">{error}</div>}
@@ -1991,7 +1993,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                     <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
                   </svg>
                 </button>
-              : (question.trim() || clips.length)
+              : canSend
                 ? <button aria-label="发送问题" title="发送问题" disabled={memoryLoading} type="submit">
                     <svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z"/></svg>
                   </button>
@@ -2013,7 +2015,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                       }
                     }}
                   >
-                    <Icon name="waveform" size={16} className="cd-send-icon" />
+                    <svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                      <rect x="3" y="9" width="2.5" height="6" rx="1" fill="currentColor" />
+                      <rect x="7.25" y="6" width="2.5" height="12" rx="1" fill="currentColor" />
+                      <rect x="11.5" y="3.5" width="2.5" height="17" rx="1" fill="currentColor" />
+                      <rect x="15.75" y="6" width="2.5" height="12" rx="1" fill="currentColor" />
+                      <rect x="20" y="9" width="2.5" height="6" rx="1" fill="currentColor" />
+                    </svg>
                   </button>}
           </div>
           {memoryLoading && <small>正在恢复历史会话…</small>}</form>
