@@ -33,6 +33,7 @@ import {
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import { parseVoiceNavIntent } from '@/lib/voice/nav-intent';
+import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
@@ -1271,6 +1272,35 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       resumeVoiceConversation();
       return;
     }
+    // User wants to end the voice session — warm goodbye TTS, then close UI (not finance ask).
+    if (isVoiceFarewell(text)) {
+      voicePartialRef.current = ''; setVoicePartial('');
+      setChatCollapsed(false);
+      // Abort any in-flight ask / prior TTS so farewell is the last thing spoken.
+      requestRef.current?.abort();
+      const priorTts = voiceTtsAbortRef.current;
+      voiceTtsAbortRef.current = null;
+      priorTts?.abort();
+      stopVoiceSession(); // mute mic — do not let TTS echo become another turn
+      const line = pickVoiceFarewellLine();
+      setMessages(m => [...m, { role: 'user', text, ask: { question: text } }, { role: 'assistant', text: line }]);
+      const abort = new AbortController();
+      voiceTtsAbortRef.current = abort;
+      voiceSpeakRef.current = false;
+      setVoiceSpeaking(true);
+      setVoiceMode(true);
+      void speakAnswer(line, abort.signal)
+        .catch(() => undefined)
+        .finally(() => {
+          if (voiceTtsAbortRef.current === abort) {
+            voiceTtsAbortRef.current = null;
+            setVoiceSpeaking(false);
+          }
+          // User-intent exit: no idle toast.
+          endVoiceConversation();
+        });
+      return;
+    }
     if (busyRef.current || !memoryReady.current) {
       // Previous answer still streaming / memory restoring: keep the conversation, listen again.
       setQuietToast({ text: '上一条还在处理，请稍后再说', at: Date.now() });
@@ -1737,6 +1767,35 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (replacing != null) {
       if (busyRef.current || !memoryReady.current) return;
     } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
+    // Dismiss / farewell: local short goodbye — never finance out-of-scope path.
+    if (replacing == null && typed && isVoiceFarewell(typed)) {
+      const line = pickVoiceFarewellLine();
+      setQuestion(''); setClips([]); setPick(null);
+      setChatCollapsed(false);
+      setMessages(m => [...m, { role: 'user', text: typed, ask: { question: typed } }, { role: 'assistant', text: line }]);
+      if (voiceConvRef.current) {
+        requestRef.current?.abort();
+        const priorTts = voiceTtsAbortRef.current;
+        voiceTtsAbortRef.current = null;
+        priorTts?.abort();
+        stopVoiceSession();
+        const abort = new AbortController();
+        voiceTtsAbortRef.current = abort;
+        voiceSpeakRef.current = false;
+        setVoiceSpeaking(true);
+        setVoiceMode(true);
+        void speakAnswer(line, abort.signal)
+          .catch(() => undefined)
+          .finally(() => {
+            if (voiceTtsAbortRef.current === abort) {
+              voiceTtsAbortRef.current = null;
+              setVoiceSpeaking(false);
+            }
+            endVoiceConversation();
+          });
+      }
+      return;
+    }
     // User-selected clips / explicit caller focus only — never treat soft-merged page as "attached".
     const userFocus: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
       kind: c.kind,
