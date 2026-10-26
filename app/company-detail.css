@@ -622,7 +622,15 @@ html.dark .cd-fb,.dark .cd-fb{
 }
 .cd-fb-tag:hover{border-color:var(--fb-chip-on-ink)!important;color:var(--fb-chip-on-ink)!important}
 .cd-fb-tag.on{background:var(--fb-chip-on)!important;border-color:var(--fb-chip-on-ink)!important;color:var(--fb-chip-on-ink)!important}
-.cd-fb-foot{display:flex;justify-content:flex-end;margin-top:10px}
+.cd-fb-foot{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px}
+.cd-fb-foot.with-note{justify-content:stretch}
+.cd-fb-note{
+  flex:1;min-width:0;height:32px;border:1px solid var(--fb-chip-border)!important;border-radius:7px!important;
+  background:var(--fb-chip)!important;color:var(--fb-ink)!important;padding:0 10px!important;
+  font-size:12px!important;outline:none;
+}
+.cd-fb-note:focus{border-color:var(--fb-chip-on-ink)!important}
+.cd-fb-note-count{margin:6px 0 0;font-size:11px;color:var(--fb-muted);text-align:right}
 .cd-fb-submit{
   border:0!important;
   background:var(--fb-submit)!important;

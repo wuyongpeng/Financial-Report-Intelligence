@@ -60,5 +60,25 @@ async function migrate() {
       company_code TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
+    await tx`CREATE TABLE IF NOT EXISTS client_audit_events (
+      id BIGSERIAL PRIMARY KEY,
+      event_type TEXT NOT NULL CHECK (event_type IN ('visit', 'ask', 'answer_feedback')),
+      owner_key TEXT,
+      ip TEXT,
+      user_agent TEXT,
+      accept_language TEXT,
+      path TEXT,
+      referer TEXT,
+      report_id TEXT,
+      company_code TEXT,
+      conversation_id UUID,
+      request_id UUID,
+      question TEXT,
+      detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS client_audit_events_created_idx ON client_audit_events (created_at DESC)`;
+    await tx`CREATE INDEX IF NOT EXISTS client_audit_events_owner_idx ON client_audit_events (owner_key, created_at DESC)`;
+    await tx`CREATE INDEX IF NOT EXISTS client_audit_events_type_idx ON client_audit_events (event_type, created_at DESC)`;
   });
 }

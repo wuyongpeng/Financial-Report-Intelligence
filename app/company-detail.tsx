@@ -19,7 +19,7 @@ import {
 } from '@/contracts/conversations';
 import type { ChatStreamEvent } from '@/contracts/chat';
 import AnswerMarkdown from './answer-markdown';
-import { AnswerFeedback } from './answer-feedback';
+import { AnswerFeedback, type AnswerFeedbackPayload } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
@@ -1077,6 +1077,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   useEffect(() => { outlineRef.current = outline; }, [outline]);
   useEffect(() => { voiceAutoJumpRef.current = voiceAutoJump; }, [voiceAutoJump]);
   useEffect(() => {
+    if (!selected?.id) return;
+    postClientAudit({
+      eventType: 'visit',
+      reportId: selected.id,
+      companyCode: selected.code,
+      conversationId: conversationIds.current.get(selected.id) ?? null,
+      detail: { period: period(selected), reportType: selected.report_type ?? null },
+    });
+  }, [selected?.id]);
+  useEffect(() => {
     if (!(voiceMode || voiceListening || voiceSpeaking)) return;
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Escape') return;
@@ -1430,8 +1440,41 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }));
   }
 
-  function submitAnswerFeedback(index: number) {
-    setMessages(m => m.map((item, i) => i === index && item.role === 'assistant' ? { ...item, feedbackDone: true } : item));
+  function browserAuditBits() {
+    if (typeof navigator === 'undefined') return {};
+    return {
+      language: navigator.language || null,
+      languages: Array.isArray(navigator.languages) ? navigator.languages.slice(0, 5) : null,
+      platform: navigator.platform || null,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+      screen: typeof screen !== 'undefined' ? { w: screen.width, h: screen.height, dpr: window.devicePixelRatio || 1 } : null,
+    };
+  }
+
+  function postClientAudit(body: Record<string, unknown>) {
+    void fetch('/api/audit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, browser: browserAuditBits(), path: typeof window !== 'undefined' ? window.location.pathname : null }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }
+
+  function submitAnswerFeedback(index: number, payload: AnswerFeedbackPayload) {
+    const item = messages[index];
+    setMessages(m => m.map((row, i) => i === index && row.role === 'assistant' ? { ...row, feedbackDone: true } : row));
+    if (!item || item.role !== 'assistant') return;
+    const prior = messages[index - 1];
+    postClientAudit({
+      eventType: 'answer_feedback',
+      reportId: selected.id,
+      companyCode: selected.code,
+      conversationId: conversationIds.current.get(selected.id) ?? null,
+      vote: item.feedback,
+      tags: payload.tags,
+      note: payload.note,
+      question: prior?.role === 'user' ? (prior.ask?.question ?? prior.text) : null,
+    });
   }
 
   async function copyAnswer(text: string, index: number) {
@@ -2049,7 +2092,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 <AnswerFeedback
                   kind={m.feedback}
                   submitted={m.feedbackDone}
-                  onSubmit={()=>submitAnswerFeedback(i)}
+                  onSubmit={(payload)=>submitAnswerFeedback(i, payload)}
                 />
                 {m.followupBusy && !(m.followups && m.followups.length) && (
                   <div className="cd-followups" aria-label="正在生成追问">
