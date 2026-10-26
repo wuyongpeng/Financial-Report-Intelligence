@@ -67,6 +67,25 @@ test('QuestionPlanner produces an explicit, testable retrieval plan', () => {
   assert.equal(page.explicitPage, 25);
   const blocked = planQuestion({ question: '预测明天股价', history: [], watched: [], currentCode: '000333' });
   assert.equal(blocked.outOfScope, true);
+  assert.equal(blocked.outOfScopeKind, 'investment');
+
+  const meta = planQuestion({ question: '当前用的哪个大语言模型', history: [], watched: [], currentCode: '000333' });
+  assert.equal(meta.outOfScope, true);
+  assert.equal(meta.outOfScopeKind, 'meta-model');
+  assert.equal(meta.needsHistory, false);
+  assert.equal(meta.needsPeers, false);
+
+  const weather = planQuestion({ question: '北京明天啥天气', history: [], watched: [], currentCode: '000333' });
+  assert.equal(weather.outOfScope, true);
+  assert.equal(weather.outOfScopeKind, 'off-topic');
+
+  const followup = planQuestion({
+    question: '为什么是空的',
+    history: [{ role: 'user', content: '这一页的长期应付职工薪酬为什么是空的' }],
+    watched: [],
+    currentCode: '000333',
+  });
+  assert.equal(followup.outOfScope, false);
 });
 
 test('KeywordPassageRetriever keeps current metric-page ranking and excerpt behavior', () => {
@@ -131,12 +150,39 @@ test('retrieveContext loads history and named/industry peers according to the pl
 
 test('retrieveContext preserves out-of-scope and insufficient-evidence policies', async () => {
   const repository = new FakeRetrievalRepository();
+  repository.metrics = [
+    { reportId: 'current', metric: 'revenue', value: 100, unit: '元', period: '2025FY', sourcePage: 8, sourceLabel: '营业收入' },
+    { reportId: 'current', metric: 'eps', value: 0.7, unit: '元/股', period: '2025FY', sourcePage: 30, sourceLabel: '每股收益' },
+    { reportId: 'current', metric: 'net_profit', value: 10, unit: '元', period: '2025FY', sourcePage: 2, sourceLabel: '归母净利润' },
+    { reportId: 'current', metric: 'roe', value: 12, unit: '%', period: '2025FY', sourcePage: 2, sourceLabel: 'ROE' },
+  ];
   const blocked = await retrieveContext({
     reportId: 'current', question: '预测明天股价', history: [], repository,
     passageRetriever: new KeywordPassageRetriever(),
   });
   assert.equal(blocked.mode, 'out-of-scope');
   assert.match(blocked.directAnswer ?? '', /不提供投资建议/);
+  assert.doesNotMatch(blocked.directAnswer ?? '', /尚未完成 AI 归纳|每股收益|ROE|营业收入/);
+  assert.equal(blocked.fallback, blocked.directAnswer);
+  assert.deepEqual(blocked.metrics, []);
+
+  const meta = await retrieveContext({
+    reportId: 'current', question: '当前用的哪个大语言模型', history: [], repository,
+    passageRetriever: new KeywordPassageRetriever(),
+  });
+  assert.equal(meta.mode, 'out-of-scope');
+  assert.match(meta.directAnswer ?? '', /财报智析 Eva/);
+  assert.doesNotMatch(meta.directAnswer ?? '', /尚未完成 AI 归纳|每股收益|ROE|归母净利润|营业收入/);
+  assert.equal(meta.fallback, meta.directAnswer);
+
+  const weather = await retrieveContext({
+    reportId: 'current', question: '北京明天啥天气', history: [], repository,
+    passageRetriever: new KeywordPassageRetriever(),
+  });
+  assert.equal(weather.mode, 'out-of-scope');
+  assert.match(weather.directAnswer ?? '', /超出当前财报范围/);
+  assert.doesNotMatch(weather.directAnswer ?? '', /尚未完成 AI 归纳|每股收益|ROE|营业收入/);
+  assert.equal(weather.fallback, weather.directAnswer);
 
   const missing = new FakeRetrievalRepository();
   missing.report = null;

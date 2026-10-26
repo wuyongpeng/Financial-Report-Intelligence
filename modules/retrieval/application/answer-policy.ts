@@ -1,7 +1,21 @@
 import { unsupportedYears } from '@/lib/chat-evidence';
+import { llmModelName } from '@/lib/llm-providers';
 import type { QueryPlan, RetrievedPassage, RetrievalMetric } from '../domain/retrieval';
 
 export type FactLine = { metric: RetrievalMetric; line: string; citation?: { id: string } | null };
+
+export function outOfScopeReply(kind: QueryPlan['outOfScopeKind'] = 'off-topic') {
+  if (kind === 'investment') {
+    return '不提供投资建议或股价预测。可以继续查看本期指标、经营变化与财报原文。';
+  }
+  if (kind === 'meta-model') {
+    const model = llmModelName();
+    return model
+      ? `我是财报智析 Eva。当前问答使用的模型是 ${model}。我只依据本份已入库财报的可核验数据与原文回答，不闲聊或编造报告外信息。`
+      : '我是财报智析 Eva。当前未配置可用大模型时，只会返回可核验指标与原文摘录。我只回答与本份财报相关的问题。';
+  }
+  return '这个问题超出当前财报范围。我是财报智析 Eva，只依据本份报告的可核验指标与原文回答；请换一个关于本期业绩、科目或某页内容的问题。';
+}
 
 export function decideDirectAnswer(input: {
   plan: QueryPlan;
@@ -17,7 +31,7 @@ export function decideDirectAnswer(input: {
   const missingYears = unsupportedYears(plan.originalQuestion, metrics.map(metric => metric.period).join(' '));
 
   if (plan.outOfScope) {
-    directAnswer = '不提供投资建议或股价预测。可以继续查看本期指标、经营变化与财报原文。';
+    directAnswer = outOfScopeReply(plan.outOfScopeKind);
     mode = 'out-of-scope';
   } else if (missingYears.length) {
     directAnswer = `暂无法回答：尚未入库 ${missingYears.join('、')} 年对应的同口径结构化数据。当前可核验报告期：${[...new Set(metrics.map(metric => metric.period))].join('、') || '无'}。`;

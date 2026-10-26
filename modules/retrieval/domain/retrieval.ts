@@ -53,6 +53,8 @@ export type RetrievalChunk = {
 
 export type WatchedCompany = { code: string; companyName: string };
 
+export type OutOfScopeKind = 'investment' | 'meta-model' | 'off-topic';
+
 export type QueryPlan = {
   originalQuestion: string;
   retrievalQuestion: string;
@@ -64,6 +66,8 @@ export type QueryPlan = {
   wantsStructuredValue: boolean;
   wantsChangeCalculation: boolean;
   outOfScope: boolean;
+  /** Present when outOfScope is true; drives the direct-answer copy. */
+  outOfScopeKind?: OutOfScopeKind;
 };
 
 export type RetrievedPassage = Evidence & { content: string };

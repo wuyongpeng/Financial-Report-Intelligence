@@ -12,7 +12,7 @@ import type {
   RetrievalReport,
 } from '../domain/retrieval';
 import { planQuestion } from './question-planner';
-import { decideDirectAnswer, type FactLine } from './answer-policy';
+import { decideDirectAnswer, outOfScopeReply, type FactLine } from './answer-policy';
 import type { PassageRetriever } from './keyword-passage-retriever';
 
 export type RetrievalObserver = (report: RetrievalReport) => Promise<void>;
@@ -105,6 +105,22 @@ export async function retrieveContext(input: {
     currentCode: target.code,
     summary: input.summary,
   });
+  if (plan.outOfScope) {
+    const directAnswer = outOfScopeReply(plan.outOfScopeKind);
+    return {
+      question: input.question,
+      retrievalQuestion: plan.retrievalQuestion,
+      structuredContext: `当前报告：${target.companyName}（${target.code}）。本轮问题超出财报问答范围。`,
+      industry: target.industry || '',
+      evidence: [],
+      passages: [],
+      fallback: directAnswer,
+      directAnswer,
+      mode: 'out-of-scope',
+      metrics: [],
+      peers: [],
+    };
+  }
   const related = await findRelatedReports({
     repository: input.repository,
     target,
@@ -213,12 +229,15 @@ export async function retrieveContext(input: {
     plan.needsPeers ? `同业比较仅限上述已入库公司（${peers.length + 1} 家），不代表全行业排名；未列出的公司没有可用比较数据。` : '',
   ].filter(Boolean).join('\n');
   const decision = decideDirectAnswer({ plan, currentReportId: input.reportId, metrics, factLines, calculations, passages });
-  const fallback = decision.directAnswer ?? [
-    '当前返回可核验的数据与原文摘录，尚未完成 AI 归纳：',
-    ...factLines.slice(0, plan.needsPeers ? 24 : 8).map(fact => fact.line),
-    ...calculations,
-    ...passages.slice(0, 3).map(passage => `${passage.quote}【${passage.id}】`),
-  ].join('\n');
+  // Never dump overview KPIs for out-of-scope asks (belt-and-suspenders if early return is skipped).
+  const fallback = decision.directAnswer ?? (plan.outOfScope
+    ? outOfScopeReply(plan.outOfScopeKind)
+    : [
+      '当前返回可核验的数据与原文摘录，尚未完成 AI 归纳：',
+      ...factLines.slice(0, plan.needsPeers ? 24 : 8).map(fact => fact.line),
+      ...calculations,
+      ...passages.slice(0, 3).map(passage => `${passage.quote}【${passage.id}】`),
+    ].join('\n'));
 
   return {
     question: input.question,

@@ -2,6 +2,7 @@ import { nameVariants, WELL_KNOWN_ALIASES } from '@/lib/company-aliases';
 import type { MemoryMessage } from '@/lib/conversations';
 import {
   METRIC_PATTERNS,
+  type OutOfScopeKind,
   type QueryPlan,
   type RetrievalMetricName,
   type WatchedCompany,
@@ -59,6 +60,57 @@ export function mentionedCompanyCodes(
   return [...found];
 }
 
+/** Investment advice / price prediction — refuse without dumping KPIs. */
+const INVESTMENT_SCOPE = /买入|卖出|推荐股票|预测.*股价|明天.*股价/;
+
+/** Which model / provider — answer from config, never from report metrics. */
+export function isMetaModelQuestion(question: string) {
+  const q = question.trim();
+  if (!q) return false;
+  if (/大语言模型|语言模型|底层模型|AI\s*模型|\bLLM\b/i.test(q)) return true;
+  if (/\b(?:GPT|Claude|Gemini|DeepSeek)\b/i.test(q)) return true;
+  if (/(?:哪个|什么).{0,8}(?:大)?模型/.test(q)) return true;
+  if (/(?:用的|使用|基于).{0,8}(?:哪个|什么).{0,8}(?:大)?模型/.test(q)) return true;
+  if (/(?:模型|LLM).{0,8}(?:哪个|什么|叫什么)/i.test(q)) return true;
+  return false;
+}
+
+/**
+ * Clear non-report chitchat / general-knowledge asks.
+ * Keep this denylist narrow; the no-finance-signal gate covers the long tail.
+ */
+export function isClearOffTopicQuestion(question: string) {
+  const q = question.trim();
+  if (!q) return false;
+  if (/你是谁|你叫什么|自我介绍|你是什么助手/.test(q)) return true;
+  return /天气|气温|下雨|下雪|限行|雾霾|空气质量|外卖|几点了|现在几点|讲个笑话|写首诗|写一首诗|翻译成|怎么做(?:饭|菜)|足球比分|篮球赛|星座|今日运势|今天吃什么/.test(q);
+}
+
+/** Lexicon that indicates the ask is about report / PDF / financial content. */
+const FINANCE_SIGNAL = /财报|年报|季报|半年报|报告期|PDF|原文|披露|附注|资产负债表|利润表|现金流量表|科目|口径|同比|环比|业绩|经营|管理层|股东|分红|派息|营收|营业收入|收入|净利润|净利|利润|总资产|资产|负债|现金流|ROE|EPS|每股收益|净资产|应收|应付|商誉|存货|借款|债券|职工薪酬|货币资金|费用|成本|毛利|研发|产能|出货|销量|客户|合同负债|审计|风险因素|减值|拨备|息差|不良|资本充足|保费|基本面|亮点|估值|市盈率|市净率|这[一]?页|本页|该页|第\s*\d+\s*页|主营|业务概要|核心竞争力|公司治理|员工人数|非经常性|扣非|同业|竞品|对标/i;
+
+export function hasFinanceSignal(question: string) {
+  return FINANCE_SIGNAL.test(question) || Object.values(METRIC_PATTERNS).some(pattern => pattern.test(question));
+}
+
+export function classifyQuestionScope(input: {
+  originalQuestion: string;
+  retrievalQuestion: string;
+  summary?: boolean;
+  metricNames: RetrievalMetricName[];
+  explicitPage: number | null;
+}): { outOfScope: boolean; outOfScopeKind?: OutOfScopeKind } {
+  const original = input.originalQuestion.trim();
+  if (INVESTMENT_SCOPE.test(original)) return { outOfScope: true, outOfScopeKind: 'investment' };
+  if (isMetaModelQuestion(original)) return { outOfScope: true, outOfScopeKind: 'meta-model' };
+  if (isClearOffTopicQuestion(original)) return { outOfScope: true, outOfScopeKind: 'off-topic' };
+  if (input.summary) return { outOfScope: false };
+  if (input.metricNames.length || input.explicitPage != null) return { outOfScope: false };
+  // Follow-ups rewrite into retrievalQuestion with prior finance context — treat as in-scope.
+  if (hasFinanceSignal(input.retrievalQuestion) || hasFinanceSignal(original)) return { outOfScope: false };
+  return { outOfScope: true, outOfScopeKind: 'off-topic' };
+}
+
 export function planQuestion(input: {
   question: string;
   history: MemoryMessage[];
@@ -74,18 +126,27 @@ export function planQuestion(input: {
     .filter(([, pattern]) => pattern.test(query))
     .map(([name]) => name as RetrievalMetricName);
   const explicit = query.match(/第\s*(\d+)\s*页/)?.[1];
+  const explicitPage = explicit ? Number(explicit) : null;
+  const scope = classifyQuestionScope({
+    originalQuestion: input.question,
+    retrievalQuestion: query,
+    summary: input.summary,
+    metricNames,
+    explicitPage,
+  });
   return {
     originalQuestion: input.question,
     retrievalQuestion: query,
     metricNames,
-    needsHistory,
-    needsPeers,
-    namedPeerCodes,
-    explicitPage: explicit ? Number(explicit) : null,
+    needsHistory: scope.outOfScope ? false : needsHistory,
+    needsPeers: scope.outOfScope ? false : needsPeers,
+    namedPeerCodes: scope.outOfScope ? [] : namedPeerCodes,
+    explicitPage,
     wantsStructuredValue: metricNames.length > 0
       && /多少|数值/.test(input.question)
       && !/为什么|原因|解释|合理|风险|构成/.test(input.question),
     wantsChangeCalculation: /同比|增长|下降/.test(input.question),
-    outOfScope: /买入|卖出|推荐股票|预测.*股价|明天.*股价/.test(input.question),
+    outOfScope: scope.outOfScope,
+    outOfScopeKind: scope.outOfScopeKind,
   };
 }
