@@ -55,7 +55,7 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
       chunks.push(event.data as ArrayBuffer);
     };
 
-    ws.onerror = () => finish(new Error('语音朗读连接失败'));
+    ws.onerror = () => finish(new Error('语音朗读未连通（服务器未启用语音通道或网关不可达）'));
     ws.onclose = () => {
       if (!settled) playAndFinish();
     };

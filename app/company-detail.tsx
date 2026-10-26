@@ -33,7 +33,7 @@ import {
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import { parseVoiceNavIntent } from '@/lib/voice/nav-intent';
-import { openAsrSession, type AsrSession } from '@/lib/voice/client-asr';
+import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer } from '@/lib/voice/client-tts';
 import './company-detail.css';
@@ -1139,6 +1139,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
 
   async function startVoiceMode() {
     if (asking || memoryLoading || voiceListening) return;
+    const secureErr = micSecureContextError();
+    if (secureErr) {
+      setQuietToast({ text: secureErr, at: Date.now() });
+      return;
+    }
     voiceTtsAbortRef.current?.abort();
     voiceTtsAbortRef.current = null;
     setVoiceJumpHint(null);
@@ -1164,7 +1169,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     } catch (err) {
       stopVoiceSession();
       setVoiceMode(false);
-      setQuietToast({ text: err instanceof Error ? err.message : '无法使用麦克风（需 HTTPS 或本机）', at: Date.now() });
+      setQuietToast({ text: err instanceof Error ? err.message : '无法使用麦克风', at: Date.now() });
     }
   }
 

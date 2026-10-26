@@ -1,4 +1,6 @@
-# DOMAIN defaults to :80 for IP-based testing. Set it to a DNS name to enable automatic HTTPS.
+# DOMAIN defaults to :80 for IP-based testing. Set it to a DNS name to enable automatic HTTPS
+# (required for microphone / getUserMedia when not on localhost).
+# reverse_proxy upgrades WebSocket by default; flush_interval -1 keeps streamed responses timely.
 {$DOMAIN} {
   encode zstd gzip
   reverse_proxy app:3000 {
