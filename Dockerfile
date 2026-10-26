@@ -29,4 +29,4 @@ RUN npm run build \
   && if [ -f data/companies.json ]; then cp data/companies.json .next/standalone/data/companies.json; fi
 
 EXPOSE 3000
-CMD ["node", "server.mjs"]
+CMD ["node", ".next/standalone/server.js"]

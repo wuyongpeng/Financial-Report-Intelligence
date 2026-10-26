@@ -28,7 +28,11 @@ const server = createServer((req, res) => {
   });
 });
 
-attachVoiceWebSockets(server);
+try {
+  attachVoiceWebSockets(server);
+} catch (err) {
+  console.error('voice websocket attach failed; HTTP continues without voice', err);
+}
 
 server.listen(port, hostname, () => {
   console.log(`> Ready on http://${hostname}:${port} (voice ws: /api/voice/asr|/api/voice/tts)`);
