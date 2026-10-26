@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appUserRole, createDemoCookie, demoAccessEnabled, ensureConversationOwner, ensureGuestSession } from '../lib/auth';
+import { appUserRole, createDemoCookie, demoAccessEnabled, ensureConversationOwner, ensureGuestSession, validAdminPassword } from '../lib/auth';
 
 test('legacy demo cookie only validates while APP_DEMO_ACCESS is true', () => {
   const previousAccess = process.env.APP_DEMO_ACCESS;
@@ -55,3 +55,15 @@ test('guest Set-Cookie omits Secure unless COOKIE_SECURE=true', () => {
   if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
 });
 
+test('validAdminPassword accepts built-in EVA and optional env password', () => {
+  const previous = process.env.ADMIN_PASSWORD;
+  delete process.env.ADMIN_PASSWORD;
+  assert.equal(validAdminPassword('EVA'), true);
+  assert.equal(validAdminPassword('eva'), false);
+  assert.equal(validAdminPassword('wrong'), false);
+  process.env.ADMIN_PASSWORD = 'custom-admin-pass';
+  assert.equal(validAdminPassword('EVA'), true);
+  assert.equal(validAdminPassword('custom-admin-pass'), true);
+  assert.equal(validAdminPassword('nope'), false);
+  if (previous === undefined) delete process.env.ADMIN_PASSWORD; else process.env.ADMIN_PASSWORD = previous;
+});

