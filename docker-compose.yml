@@ -24,6 +24,7 @@ services:
       REPORTS_DIR: /data/reports
       RUNTIME_DIR: /app/.data
       LLM_MODELS: ${LLM_MODELS:-thudm/glm-5.2,minimax/MiniMax-M2.7-highspeed,thudm/glm-5.1}
+      NODE_ENV: production
     depends_on:
       db:
         condition: service_healthy

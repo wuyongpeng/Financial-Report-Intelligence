@@ -2,6 +2,7 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
 
 # Poppler is the deterministic fallback for Chinese PDFs whose embedded fonts
 # do not expose usable Unicode text to PDF.js.

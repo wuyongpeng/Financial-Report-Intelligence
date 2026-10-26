@@ -11,7 +11,12 @@ import { parse } from 'node:url';
 import next from 'next';
 import { attachVoiceWebSockets } from './lib/voice/ws-proxy.mjs';
 
-const dev = process.env.NODE_ENV !== 'production';
+// Docker/CMD often forgets NODE_ENV; missing must not mean webpack-hmr in deploy.
+// Opt into next-dev only with NODE_ENV=development or NEXT_DEV=1.
+const wantDev =
+  process.env.NEXT_DEV === '1' ||
+  process.env.NODE_ENV === 'development';
+const dev = wantDev;
 const hostname = process.env.HOST || process.env.LISTEN_HOST || '0.0.0.0';
 const port = Number(process.env.PORT || 3000);
 
