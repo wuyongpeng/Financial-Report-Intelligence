@@ -32,6 +32,10 @@ import {
 } from '@/lib/industry-skills-ui';
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
+import { parseVoiceNavIntent } from '@/lib/voice/nav-intent';
+import { openAsrSession, type AsrSession } from '@/lib/voice/client-asr';
+import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
+import { speakAnswer } from '@/lib/voice/client-tts';
 import './company-detail.css';
 
 type Outline = { pageLabels?: PdfPageLabel[]; indexedPages: number; pages: { page: number; content: string }[]; outline: { id: string; title: string; page: number; highlight: string }[] };
@@ -277,6 +281,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [clipsFlash, setClipsFlash] = useState(false);
   const pageEnter = useRef<'start' | 'next' | 'prev'>('start');
   const [asking, setAsking] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voicePartial, setVoicePartial] = useState('');
+  const [voiceJumpHint, setVoiceJumpHint] = useState<{ page: number; quote: string } | null>(null);
+  const [voiceAutoJump, setVoiceAutoJump] = useState(true);
   const [regenMenu, setRegenMenu] = useState<number | null>(null);
   const [jumpAsk, setJumpAsk] = useState<null | { href: string; title: string; detail: ReactNode }>(null);
   const [jumpBlocked, setJumpBlocked] = useState(false);
@@ -295,6 +304,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const sourceRef = useRef<HTMLDivElement>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
+  const asrSessionRef = useRef<AsrSession | null>(null);
+  const pcmCaptureRef = useRef<PcmCapture | null>(null);
+  const voiceSpeakRef = useRef(false);
+  const voiceTtsAbortRef = useRef<AbortController | null>(null);
+  const userScrollAtRef = useRef(0);
+  const sourcePageRef = useRef(1);
+  const outlineRef = useRef(emptyOutline);
+  const voiceAutoJumpRef = useRef(true);
+  const voicePartialRef = useRef('');
   const overviewRef = useRef<HTMLDivElement>(null);
   const autoAskedRef = useRef(false);
   const deepCitedRef = useRef(false);
@@ -1037,6 +1055,20 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     return uniqueAnswerSources(message.text, message.citations, pageLabel);
   }
   function focusModule(id: string) { if (sourceDrawerOpen) closeSource(); setDepthOpen(true); setExpanded(e => e.includes(id) ? e : [...e,id]); setFocused(id); setMobilePane('dashboard'); window.setTimeout(() => document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 80); }
+  useEffect(() => { sourcePageRef.current = sourcePage; }, [sourcePage]);
+  useEffect(() => {
+    return () => {
+      /* voice unmount cleanup */
+      pcmCaptureRef.current?.stop();
+      pcmCaptureRef.current = null;
+      asrSessionRef.current?.close();
+      asrSessionRef.current = null;
+      voiceTtsAbortRef.current?.abort();
+    };
+  }, []);
+  useEffect(() => { outlineRef.current = outline; }, [outline]);
+  useEffect(() => { voiceAutoJumpRef.current = voiceAutoJump; }, [voiceAutoJump]);
+
   function resizeComposer() {
     const el = questionRef.current;
     if (!el) return;
@@ -1045,6 +1077,97 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const max = 180;
     el.style.height = `${Math.min(max, Math.max(min, el.scrollHeight))}px`;
   }
+  function stopVoiceSession(opts?: { finalize?: boolean }) {
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    if (opts?.finalize) asrSessionRef.current?.stop();
+    else asrSessionRef.current?.close();
+    asrSessionRef.current = null;
+    setVoiceListening(false);
+  }
+
+  function applyVoiceNav(intent: NonNullable<ReturnType<typeof parseVoiceNavIntent>>) {
+    const pages = (outlineRef.current.pageLabels?.length
+      ? outlineRef.current.pageLabels.map(p => p.page)
+      : outlineRef.current.pages.map(p => p.page)).filter((p, i, arr) => arr.indexOf(p) === i).sort((a, b) => a - b);
+    const cur = sourcePageRef.current;
+    let target = cur;
+    if (intent.kind === 'next') {
+      target = pages.find(p => p > cur) ?? (cur + 1);
+    } else if (intent.kind === 'prev') {
+      const before = pages.filter(p => p < cur);
+      target = before.length ? before[before.length - 1]! : Math.max(1, cur - 1);
+    } else {
+      target = intent.page;
+    }
+    readingPosition.current = null;
+    pageEnter.current = 'start';
+    scrollPageSync.current = false;
+    setSourcePage(target);
+    setPdfJumpNonce(n => n + 1);
+    setHighlight('');
+    setSearchHighlight(null);
+    setVoiceJumpHint(null);
+    setQuietToast({ text: `已跳到第 ${target} 页`, at: Date.now() });
+  }
+
+  async function handleVoiceUtterance(raw: string) {
+    const text = raw.replace(/\s+/g, ' ').trim();
+    voicePartialRef.current = text; setVoicePartial(text);
+    if (!text) {
+      setVoiceMode(false);
+      return;
+    }
+    const nav = parseVoiceNavIntent(text);
+    if (nav) {
+      applyVoiceNav(nav);
+      voicePartialRef.current = ''; setVoicePartial('');
+      setVoiceMode(false);
+      return;
+    }
+    const page = sourcePageRef.current;
+    const pageContent = outlineRef.current.pages.find(p => p.page === page)?.content?.replace(/\s+/g, ' ').trim() ?? '';
+    const focusText = (pageContent || `当前正在阅读第 ${page} 页`).slice(0, FOCUS_QUOTE_MAX);
+    const focus: FocusItem[] = [{ kind: 'pdf', text: focusText, page, title: pageLabel(page) }];
+    voiceSpeakRef.current = true;
+    setVoiceMode(false);
+    voicePartialRef.current = ''; setVoicePartial('');
+    setChatCollapsed(false);
+    // Keep PDF visible on mobile when possible.
+    void ask(text, { focus });
+  }
+
+  async function startVoiceMode() {
+    if (asking || memoryLoading || voiceListening) return;
+    voiceTtsAbortRef.current?.abort();
+    voiceTtsAbortRef.current = null;
+    setVoiceJumpHint(null);
+    setVoiceMode(true);
+    voicePartialRef.current = ''; setVoicePartial('');
+    setVoiceListening(true);
+    try {
+      const session = openAsrSession((ev) => {
+        if (ev.type === 'partial') { voicePartialRef.current = ev.text; setVoicePartial(ev.text); }
+        if (ev.type === 'final') {
+          stopVoiceSession();
+          void handleVoiceUtterance(ev.text || voicePartialRef.current);
+        }
+        if (ev.type === 'error') {
+          stopVoiceSession();
+          setVoiceMode(false);
+          setQuietToast({ text: ev.message, at: Date.now() });
+        }
+      });
+      asrSessionRef.current = session;
+      const capture = await startPcmCapture((chunk) => session.sendPcm(chunk));
+      pcmCaptureRef.current = capture;
+    } catch (err) {
+      stopVoiceSession();
+      setVoiceMode(false);
+      setQuietToast({ text: err instanceof Error ? err.message : '无法使用麦克风（需 HTTPS 或本机）', at: Date.now() });
+    }
+  }
+
   function draftAsk(text: string) {
     setQuestion(text);
     setChatCollapsed(false);
@@ -1286,7 +1409,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     const targetModule = moduleForQuestion(assembled); if (targetModule) focusModule(targetModule);
     let answer = '';
-    function update(citations?: Citation[]) { if (activeId.current !== id || controller.signal.aborted) return; setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:answer, ...(citations ? { citations } : {}) } : item)); }
+    let lastEvidence: Citation[] | undefined;
+    function update(citations?: Citation[]) {
+      if (citations) lastEvidence = citations;
+      if (activeId.current !== id || controller.signal.aborted) return;
+      setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:answer, ...(citations ? { citations } : {}) } : item));
+    }
     try {
       await ensureGuestCookie();
       let conversationId = conversationIds.current.get(id);
@@ -1323,6 +1451,24 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
     }
     if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
+    /* voice-after-ask */
+    if (activeId.current === id && !controller.signal.aborted && answer && voiceSpeakRef.current) {
+      voiceSpeakRef.current = false;
+      const first = lastEvidence?.[0];
+      if (first?.page) {
+        const recentlyScrolled = Date.now() - userScrollAtRef.current < 4000;
+        if (voiceAutoJumpRef.current && !recentlyScrolled) {
+          cite({ page: first.page, quote: first.quote ?? '' });
+        } else {
+          setVoiceJumpHint({ page: first.page, quote: first.quote ?? '' });
+        }
+      }
+      const abort = new AbortController();
+      voiceTtsAbortRef.current = abort;
+      void speakAnswer(answer, abort.signal).catch(() => undefined);
+    } else {
+      voiceSpeakRef.current = false;
+    }
   }
   useEffect(() => {
     askRef.current = ask;
@@ -1472,7 +1618,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {feedbackError && <small className="cd-verify-hint cd-verify-error">{feedbackError}</small>}
             {feedback[citedMetric] && <small className="cd-verify-hint">{feedback[citedMetric]==='correct'?'已记录你的确认，累计确认会进入复核队列。':'已记录异议，该指标会被优先人工复核。'}</small>}
           </div>}
-          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} searchQuote={searchHighlight?.quote ?? ''} searchPage={searchHighlight?.page ?? 0} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark className={highlight?'':'cd-search-mark'}>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
+          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} searchQuote={searchHighlight?.quote ?? ''} searchPage={searchHighlight?.page ?? 0} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; userScrollAtRef.current = Date.now(); setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark className={highlight?'':'cd-search-mark'}>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
         </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF <Icon name="external" size={12} /></a><button onClick={()=>{draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
       </aside>
       </div>
@@ -1840,9 +1986,30 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                     <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
                   </svg>
                 </button>
-              : <button aria-label="发送问题" disabled={memoryLoading||(!question.trim()&&!clips.length)} type="submit">
-                  <svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z"/></svg>
-                </button>}
+              : (question.trim() || clips.length)
+                ? <button aria-label="发送问题" title="发送问题" disabled={memoryLoading} type="submit">
+                    <svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z"/></svg>
+                  </button>
+                : <button
+                    type="button"
+                    className={`cd-voice-mic${voiceListening ? ' cd-voice-listening' : ''}`}
+                    aria-label={voiceListening ? '结束并发送' : '进入语音模式'}
+                    title="进入语音模式"
+                    disabled={memoryLoading}
+                    onClick={() => {
+                      if (voiceListening) {
+                        // Finalize current utterance
+                        asrSessionRef.current?.stop();
+                        pcmCaptureRef.current?.stop();
+                        pcmCaptureRef.current = null;
+                        setVoiceListening(false);
+                      } else {
+                        void startVoiceMode();
+                      }
+                    }}
+                  >
+                    <Icon name="mic" size={16} className="cd-send-icon" />
+                  </button>}
           </div>
           {memoryLoading && <small>正在恢复历史会话…</small>}</form>
       </aside>
@@ -1861,6 +2028,34 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           </div>
         </div>
       </div>
+    )}
+    {(voiceMode || voiceListening || voicePartial) && (
+      <div className="cd-voice-float" role="status" aria-live="polite">
+        <div className="cd-voice-float-head">
+          <b>{voiceListening ? '正在聆听…' : '语音'}</b>
+          <label style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12}}>
+            <input type="checkbox" checked={voiceAutoJump} onChange={e => setVoiceAutoJump(e.target.checked)} />
+            自动跳到出处
+          </label>
+        </div>
+        <div className="cd-voice-float-text">{voicePartial || '说出问题，或说「下一页」「第 12 页」'}</div>
+        <div className="cd-voice-float-actions">
+          <button type="button" onClick={() => { stopVoiceSession(); setVoiceMode(false); voicePartialRef.current = ''; setVoicePartial(''); }}>取消</button>
+          {voiceListening ? <button type="button" className="primary" onClick={() => { asrSessionRef.current?.stop(); pcmCaptureRef.current?.stop(); pcmCaptureRef.current = null; setVoiceListening(false); }}>说完了</button> : null}
+        </div>
+      </div>
+    )}
+    {voiceJumpHint && (
+      <button
+        type="button"
+        className="cd-voice-jump"
+        onClick={() => {
+          cite({ page: voiceJumpHint.page, quote: voiceJumpHint.quote });
+          setVoiceJumpHint(null);
+        }}
+      >
+        答案在第 {voiceJumpHint.page} 页 · 去看
+      </button>
     )}
     {quietToast && (
       <div className="cd-quiet-toast" role="status" aria-live="polite">

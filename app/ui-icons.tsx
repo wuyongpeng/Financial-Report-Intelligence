@@ -54,6 +54,13 @@ const icons = {
       <path d="M18 14v4H6V6h4" />
     </>
   ),
+  mic: (
+    <>
+      <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+      <path d="M12 18v3" />
+    </>
+  ),
   search: (
     <>
       <circle cx="11" cy="11" r="6.5" />

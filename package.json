@@ -6,9 +6,9 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "node server.mjs",
     "build": "next build",
-    "start": "next start",
+    "start": "NODE_ENV=production node server.mjs",
     "worker": "tsx scripts/worker.ts",
     "backfill": "node scripts/backfill-snapshot.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
@@ -25,7 +25,9 @@
     "refresh:ashare": "tsx scripts/refresh-ashare-universe.ts",
     "dev:turbo": "next dev --turbopack",
     "eval:questions": "node --import tsx scripts/eval-questions.ts",
-    "fill:verdicts": "node --env-file=.env.development.local --import tsx scripts/fill-verdicts.ts"
+    "fill:verdicts": "node --env-file=.env.development.local --import tsx scripts/fill-verdicts.ts",
+    "dev:next": "next dev --webpack",
+    "start:next": "next start"
   },
   "dependencies": {
     "drizzle-kit": "^0.31.10",
@@ -37,7 +39,8 @@
     "react-dom": "19.2.6",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "unpdf": "^1.8.1"
+    "unpdf": "^1.8.1",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
