@@ -84,6 +84,31 @@ export function focusAttachNote(focus: FocusItem[]) {
   return `已带上 ${bits.join(' + ') || `${focus.length} 项关注`}`;
 }
 
+/** Soft-merge a live PDF/text selection (no 「加入AI分析」 click) into focus.
+ *  Puts the live quote first so the model prioritizes it; skips tiny/dupes.
+ *  Does not count as an explicit clip for attachNote — caller keeps that separate.
+ */
+export function mergeLiveSelectionFocus(
+  focus: FocusItem[],
+  live: { quote: string; page: number; kind?: 'pdf' | 'text' } | null | undefined,
+  maxItems = FOCUS_MAX_ITEMS,
+): FocusItem[] {
+  if (!live) return focus;
+  const quote = clipQuote(live.quote, FOCUS_QUOTE_MAX);
+  if (quote.length < 2) return focus;
+  const kind = live.kind === 'text' ? 'text' : 'pdf';
+  const page = Number.isInteger(live.page) && live.page >= 1 ? live.page : undefined;
+  const dup = focus.some(f =>
+    (f.kind === 'pdf' || f.kind === 'text')
+    && f.text === quote
+    && (page === undefined || f.page === undefined || f.page === page),
+  );
+  if (dup) return focus;
+  const item: FocusItem = { kind, text: quote };
+  if (page !== undefined) item.page = page;
+  return [item, ...focus].slice(0, maxItems);
+}
+
 /** Short block for structuredContext so RAG treats focus as evidence. */
 export function focusContextBlock(focus: FocusItem[]) {
   if (!focus.length) return '';

@@ -464,7 +464,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
       const pickPage = pageAttr ? Number(pageAttr) : (shifted ?? page);
       if (!Number.isFinite(pickPage)) return;
       const text = sel.toString().replace(/\s+/g, ' ').trim();
-      if (text.length < 4) return;
+      if (text.length < 2) return;
       pickRef.current(text, pickPage);
     }
     root.addEventListener('mouseup', onUp);

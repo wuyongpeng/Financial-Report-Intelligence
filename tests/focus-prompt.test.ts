@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, focusContextBlock, parseFocus } from '../lib/focus-prompt';
+import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, focusContextBlock, mergeLiveSelectionFocus, parseFocus } from '../lib/focus-prompt';
 
 test('assembles pdf focus frame with typed question', () => {
   const focus = parseFocus([{ kind: 'pdf', text: '营业收入同比增长12%', page: 12 }]);
@@ -44,4 +44,20 @@ test('parseFocus truncates long quotes instead of rejecting', () => {
   const [item] = parseFocus([{ kind: 'pdf', text: long, page: 2 }]);
   assert.ok(item.text.length <= 600);
   assert.ok(item.text.endsWith('…'));
+});
+
+test('mergeLiveSelectionFocus prepends live PDF quote without requiring clip click', () => {
+  const base = parseFocus([{ kind: 'pdf', text: 'already clipped', page: 2 }]);
+  const merged = mergeLiveSelectionFocus(base, { quote: '长期应付职工薪酬', page: 7 });
+  assert.equal(merged[0].text, '长期应付职工薪酬');
+  assert.equal(merged[0].page, 7);
+  assert.equal(merged[0].kind, 'pdf');
+  assert.equal(merged.length, 2);
+});
+
+test('mergeLiveSelectionFocus skips tiny and duplicate selections', () => {
+  const base = parseFocus([{ kind: 'pdf', text: '同一段原文', page: 3 }]);
+  assert.deepEqual(mergeLiveSelectionFocus(base, { quote: '一', page: 3 }), base);
+  assert.deepEqual(mergeLiveSelectionFocus(base, { quote: '同一段原文', page: 3 }), base);
+  assert.deepEqual(mergeLiveSelectionFocus(base, null), base);
 });

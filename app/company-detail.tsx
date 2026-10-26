@@ -7,7 +7,7 @@ import { verdictTone, type ReportVerdict } from '@/lib/report-verdict';
 import { buildFocusHighlights } from '@/lib/focus-highlights';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
-import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
+import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, mergeLiveSelectionFocus, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
 import { citeFilingLabel, citeHoverText, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '@/lib/answer-cite';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
 import { readContractJson } from '@/contracts/common';
@@ -318,6 +318,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const requestRef = useRef<AbortController | null>(null);
   const activeId = useRef(selected.id);
   const busyRef = useRef(false);
+  /** Live PDF/text selection kept even without 「加入AI分析」 — used on next ask (esp. voice). */
+  const pendingSelectionRef = useRef<{ quote: string; page: number; kind: 'pdf' | 'text' } | null>(null);
   const sourceRef = useRef<HTMLDivElement>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
@@ -357,7 +359,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // Same-company period switch keeps the QA thread; only `newConversation` / `+` clears it.
     memoryReady.current = false; setMemoryLoading(true);
     activeId.current = report.id;
-    setSelected(report); onSelect(report.id); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
+    setSelected(report); onSelect(report.id); clearPendingSelection(); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
     setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setDepthOpen(false); setFocused(null);
     setPdfSearch(''); setPdfSearchHits([]); setPdfSearchOpen(false); setSearchHighlight(null);
     setVerdict(null); setVerdictStatus('loading'); setVerdictError('');
@@ -619,12 +621,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         return;
       }
       const raw = sel.toString().replace(/\s+/g, ' ').trim();
+      if (raw.length < 2) { setPick(null); return; }
+      const page = resolvedPage ?? sourcePage;
+      rememberPendingSelection(raw, page, sourceMode === 'text' ? 'text' : 'pdf');
       if (raw.length < 4) { setPick(null); return; }
       const range = sel.getRangeAt(0).getBoundingClientRect();
       setOverviewPick(null);
       setPick({
         quote: raw,
-        page: resolvedPage ?? sourcePage,
+        page,
         x: range.left + range.width / 2,
         y: Math.max(8, range.top - 40),
       });
@@ -1691,6 +1696,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       flashClips('加入AI分析失败，请重试');
       return;
     }
+    clearPendingSelection();
     setPick(null);
     setOverviewPick(null);
     setChatCollapsed(false);
@@ -1715,8 +1721,18 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const q = c.quote.trim();
     return q.startsWith('概览 ') ? q : `概览 ${q}`;
   }
+  function rememberPendingSelection(quote: string, page: number, kind: 'pdf' | 'text' = sourceMode === 'text' ? 'text' : 'pdf') {
+    const clean = quote.replace(/\s+/g, ' ').trim();
+    if (clean.length < 2) return;
+    pendingSelectionRef.current = { quote: clean.slice(0, FOCUS_QUOTE_MAX), page, kind };
+  }
+  function clearPendingSelection() {
+    pendingSelectionRef.current = null;
+  }
   function placePick(quote: string, page: number) {
     // .cd-pick-bar is position:fixed — use viewport coords, not scroll-container offsets.
+    const kind = sourceMode === 'text' ? 'text' : 'pdf';
+    rememberPendingSelection(quote, page, kind);
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) { addClip(quote, page); return; }
     const range = sel.getRangeAt(0).getBoundingClientRect();
@@ -1816,7 +1832,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const typedNav = parseVoiceNavIntent(typed);
       if (typedNav?.kind === 'home') {
         const line = pickVoiceHomeLine();
-        setQuestion(''); setClips([]); setPick(null);
+        setQuestion(''); setClips([]); clearPendingSelection(); setPick(null);
         setChatCollapsed(false);
         setMessages(m => [...m, { role: 'user', text: typed, ask: { question: typed } }, { role: 'assistant', text: line }]);
         try {
@@ -1857,7 +1873,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // Dismiss / farewell: local short goodbye — never finance out-of-scope path.
     if (replacing == null && typed && isVoiceFarewell(typed)) {
       const line = pickVoiceFarewellLine();
-      setQuestion(''); setClips([]); setPick(null);
+      setQuestion(''); setClips([]); clearPendingSelection(); setPick(null);
       setChatCollapsed(false);
       setMessages(m => [...m, { role: 'user', text: typed, ask: { question: typed } }, { role: 'assistant', text: line }]);
       if (voiceConvRef.current) {
@@ -1891,6 +1907,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       ...(c.title ? { title: c.title } : {}),
     })));
     let focusPayload: FocusItem[] = [...userFocus];
+    // Live PDF/text selection without 「加入AI分析」 — soft-merge as priority focus (voice + typed).
+    const liveSel = replacing != null ? null : pendingSelectionRef.current;
+    if (liveSel) {
+      focusPayload = mergeLiveSelectionFocus(focusPayload, liveSel);
+    }
     // Soft-merge the page under the reader's eyes only when it looks relevant to the typed ask.
     // Blindly attaching whatever page is open (cover / KPI table) used to pollute focus context
     // and — before the chat-route fix — the retrieval planner itself.
@@ -1912,9 +1933,24 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         }
       }
     }
-    // Pre-highlight: paint a quote on the page the reader is already viewing.
+    // Pre-highlight: prefer live selection quote; else paint a quote on the page already in view.
     // Never jump away before the answer — adjacent/elsewhere matches wait for citations.
-    if (replacing == null && typed && typed !== '怎么看待这些数据') {
+    if (replacing == null && liveSel && liveSel.quote.length >= 2) {
+      clearPdfSearchHighlight();
+      setCitedMetric(null);
+      setResolvedPage(null);
+      setHighlight(liveSel.quote);
+      // Selection was made on this page — paint only; do not yank scroll via jumpNonce.
+      if (liveSel.page === sourcePageRef.current) {
+        widenSourceForPdf(SOURCE_WIDE);
+      } else {
+        // User selected on another page still open in the stack: jump so highlight is visible.
+        sourcePageRef.current = liveSel.page;
+        setSourcePage(liveSel.page);
+        setPdfJumpNonce((n) => n + 1);
+        widenSourceForPdf(SOURCE_WIDE);
+      }
+    } else if (replacing == null && typed && typed !== '怎么看待这些数据') {
       const current = sourcePageRef.current;
       const hit = findPageLocalHighlight(typed, outlineRef.current.pages, current, 1);
       if (hit && hit.page === current) {
@@ -1941,7 +1977,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const slot = replacing != null ? replacing : messages.length + 1;
     setAsking(true); setThinking(false);
     if (replacing == null) {
-      setQuestion(''); setClips([]); setPick(null);
+      setQuestion(''); setClips([]); clearPendingSelection(); setPick(null);
       setMessages(m => [...m, { role:'user', text:display, ask:{ question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(attachNote ? { attachNote } : {}) } }, { role:'assistant', text:'' }]);
     } else {
       setMessages(m => [...m.slice(0, replacing), { role:'assistant', text:'' }]);
@@ -2200,7 +2236,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           {pick && <div className="cd-pick-bar" style={{ top: pick.y, left: pick.x }}>
             <div className="cd-pick-actions">
               <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => addClip(pick.quote, pick.page)}>加入AI分析</button>
-              <button type="button" className="cd-pick-cancel" onMouseDown={e => e.preventDefault()} onClick={() => { setPick(null); window.getSelection()?.removeAllRanges(); }}>取消</button>
+              <button type="button" className="cd-pick-cancel" onMouseDown={e => e.preventDefault()} onClick={() => { clearPendingSelection(); setPick(null); window.getSelection()?.removeAllRanges(); }}>取消</button>
             </div>
           </div>}
           {highlight && <div className="cd-source-hit">已定位 · {pageDescription(sourcePage)}{resolvedPage!==null&&resolvedPage!==sourcePage?` · 已按引用原文校正至 PDF 第 ${resolvedPage} 页`:''}<small>{highlight.slice(0,100)}</small></div>}
