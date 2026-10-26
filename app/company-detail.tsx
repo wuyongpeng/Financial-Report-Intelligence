@@ -1281,7 +1281,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voicePartialRef.current = ''; setVoicePartial('');
     setChatCollapsed(false);
     // Shared ask path: current-page focus + pre-highlight, same as typed send.
-    void ask(text);
+    void ask(text, { spoken: true });
     if (voiceConvRef.current) void armBargeInAsr('asking');
   }
 
@@ -1728,7 +1728,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     void ask(user.ask?.question ?? user.text, { replaceAt: index, focus: user.ask?.focus, rewrite });
   }
 
-  async function ask(text: string, extra?: { replaceAt?: number; focus?: FocusItem[]; rewrite?: 'detailed' | 'brief' | 'retry' }) {
+  async function ask(text: string, extra?: { replaceAt?: number; focus?: FocusItem[]; rewrite?: 'detailed' | 'brief' | 'retry'; spoken?: boolean }) {
     const replacing = extra?.replaceAt;
     const typed = text.trim();
     if (replacing != null) {
@@ -1832,7 +1832,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           conversationId = payload.conversation.id; conversationIds.current.set(id, conversationId);
         } catch { /* ignore — anonymous users can ask without persisted memory */ }
       }
-      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), stream:true }) });
+      const spoken = Boolean(extra?.spoken ?? voiceSpeakRef.current ?? voiceConvRef.current);
+      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), ...(spoken ? { spoken: true } : {}), stream:true }) });
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {

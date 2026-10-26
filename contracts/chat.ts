@@ -14,6 +14,8 @@ export type ChatRequest = {
   requestId: string;
   conversationId?: string;
   rewrite?: AnswerRewrite;
+  /** Realtime voice / spoken TTS path — answers must stay very short. */
+  spoken?: boolean;
 };
 
 export type ChatResponse = AnswerResult & {
@@ -50,6 +52,7 @@ export function parseChatRequest(body: Record<string, unknown>): ChatRequest {
     requestId,
     conversationId,
     rewrite: parseAnswerRewrite(body.rewrite),
+    spoken: optionalBoolean(body.spoken, 'spoken') ?? false,
   };
 }
 

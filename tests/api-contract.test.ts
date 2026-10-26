@@ -65,6 +65,17 @@ test('current retrieval intent and keyword ranking behavior is locked as a refac
   ];
   assert.match(retrievalQuestion('具体原因呢？', history), /净利润为什么下降/);
   assert.equal(retrievalQuestion('营业收入是多少？', history), '营业收入是多少？');
+  assert.equal(
+    retrievalQuestion('分析一下这个季度业绩到底好不好？', history),
+    '分析一下这个季度业绩到底好不好？',
+  );
+  assert.equal(
+    retrievalQuestion('分析一下这个季度业绩到底好不好？', [
+      { role: 'user', content: '当前用的哪个大语言模型' },
+      { role: 'assistant', content: '模型 x' },
+    ]),
+    '分析一下这个季度业绩到底好不好？',
+  );
   assert.equal(wantsCompanyHistory('过去三年现金流趋势'), true);
   assert.equal(wantsPeerCompare('与同行相比如何'), true);
   assert.deepEqual(mentionedCompanyCodes('对比格力电器', [

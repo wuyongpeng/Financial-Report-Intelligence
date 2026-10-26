@@ -45,6 +45,7 @@ export async function POST(request: Request) {
         path: '/api/chat',
         detail: {
           rewrite: input.rewrite ?? null,
+          spoken: Boolean(input.spoken),
           focusCount: focus.length,
           streamed: Boolean(input.stream),
           replay: Boolean(replay),
@@ -59,8 +60,9 @@ export async function POST(request: Request) {
     const persist = async (result: AnswerResult) => {
       if (lease) await finishTurn(lease.owner, lease.conversationId, lease.requestId, result);
     };
+    const answerOpts = { rewrite: input.rewrite, spoken: Boolean(input.spoken) };
     if (!input.stream) {
-      const result = replay ?? await generateAnswer(context!, history, request.signal, undefined, input.rewrite);
+      const result = replay ?? await generateAnswer(context!, history, request.signal, undefined, answerOpts);
       await persist(result);
       const headers = new Headers({ 'cache-control': 'no-store' });
       if (setCookie) headers.append('set-cookie', setCookie);
@@ -82,7 +84,7 @@ export async function POST(request: Request) {
             if (event.content) emitted = true;
             if (event.content) emit({ content: event.content });
             else if (event.status === 'reasoning') emit({ status: 'reasoning' });
-          }, input.rewrite);
+          }, answerOpts);
           await persist(result);
           if (!emitted) emit({ content: result.answer });
           // Final result replaces provisional deltas if validation required a fallback.

@@ -5,7 +5,7 @@ import { boundedMemory } from '../lib/conversations';
 import { hasCoreMetrics } from '../lib/metric-quality';
 import { buildOutline } from '../lib/outline';
 import { excerpt, retrievalQuestion, type RagContext } from '../lib/rag';
-import { generateAnswer, modelMessages, parseAnswerRewrite, parseSse, validateCitations } from '../lib/answer';
+import { formatSpokenDirectAnswer, generateAnswer, modelMessages, parseAnswerRewrite, parseSse, validateCitations } from '../lib/answer';
 import { readObject } from '../lib/api';
 import { collectPages } from '../lib/sources';
 import type { Announcement } from '../lib/types';
@@ -71,6 +71,37 @@ test('rewrite styles append targeted instructions', () => {
   assert.match(brief[brief.length - 1].content, /更简短/);
   assert.match(retry[retry.length - 1].content, /重新作答/);
   assert.doesNotMatch(plain[plain.length - 1].content, /重写要求/);
+});
+
+test('spoken voice mode forces brevity and drops industry essay framing', () => {
+  const spoken = modelMessages({ ...context, industry: '银行' }, [], { spoken: true });
+  const system = spoken[0].content;
+  const user = spoken[spoken.length - 1].content;
+  assert.match(user, /语音回答要求/);
+  assert.match(user, /禁止 Markdown 表格/);
+  assert.match(user, /只回答上面的「当前问题」/);
+  assert.match(system, /只回答本轮用户消息里「当前问题」/);
+  assert.match(system, /禁止表格/);
+  assert.doesNotMatch(system, /一、结论先行|结论先行/);
+  assert.equal(formatSpokenDirectAnswer('营收：1【E1】\n净利：2【E2】\nROE：3【E3】'), '营收：1【E1】');
+  assert.equal(
+    formatSpokenDirectAnswer('| 指标 | 值 |\n| --- | --- |\n| 营收 | 907亿 |\n营收约907亿【E1】'),
+    '营收约907亿【E1】',
+  );
+});
+
+test('modelMessages strips meta prior turns so Eva does not re-answer them', () => {
+  const history = [
+    { role: 'user' as const, content: '当前用的哪个大语言模型' },
+    { role: 'assistant' as const, content: '模型是 thudm/glm-5.2' },
+    { role: 'user' as const, content: '营业收入是多少？' },
+    { role: 'assistant' as const, content: '营收 100【E1】' },
+  ];
+  const msgs = modelMessages({ ...context, question: '分析一下这个季度业绩到底好不好？' }, history);
+  const roles = msgs.filter(m => m.role !== 'system');
+  assert.equal(roles[0].content, '营业收入是多少？');
+  assert.doesNotMatch(roles.map(m => m.content).join('\n'), /大语言模型/);
+  assert.match(msgs[msgs.length - 1].content, /分析一下这个季度业绩到底好不好/);
 });
 
 test('deterministic answers avoid model calls; unknown citations trigger fallback', async t => {

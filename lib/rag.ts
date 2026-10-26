@@ -6,6 +6,9 @@ import { KeywordPassageRetriever } from '@/modules/retrieval/application/keyword
 import {
   mentionedCompanyCodes,
   retrievalQuestion,
+  historyForModel,
+  isAnaphoricFollowUp,
+  isDisposablePriorQuestion,
   wantsCompanyHistory,
   wantsEvaluativeJudgement,
   wantsPeerCompare,
@@ -19,6 +22,9 @@ export type RagContext = RetrievalContext;
 export {
   mentionedCompanyCodes,
   retrievalQuestion,
+  historyForModel,
+  isAnaphoricFollowUp,
+  isDisposablePriorQuestion,
   wantsCompanyHistory,
   wantsEvaluativeJudgement,
   wantsPeerCompare,

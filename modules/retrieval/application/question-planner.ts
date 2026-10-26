@@ -20,13 +20,54 @@ export function wantsEvaluativeJudgement(query: string) {
   return /好不好|好吗|怎样|怎么样|如何|亮眼|疲软|优秀|差吗/.test(query);
 }
 
+/** Prior turn that should never be merged into a later finance ask. */
+export function isDisposablePriorQuestion(question: string) {
+  return isMetaModelQuestion(question) || isClearOffTopicQuestion(question);
+}
+
+/**
+ * True when the current utterance is a short anaphoric follow-up that needs the
+ * previous user turn for topic. Self-contained asks like「这个季度业绩好不好」
+ * must NOT match — bare「这个」used to prepend a prior meta ask and confuse the LLM.
+ */
+export function isAnaphoricFollowUp(question: string) {
+  const q = question.trim();
+  if (!q) return false;
+  // Period / report deixis is self-contained, not a pointer to the prior ask.
+  if (/这个季度|这季度|这份报告|本季度|本期财报|该公司|这家公司|这一页|本页|当前页/.test(q)) {
+    return /那它|该指标|上述|这项|这张|具体原因|那为什么|为何如此/.test(q);
+  }
+  if (/那它|该指标|上述|这项|这张|具体原因呢|那为什么|为何如此/.test(q)) return true;
+  if (/^(为什么|为何)[？?]?$/.test(q)) return true;
+  // Very short deixis without its own metric/finance topic.
+  const hasTopic = Object.values(METRIC_PATTERNS).some(pattern => pattern.test(q));
+  if (!hasTopic && !hasFinanceSignal(q) && /^(那|这个|该项|它|为啥)/.test(q) && q.length < 24) {
+    return true;
+  }
+  if (!hasTopic && !hasFinanceSignal(q) && /为什么|为何/.test(q) && q.length < 36) return true;
+  return false;
+}
+
 export function retrievalQuestion(question: string, history: MemoryMessage[]) {
   const previous = [...history].reverse().find(message => message.role === 'user')?.content;
   if (!previous) return question;
-  const hasTopic = Object.values(METRIC_PATTERNS).some(pattern => pattern.test(question));
-  return !hasTopic || /那它|这个|该指标|上述|这项|这张|为什么|为何/.test(question)
-    ? `${previous.slice(0, 600)}\n当前追问：${question}`
-    : question;
+  // Never carry meta / weather / chitchat priors into retrieval or planning.
+  if (isDisposablePriorQuestion(previous)) return question;
+  if (!isAnaphoricFollowUp(question)) return question;
+  return `${previous.slice(0, 600)}\n当前追问：${question}`;
+}
+
+/** Drop meta/off-topic turns so the LLM never re-answers a prior chitchat ask. */
+export function historyForModel(history: MemoryMessage[]) {
+  const out: MemoryMessage[] = [];
+  for (let i = 0; i + 1 < history.length; i += 2) {
+    const user = history[i];
+    const assistant = history[i + 1];
+    if (user?.role !== 'user' || assistant?.role !== 'assistant') continue;
+    if (isDisposablePriorQuestion(user.content)) continue;
+    out.push(user, assistant);
+  }
+  return out;
 }
 
 export function mentionedCompanyCodes(

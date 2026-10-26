@@ -3,10 +3,14 @@ import test from 'node:test';
 import {
   classifyQuestionScope,
   hasFinanceSignal,
+  historyForModel,
+  isAnaphoricFollowUp,
   isClearOffTopicQuestion,
+  isDisposablePriorQuestion,
   isReportEntityQuestion,
   isMetaModelQuestion,
   planQuestion,
+  retrievalQuestion,
 } from '../modules/retrieval/application/question-planner';
 import { outOfScopeReply } from '../modules/retrieval/application/answer-policy';
 
@@ -90,4 +94,27 @@ test('茅台学院是什么意思 stays in-scope for page-text retrieval', () =>
   assert.equal(plan.outOfScope, false);
   assert.deepEqual(plan.metricNames, []);
   assert.equal(plan.wantsStructuredValue, false);
+});
+
+test('这个季度业绩好不好 is self-contained — does not prepend prior meta ask', () => {
+  const history = [
+    { role: 'user' as const, content: '当前用的哪个大语言模型' },
+    { role: 'assistant' as const, content: '我是财报智析 Eva。当前问答使用的模型是 thudm/glm-5.2。' },
+  ];
+  const q = '分析一下这个季度业绩到底好不好？';
+  assert.equal(isAnaphoricFollowUp(q), false);
+  assert.equal(retrievalQuestion(q, history), q);
+  assert.equal(isDisposablePriorQuestion('当前用的哪个大语言模型'), true);
+  const filtered = historyForModel(history);
+  assert.equal(filtered.length, 0);
+});
+
+test('short anaphoric follow-ups still merge prior finance topic', () => {
+  const history = [
+    { role: 'user' as const, content: '净利润为什么下降？' },
+    { role: 'assistant' as const, content: '需要查看经营原因。' },
+  ];
+  assert.equal(isAnaphoricFollowUp('具体原因呢？'), true);
+  assert.match(retrievalQuestion('具体原因呢？', history), /净利润为什么下降/);
+  assert.equal(retrievalQuestion('营业收入是多少？', history), '营业收入是多少？');
 });
