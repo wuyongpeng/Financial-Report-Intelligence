@@ -283,8 +283,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [asking, setAsking] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceSpeaking, setVoiceSpeaking] = useState(false);
   const [voicePartial, setVoicePartial] = useState('');
-  const [voiceJumpHint, setVoiceJumpHint] = useState<{ page: number; quote: string } | null>(null);
+  const [voiceJumpHint, setVoiceJumpHint] = useState<Citation | null>(null);
   const [voiceAutoJump, setVoiceAutoJump] = useState(true);
   const [regenMenu, setRegenMenu] = useState<number | null>(null);
   const [jumpAsk, setJumpAsk] = useState<null | { href: string; title: string; detail: ReactNode }>(null);
@@ -308,6 +309,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const pcmCaptureRef = useRef<PcmCapture | null>(null);
   const voiceSpeakRef = useRef(false);
   const voiceTtsAbortRef = useRef<AbortController | null>(null);
+  const voiceFinalTimerRef = useRef<number | null>(null);
+  const voiceUtteranceHandledRef = useRef(false);
   const userScrollAtRef = useRef(0);
   const sourcePageRef = useRef(1);
   const outlineRef = useRef(emptyOutline);
@@ -1059,15 +1062,30 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   useEffect(() => {
     return () => {
       /* voice unmount cleanup */
+      if (voiceFinalTimerRef.current != null) {
+        window.clearTimeout(voiceFinalTimerRef.current);
+        voiceFinalTimerRef.current = null;
+      }
       pcmCaptureRef.current?.stop();
       pcmCaptureRef.current = null;
       asrSessionRef.current?.close();
       asrSessionRef.current = null;
       voiceTtsAbortRef.current?.abort();
+      voiceTtsAbortRef.current = null;
     };
   }, []);
   useEffect(() => { outlineRef.current = outline; }, [outline]);
   useEffect(() => { voiceAutoJumpRef.current = voiceAutoJump; }, [voiceAutoJump]);
+  useEffect(() => {
+    if (!(voiceMode || voiceListening || voiceSpeaking)) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault();
+      endVoiceMode();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [voiceMode, voiceListening, voiceSpeaking]);
 
   function resizeComposer() {
     const el = questionRef.current;
@@ -1077,13 +1095,68 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const max = 180;
     el.style.height = `${Math.min(max, Math.max(min, el.scrollHeight))}px`;
   }
+
+  function clearVoiceFinalTimer() {
+    if (voiceFinalTimerRef.current != null) {
+      window.clearTimeout(voiceFinalTimerRef.current);
+      voiceFinalTimerRef.current = null;
+    }
+  }
+
+  /** Hard stop: release mic, close ASR, abort TTS, clear listening UI. */
+  function endVoiceMode() {
+    clearVoiceFinalTimer();
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    asrSessionRef.current?.close();
+    asrSessionRef.current = null;
+    voiceTtsAbortRef.current?.abort();
+    voiceTtsAbortRef.current = null;
+    voiceSpeakRef.current = false;
+    voicePartialRef.current = '';
+    setVoicePartial('');
+    setVoiceListening(false);
+    setVoiceSpeaking(false);
+    setVoiceMode(false);
+  }
+
+  /** Stop mic capture and ask ASR to finalize; keep HUD until final or timeout. */
+  function finalizeListening() {
+    if (!asrSessionRef.current && !pcmCaptureRef.current) {
+      endVoiceMode();
+      return;
+    }
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    asrSessionRef.current?.stop();
+    setVoiceListening(false);
+    clearVoiceFinalTimer();
+    voiceFinalTimerRef.current = window.setTimeout(() => {
+      voiceFinalTimerRef.current = null;
+      const pending = voicePartialRef.current.trim();
+      asrSessionRef.current?.close();
+      asrSessionRef.current = null;
+      if (pending) void handleVoiceUtterance(pending);
+      else endVoiceMode();
+    }, 2500);
+  }
+
   function stopVoiceSession(opts?: { finalize?: boolean }) {
+    clearVoiceFinalTimer();
     pcmCaptureRef.current?.stop();
     pcmCaptureRef.current = null;
     if (opts?.finalize) asrSessionRef.current?.stop();
     else asrSessionRef.current?.close();
     asrSessionRef.current = null;
     setVoiceListening(false);
+  }
+
+  /** Same path as clicking an in-answer [Pxx] / 参考来源 chip. */
+  function revealVoiceCitation(c: Citation) {
+    setSourceMode('pdf');
+    setSourceCollapsed(false);
+    setMobilePane('sources');
+    jumpCitation(c);
   }
 
   function applyVoiceNav(intent: NonNullable<ReturnType<typeof parseVoiceNavIntent>>) {
@@ -1112,10 +1185,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
 
   async function handleVoiceUtterance(raw: string) {
+    if (voiceUtteranceHandledRef.current) return;
+    voiceUtteranceHandledRef.current = true;
     const text = raw.replace(/\s+/g, ' ').trim();
     voicePartialRef.current = text; setVoicePartial(text);
     if (!text) {
-      setVoiceMode(false);
+      endVoiceMode();
       return;
     }
     const nav = parseVoiceNavIntent(text);
@@ -1144,8 +1219,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       setQuietToast({ text: secureErr, at: Date.now() });
       return;
     }
-    voiceTtsAbortRef.current?.abort();
-    voiceTtsAbortRef.current = null;
+    // Starting a new turn always terminates any prior listen/speak session.
+    endVoiceMode();
+    voiceUtteranceHandledRef.current = false;
     setVoiceJumpHint(null);
     setVoiceMode(true);
     voicePartialRef.current = ''; setVoicePartial('');
@@ -1154,12 +1230,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const session = openAsrSession((ev) => {
         if (ev.type === 'partial') { voicePartialRef.current = ev.text; setVoicePartial(ev.text); }
         if (ev.type === 'final') {
+          clearVoiceFinalTimer();
           stopVoiceSession();
           void handleVoiceUtterance(ev.text || voicePartialRef.current);
         }
         if (ev.type === 'error') {
-          stopVoiceSession();
-          setVoiceMode(false);
+          endVoiceMode();
           setQuietToast({ text: ev.message, at: Date.now() });
         }
       });
@@ -1167,8 +1243,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const capture = await startPcmCapture((chunk) => session.sendPcm(chunk));
       pcmCaptureRef.current = capture;
     } catch (err) {
-      stopVoiceSession();
-      setVoiceMode(false);
+      endVoiceMode();
       setQuietToast({ text: err instanceof Error ? err.message : '无法使用麦克风', at: Date.now() });
     }
   }
@@ -1456,21 +1531,33 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
     }
     if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
-    /* voice-after-ask */
+    /* voice-after-ask: jump via the same path as clicking an answer [Pxx] chip */
     if (activeId.current === id && !controller.signal.aborted && answer && voiceSpeakRef.current) {
       voiceSpeakRef.current = false;
-      const first = lastEvidence?.[0];
-      if (first?.page) {
+      const fromMarks = uniqueAnswerSources(answer, lastEvidence, pageLabel);
+      const withQuote = lastEvidence?.find(e => e.page && (e.quote ?? '').trim());
+      const target = fromMarks[0] ?? withQuote ?? lastEvidence?.[0];
+      if (target?.page) {
         const recentlyScrolled = Date.now() - userScrollAtRef.current < 4000;
         if (voiceAutoJumpRef.current && !recentlyScrolled) {
-          cite({ page: first.page, quote: first.quote ?? '' });
+          revealVoiceCitation(target);
+          setVoiceJumpHint(null);
         } else {
-          setVoiceJumpHint({ page: first.page, quote: first.quote ?? '' });
+          setVoiceJumpHint(target);
         }
       }
       const abort = new AbortController();
       voiceTtsAbortRef.current = abort;
-      void speakAnswer(answer, abort.signal).catch(() => undefined);
+      setVoiceSpeaking(true);
+      setVoiceMode(true);
+      void speakAnswer(answer, abort.signal)
+        .catch(() => undefined)
+        .finally(() => {
+          if (voiceTtsAbortRef.current === abort) voiceTtsAbortRef.current = null;
+          setVoiceSpeaking(false);
+          // Drop the float once reading finishes, unless a new listen already started.
+          if (!asrSessionRef.current && !pcmCaptureRef.current) setVoiceMode(false);
+        });
     } else {
       voiceSpeakRef.current = false;
     }
@@ -1999,17 +2086,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                   </button>
                 : <button
                     type="button"
-                    className={`cd-voice-mic${voiceListening ? ' cd-voice-listening' : ''}`}
-                    aria-label={voiceListening ? '结束并发送' : '进入语音模式'}
-                    title="进入语音模式"
+                    className={`cd-voice-mic${voiceListening ? ' cd-voice-listening' : ''}${voiceSpeaking ? ' cd-voice-speaking' : ''}`}
+                    aria-label={voiceListening ? '结束并发送' : voiceSpeaking ? '停止朗读' : '进入语音模式'}
+                    title={voiceListening ? '结束并发送' : voiceSpeaking ? '停止朗读' : '进入语音模式'}
                     disabled={memoryLoading}
                     onClick={() => {
                       if (voiceListening) {
-                        // Finalize current utterance
-                        asrSessionRef.current?.stop();
-                        pcmCaptureRef.current?.stop();
-                        pcmCaptureRef.current = null;
-                        setVoiceListening(false);
+                        finalizeListening();
+                      } else if (voiceSpeaking) {
+                        endVoiceMode();
                       } else {
                         void startVoiceMode();
                       }
@@ -2042,19 +2127,19 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         </div>
       </div>
     )}
-    {(voiceMode || voiceListening || voicePartial) && (
+    {(voiceMode || voiceListening || voicePartial || voiceSpeaking) && (
       <div className="cd-voice-float" role="status" aria-live="polite">
         <div className="cd-voice-float-head">
-          <b>{voiceListening ? '正在聆听…' : '语音'}</b>
+          <b>{voiceListening ? '正在聆听…' : voiceSpeaking ? '正在朗读…' : '语音'}</b>
           <label style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12}}>
             <input type="checkbox" checked={voiceAutoJump} onChange={e => setVoiceAutoJump(e.target.checked)} />
             自动跳到出处
           </label>
         </div>
-        <div className="cd-voice-float-text">{voicePartial || '说出问题，或说「下一页」「第 12 页」'}</div>
+        <div className="cd-voice-float-text">{voicePartial || (voiceSpeaking ? '回答朗读中，可随时停止' : '说出问题，或说「下一页」「第 12 页」')}</div>
         <div className="cd-voice-float-actions">
-          <button type="button" onClick={() => { stopVoiceSession(); setVoiceMode(false); voicePartialRef.current = ''; setVoicePartial(''); }}>取消</button>
-          {voiceListening ? <button type="button" className="primary" onClick={() => { asrSessionRef.current?.stop(); pcmCaptureRef.current?.stop(); pcmCaptureRef.current = null; setVoiceListening(false); }}>说完了</button> : null}
+          <button type="button" onClick={() => endVoiceMode()}>{voiceSpeaking && !voiceListening ? '停止' : '取消'}</button>
+          {voiceListening ? <button type="button" className="primary" onClick={() => finalizeListening()}>说完了</button> : null}
         </div>
       </div>
     )}
@@ -2063,7 +2148,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         type="button"
         className="cd-voice-jump"
         onClick={() => {
-          cite({ page: voiceJumpHint.page, quote: voiceJumpHint.quote });
+          revealVoiceCitation(voiceJumpHint);
           setVoiceJumpHint(null);
         }}
       >

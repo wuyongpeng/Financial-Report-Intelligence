@@ -783,6 +783,7 @@ html.dark .cd-fb,.dark .cd-fb{
 .cd-chat-input button.cd-voice-mic:hover{background:#e8eef8;color:#3064db;border-color:#c5d6f5}
 .cd-chat-input button.cd-voice-mic:disabled{background:#eef1f5;color:#a0acbd;border-color:#e2e8f0}
 .cd-chat-input button.cd-voice-listening{background:#fee2e2;color:#b91c1c;border-color:#fecaca;animation:cd-voice-pulse 1.2s ease-in-out infinite}
+.cd-chat-input button.cd-voice-speaking{background:#e8eef8;color:#3064db;border-color:#c5d6f5}
 @keyframes cd-voice-pulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.25)}50%{box-shadow:0 0 0 6px rgba(220,38,38,0)}}
 .cd-voice-float{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;min-width:min(420px,92vw);max-width:520px;background:#fff;border:1px solid #dce6f8;border-radius:14px;box-shadow:0 10px 30px rgba(32,48,71,.16);padding:12px 14px;display:grid;gap:8px}
 .cd-voice-float-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#5d6e85}
