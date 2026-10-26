@@ -1003,8 +1003,6 @@ export default function ReportHome() {
       </form>
       {showPersonalizedHint ? (
         <p className="rh-search-hint" role="status">已按你最近的提问定制示例</p>
-      ) : !search.trim() && !voiceListening ? (
-        <p className="rh-search-hint" role="status">按 Tab 采用当前示例 · 或点波形语音提问</p>
       ) : voiceListening ? (
         <p className="rh-search-hint" role="status">正在聆听… 点停止结束并发送</p>
       ) : (
