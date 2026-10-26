@@ -2075,40 +2075,70 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           </div>}
           <div className="cd-composer">
             <textarea ref={questionRef} aria-label="向 Eva 提问" placeholder="随意划词，灵活追问" rows={1} value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault(); if(!asking) void ask(question);}}}/>
-            {asking
-              ? <button type="button" className="cd-stop" aria-label="停止生成" title="停止生成" onClick={stopAsk}>
-                  <svg className="cd-stop-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
-                    <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
-                  </svg>
-                </button>
-              : canSend
-                ? <button aria-label="发送问题" title="发送问题" disabled={memoryLoading} type="submit">
-                    <svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z"/></svg>
+            {(() => {
+              const stopGlyph = (
+                <svg className="cd-composer-glyph" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                  <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" />
+                </svg>
+              );
+              const sendGlyph = (
+                <svg className="cd-composer-glyph" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                  <path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z" />
+                </svg>
+              );
+              const waveGlyph = (
+                <svg className="cd-composer-glyph" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                  <rect x="4" y="9" width="2.2" height="6" rx="1.1" fill="currentColor" />
+                  <rect x="8.2" y="6" width="2.2" height="12" rx="1.1" fill="currentColor" />
+                  <rect x="12.4" y="3.5" width="2.2" height="17" rx="1.1" fill="currentColor" />
+                  <rect x="16.6" y="6" width="2.2" height="12" rx="1.1" fill="currentColor" />
+                  <rect x="20.8" y="9" width="2.2" height="6" rx="1.1" fill="currentColor" />
+                </svg>
+              );
+              // Grok-like: stop (asking/voice) > send (text/clips) > idle waveform
+              if (asking) {
+                return (
+                  <button type="button" className="cd-composer-btn cd-composer-stop" aria-label="停止生成" title="停止生成" onClick={stopAsk}>
+                    {stopGlyph}
                   </button>
-                : <button
+                );
+              }
+              if (voiceListening || voiceSpeaking) {
+                return (
+                  <button
                     type="button"
-                    className={`cd-voice-mic${voiceListening ? ' cd-voice-listening' : ''}${voiceSpeaking ? ' cd-voice-speaking' : ''}`}
-                    aria-label={voiceListening ? '结束并发送' : voiceSpeaking ? '停止朗读' : '进入语音模式'}
-                    title={voiceListening ? '结束并发送' : voiceSpeaking ? '停止朗读' : '进入语音模式'}
-                    disabled={memoryLoading}
+                    className="cd-composer-btn cd-composer-stop"
+                    aria-label={voiceListening ? '结束并发送' : '停止朗读'}
+                    title={voiceListening ? '结束并发送' : '停止朗读'}
                     onClick={() => {
-                      if (voiceListening) {
-                        finalizeListening();
-                      } else if (voiceSpeaking) {
-                        endVoiceMode();
-                      } else {
-                        void startVoiceMode();
-                      }
+                      if (voiceListening) finalizeListening();
+                      else endVoiceMode();
                     }}
                   >
-                    <svg className="cd-send-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-                      <rect x="3" y="9" width="2.5" height="6" rx="1" fill="currentColor" />
-                      <rect x="7.25" y="6" width="2.5" height="12" rx="1" fill="currentColor" />
-                      <rect x="11.5" y="3.5" width="2.5" height="17" rx="1" fill="currentColor" />
-                      <rect x="15.75" y="6" width="2.5" height="12" rx="1" fill="currentColor" />
-                      <rect x="20" y="9" width="2.5" height="6" rx="1" fill="currentColor" />
-                    </svg>
-                  </button>}
+                    {stopGlyph}
+                  </button>
+                );
+              }
+              if (canSend) {
+                return (
+                  <button type="submit" className="cd-composer-btn cd-composer-send" aria-label="发送问题" title="发送问题" disabled={memoryLoading}>
+                    {sendGlyph}
+                  </button>
+                );
+              }
+              return (
+                <button
+                  type="button"
+                  className="cd-composer-btn cd-composer-voice"
+                  aria-label="进入语音模式"
+                  title="进入语音模式"
+                  disabled={memoryLoading}
+                  onClick={() => { void startVoiceMode(); }}
+                >
+                  {waveGlyph}
+                </button>
+              );
+            })()}
           </div>
           {memoryLoading && <small>正在恢复历史会话…</small>}</form>
       </aside>
