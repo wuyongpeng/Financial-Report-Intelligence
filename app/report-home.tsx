@@ -394,6 +394,24 @@ export default function ReportHome() {
     asrSessionRef.current = null;
   }, []);
 
+  // Detail voice said 「回首页 / 换一家」 → land here and open mic for next company.
+  useEffect(() => {
+    let flag = '';
+    try {
+      flag = sessionStorage.getItem('eva-home-voice') || '';
+      if (flag) sessionStorage.removeItem('eva-home-voice');
+    } catch {
+      return;
+    }
+    if (flag !== '1') return;
+    const timer = window.setTimeout(() => {
+      void startHomeVoice();
+    }, 350);
+    return () => window.clearTimeout(timer);
+    // startHomeVoice is stable enough for mount-only auto-listen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const refreshCoverage = useCallback(async () => {
     try {
       const response = await fetch('/api/crawl', { cache: 'no-store' });

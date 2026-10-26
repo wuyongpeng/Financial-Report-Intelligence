@@ -33,7 +33,7 @@ import {
 } from '@/lib/industry-skills-ui';
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
-import { parseVoiceNavIntent } from '@/lib/voice/nav-intent';
+import { parseVoiceNavIntent, pickVoiceHomeLine } from '@/lib/voice/nav-intent';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
@@ -1274,10 +1274,46 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     voiceEmptyTurnsRef.current = 0;
     const nav = parseVoiceNavIntent(text);
-    if (nav) {
+    if (nav && nav.kind !== 'home') {
       applyVoiceNav(nav);
       voicePartialRef.current = ''; setVoicePartial('');
       resumeVoiceConversation();
+      return;
+    }
+    // Switch company / go home — leave detail for product home/search (not farewell).
+    if (nav?.kind === 'home') {
+      voicePartialRef.current = ''; setVoicePartial('');
+      setChatCollapsed(false);
+      requestRef.current?.abort();
+      const priorTts = voiceTtsAbortRef.current;
+      voiceTtsAbortRef.current = null;
+      priorTts?.abort();
+      stopVoiceSession();
+      const line = pickVoiceHomeLine();
+      setMessages(m => [...m, { role: 'user', text, ask: { question: text } }, { role: 'assistant', text: line }]);
+      const abort = new AbortController();
+      voiceTtsAbortRef.current = abort;
+      voiceSpeakRef.current = false;
+      setVoiceSpeaking(true);
+      setVoiceMode(true);
+      try {
+        sessionStorage.setItem('eva-home-voice', '1');
+      } catch {
+        /* ignore */
+      }
+      void speakAnswer(line, abort.signal)
+        .catch(() => undefined)
+        .finally(() => {
+          if (voiceTtsAbortRef.current === abort) {
+            voiceTtsAbortRef.current = null;
+            setVoiceSpeaking(false);
+          }
+          voiceConvRef.current = false;
+          voiceEmptyTurnsRef.current = 0;
+          setVoiceSession(false);
+          endVoiceMode();
+          onBack();
+        });
       return;
     }
     // User wants to end the voice session — warm goodbye TTS, then close UI (not finance ask).
@@ -1775,6 +1811,49 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (replacing != null) {
       if (busyRef.current || !memoryReady.current) return;
     } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
+    // Go home / switch company from typed chat too — leave detail for search.
+    if (replacing == null && typed) {
+      const typedNav = parseVoiceNavIntent(typed);
+      if (typedNav?.kind === 'home') {
+        const line = pickVoiceHomeLine();
+        setQuestion(''); setClips([]); setPick(null);
+        setChatCollapsed(false);
+        setMessages(m => [...m, { role: 'user', text: typed, ask: { question: typed } }, { role: 'assistant', text: line }]);
+        try {
+          sessionStorage.setItem('eva-home-voice', '1');
+        } catch {
+          /* ignore */
+        }
+        if (voiceConvRef.current) {
+          requestRef.current?.abort();
+          const priorTts = voiceTtsAbortRef.current;
+          voiceTtsAbortRef.current = null;
+          priorTts?.abort();
+          stopVoiceSession();
+          const abort = new AbortController();
+          voiceTtsAbortRef.current = abort;
+          voiceSpeakRef.current = false;
+          setVoiceSpeaking(true);
+          setVoiceMode(true);
+          void speakAnswer(line, abort.signal)
+            .catch(() => undefined)
+            .finally(() => {
+              if (voiceTtsAbortRef.current === abort) {
+                voiceTtsAbortRef.current = null;
+                setVoiceSpeaking(false);
+              }
+              voiceConvRef.current = false;
+              voiceEmptyTurnsRef.current = 0;
+              setVoiceSession(false);
+              endVoiceMode();
+              onBack();
+            });
+        } else {
+          onBack();
+        }
+        return;
+      }
+    }
     // Dismiss / farewell: local short goodbye — never finance out-of-scope path.
     if (replacing == null && typed && isVoiceFarewell(typed)) {
       const line = pickVoiceFarewellLine();
