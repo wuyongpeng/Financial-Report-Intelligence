@@ -1,5 +1,10 @@
 import type { Citation } from './detail-model';
-import { FALLBACK_ATTRIBUTION_MODULES, type AttributionModuleDef } from './industry-skills-ui';
+import {
+  FALLBACK_ATTRIBUTION_MODULES,
+  isEmptyAttributionConclusion,
+  selectDisplayAttributionModules,
+  type AttributionModuleDef,
+} from './industry-skills-ui';
 
 export const VERDICT_LABELS = [
   '稳健增长',
@@ -52,7 +57,7 @@ const LABEL_SET = new Set<string>(VERDICT_LABELS);
 const TYPE_SET = new Set<string>(CHANGE_TYPES);
 const DIRECTION_SET = new Set<string>(CHANGE_DIRECTIONS);
 const FALLBACK_MODULE_SET = new Set<string>(FALLBACK_MODULE_IDS);
-const MAX_MODULES = 6;
+const MAX_MODULES = 8;
 
 export function isFallbackModuleId(id: string): id is FallbackModuleId {
   return FALLBACK_MODULE_SET.has(id);
@@ -331,10 +336,11 @@ export function acceptVerdictPayload(raw: unknown): ReportVerdict | null {
 
 
 const MODULE_PIVOT_KEYWORDS: Record<string, string[]> = {
-  volume: ['销量', '晶圆', '出货', '营收', '营业收入'],
-  price: ['平均售价', 'ASP', '售价', '单价', '毛利率'],
-  structure: ['地区', '产品', '分部', '结构', '占比', '应用', '尺寸', '营收', '营业收入'],
-  gross_margin: ['毛利率', '毛利', '营收', '营业收入'],
+  volume: ['销量', '晶圆', '出货', '销售量', '交付'],
+  price: ['平均售价', 'ASP', '售价', '单价', '吨价', '均价'],
+  structure: ['地区', '产品', '分部', '结构', '占比', '应用', '尺寸', '海外', '内销'],
+  gross_margin: ['毛利率', '毛利', '销售费用', '研发费用', '费用率'],
+  inventory: ['存货', '跌价', '减值'],
   inventory_capex: ['存货', '跌价', '购建固定资产', '资本开支', '投资活动'],
   revenue_margin: ['营业收入', '营收', '毛利率', '毛利'],
   inventory_receivable: ['存货', '应收', '应收账款', '经营现金流'],
@@ -345,6 +351,16 @@ const MODULE_PIVOT_KEYWORDS: Record<string, string[]> = {
   anomalies: ['同比', '异常', '大幅'],
   history: ['同比', '营收', '净利润'],
   peers: ['同行', '行业', 'ROE'],
+  revenue_profit: ['营业收入', '营收', '净利润', '归母'],
+  gross_opex: ['毛利率', '毛利', '销售费用', '管理费用', '研发费用', '费用率'],
+  rd_intensity: ['研发费用', '研发', '研发投入'],
+  overseas: ['海外', '出口', '国外', '境外', '国际'],
+  cash_conversion: ['经营现金流', '现金流', '经营活动'],
+  inventory_quality: ['存货', '跌价', '减值'],
+  capacity_capex: ['购建固定资产', '资本开支', '投资活动', '产能', '扩产'],
+  channel_contract: ['合同负债', '预收', '经销', '渠道'],
+  tax_oneoff: ['所得税', '政府补助', '投资收益', '非经常', '营业外'],
+  guidance_outlook: ['预计', '展望', '指引', '下半年', '全年'],
 };
 
 function contextLinesWithNumbers(structuredContext: string): string[] {
@@ -377,14 +393,15 @@ function synthesizeModuleConclusion(
   if (!snippet || !hasConcreteNumber(snippet)) return null;
   const disclosed = keywords.some((key) => snippet.includes(key));
   if (disclosed) {
-    return `${def.title}方面可核验指标显示经营节奏需结合下列数字理解：${snippet}`;
+    return `${def.title}：${snippet}`;
   }
   return `未单独披露「${def.title}」明细，改用邻近已披露指标：${snippet}`;
 }
 
 /**
- * Ensure every required industry (or fallback) module has a conclusion.
- * Missing LLM rows are filled from structured metrics / context with best-effort citations.
+ * Fill missing dims from structured metrics across the full priority pool,
+ * then keep ~5 display slots: prefer substantive primary; if all primary
+ * empty/limited, fall back to filled secondary angles.
  */
 export function ensureAttributionModules(
   verdict: ReportVerdict,
@@ -393,27 +410,43 @@ export function ensureAttributionModules(
 ): ReportVerdict {
   if (!moduleDefs.length) return verdict;
   const byId = new Map(verdict.modules.map((row) => [row.id, row]));
-  const ordered: ModuleConclusion[] = [];
+  const filled: ModuleConclusion[] = [];
   for (const def of moduleDefs) {
     const existing = byId.get(def.id);
-    if (existing?.conclusion && hasConcreteNumber(existing.conclusion)) {
-      ordered.push({
+    if (
+      existing?.conclusion
+      && hasConcreteNumber(existing.conclusion)
+      && !isEmptyAttributionConclusion(existing.conclusion)
+    ) {
+      filled.push({
         ...existing,
         title: existing.title || def.title,
-        sourceRef: existing.sourceRef.length ? existing.sourceRef : bestEffortEvidence(existing.conclusion, opts.evidence),
+        sourceRef: existing.sourceRef.length
+          ? existing.sourceRef
+          : bestEffortEvidence(existing.conclusion, opts.evidence),
       });
       continue;
     }
     const conclusion = synthesizeModuleConclusion(def, opts.structuredContext);
     if (!conclusion) continue;
-    ordered.push({
+    filled.push({
       id: def.id,
       title: def.title,
       conclusion,
       sourceRef: bestEffortEvidence(conclusion, opts.evidence),
     });
   }
-  return { ...verdict, modules: ordered.slice(0, MAX_MODULES) };
+
+  const displayDefs = selectDisplayAttributionModules(moduleDefs, filled, { maxDisplay: 5 });
+  const byFilled = new Map(filled.map((row) => [row.id, row]));
+  const preferred = displayDefs
+    .map((def) => byFilled.get(def.id))
+    .filter((row): row is ModuleConclusion => Boolean(row));
+
+  if (preferred.length) {
+    return { ...verdict, modules: preferred.slice(0, MAX_MODULES) };
+  }
+  return { ...verdict, modules: filled.slice(0, Math.min(5, MAX_MODULES)) };
 }
 
 export function followupFromTitle(title: string) {

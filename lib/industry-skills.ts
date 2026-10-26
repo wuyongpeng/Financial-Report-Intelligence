@@ -4,15 +4,26 @@ import seedAll from '@/data/industry-skills/_all.json';
 import badgesSeed from '@/data/industry-skills/badges.json';
 import {
   FALLBACK_ATTRIBUTION_MODULES,
+  SECONDARY_ATTRIBUTION_MODULES,
   depthAttributionLead,
+  expandAttributionModulePool,
   industryAttributionModules as industryAttributionModulesFromSeed,
+  isEmptyAttributionConclusion,
   resolveIndustrySkillKey as resolveIndustrySkillKeyFromSeed,
+  selectDisplayAttributionModules,
   type AttributionModuleDef,
   type IndustrySkillUserFacing,
 } from './industry-skills-ui';
 
 export type { AttributionModuleDef, IndustrySkillUserFacing };
-export { FALLBACK_ATTRIBUTION_MODULES, depthAttributionLead };
+export {
+  FALLBACK_ATTRIBUTION_MODULES,
+  SECONDARY_ATTRIBUTION_MODULES,
+  depthAttributionLead,
+  expandAttributionModulePool,
+  isEmptyAttributionConclusion,
+  selectDisplayAttributionModules,
+};
 
 export type IndustrySkill = {
   id: string;
@@ -135,6 +146,14 @@ export function industryAttributionModules(industry: string | null | undefined):
   const fromDisk = getIndustrySkill(industry)?.attributionModules;
   if (fromDisk?.length) return fromDisk;
   return industryAttributionModulesFromSeed(industry);
+}
+
+/**
+ * Full prioritized attribution pool (~15): industry primary dims + shared secondary.
+ * Use for LLM generation and display selection; prefer selectDisplayAttributionModules for UI.
+ */
+export function attributionModulePool(industry: string | null | undefined): AttributionModuleDef[] {
+  return expandAttributionModulePool(industryAttributionModules(industry));
 }
 
 /** Parse「行业 X」from structuredContext lines produced by retrieve-context. */

@@ -26,9 +26,10 @@ import { clientUuid } from '@/lib/client-uuid';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import {
   depthAttributionLead,
+  expandAttributionModulePool,
   industryAttributionModules,
   industrySkillUserFacing,
-  FALLBACK_ATTRIBUTION_MODULES,
+  selectDisplayAttributionModules,
 } from '@/lib/industry-skills-ui';
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
@@ -774,11 +775,17 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const verdictGenerating = verdictStatus === 'loading';
   const flaggedMoves = changes.filter(d => Math.abs(d.amount!) >= 30);
   const skillDepthModules = industryAttributionModules(selected.industry);
-  const depthModuleDefs = skillDepthModules?.length ? skillDepthModules : FALLBACK_ATTRIBUTION_MODULES;
   const industryDepthMode = Boolean(skillDepthModules?.length);
+  const depthModulePool = expandAttributionModulePool(skillDepthModules);
+  // Prefer filled primary dims; if all primary empty/limited, surface secondary angles.
+  const depthModuleDefs = selectDisplayAttributionModules(
+    depthModulePool,
+    verdict?.modules ?? [],
+    { maxDisplay: 5 },
+  );
   const compactModuleIds = new Set(
     industryDepthMode
-      ? depthModuleDefs.map((m) => m.id)
+      ? depthModulePool.map((m) => m.id)
       : ['business', 'attribution', 'anomalies'],
   );
   function aiModule(id: string) {
@@ -824,7 +831,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     return false;
   }
   function moduleLabel(id: string) {
-    const fromSkill = depthModuleDefs.find((m) => m.id === id)?.title;
+    const fromSkill = depthModuleDefs.find((m) => m.id === id)?.title
+      || depthModulePool.find((m) => m.id === id)?.title;
     if (fromSkill) return fromSkill;
     const fromVerdict = verdict?.modules.find((m) => m.id === id)?.title;
     return fromVerdict || id;

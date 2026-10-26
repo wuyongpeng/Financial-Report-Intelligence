@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { acceptVerdictPayload, ensureAttributionModules, followupFromTitle, followupQuestions, parseReportVerdict, parseReportVerdictJson, targetedFollowups, unwrapModelJson, verdictTone, type ReportVerdict } from '../lib/report-verdict';
+import { expandAttributionModulePool } from '../lib/industry-skills-ui';
 import type { Citation } from '../lib/detail-model';
 
 const evidence: Citation[] = [
@@ -217,7 +218,7 @@ test('keeps industry modules without explicit sourceRef when numbers exist', () 
   assert.ok(parsed!.modules[0].sourceRef.length >= 1);
 });
 
-test('ensureAttributionModules fills every required industry dimension', () => {
+test('ensureAttributionModules fills industry dimensions and keeps numeric conclusions', () => {
   const partial: ReportVerdict = {
     verdict: { label: '稳健增长', summary: '盈利改善。' },
     changes: [],
@@ -228,11 +229,11 @@ test('ensureAttributionModules fills every required industry dimension', () => {
   const filled = ensureAttributionModules(
     partial,
     [
-      { id: 'revenue_margin', title: '收入与毛利', hint: '' },
-      { id: 'structure', title: '结构', hint: '' },
-      { id: 'inventory_receivable', title: '存货与应收', hint: '' },
-      { id: 'expenses', title: '费用与现金流', hint: '' },
-      { id: 'd5', title: '季节性与新品节奏线索', hint: '' },
+      { id: 'revenue_margin', title: '收入与毛利', hint: '', priority: 1 },
+      { id: 'structure', title: '结构', hint: '', priority: 2 },
+      { id: 'inventory_receivable', title: '存货与应收', hint: '', priority: 3 },
+      { id: 'expenses', title: '费用与现金流', hint: '', priority: 4 },
+      { id: 'd5', title: '季节性与新品节奏线索', hint: '', priority: 5 },
     ],
     {
       structuredContext: [
@@ -246,14 +247,47 @@ test('ensureAttributionModules fills every required industry dimension', () => {
       evidence,
     },
   );
-  assert.equal(filled.modules.length, 5);
-  assert.deepEqual(filled.modules.map((m) => m.id), [
-    'revenue_margin', 'structure', 'inventory_receivable', 'expenses', 'd5',
-  ]);
+  assert.ok(filled.modules.length >= 1 && filled.modules.length <= 5);
+  assert.ok(filled.modules.some((m) => m.id === 'revenue_margin'));
   for (const row of filled.modules) {
     assert.ok(row.conclusion);
     assert.match(row.conclusion, /\d/);
     assert.ok(row.title);
   }
-  assert.match(filled.modules.find((m) => m.id === 'structure')!.conclusion, /未单独披露|结构|营收|销量/);
+});
+
+test('ensureAttributionModules falls back to secondary when primary lack disclosure', () => {
+  const pool = expandAttributionModulePool([
+    { id: 'volume', title: '量', hint: '', priority: 1 },
+    { id: 'price', title: '价', hint: '', priority: 2 },
+    { id: 'structure', title: '结构', hint: '', priority: 3 },
+    { id: 'gross_margin', title: '毛利与费用', hint: '', priority: 4 },
+    { id: 'inventory', title: '存货与现金流', hint: '', priority: 5 },
+  ]);
+  const emptyPrimary: ReportVerdict = {
+    verdict: { label: '表现平稳', summary: '披露有限。' },
+    changes: [],
+    modules: [],
+  };
+  const filled = ensureAttributionModules(emptyPrimary, pool, {
+    structuredContext: [
+      '当前报告：比亚迪（002594），2026H1，行业 新能源车。',
+      '营业收入：3712.80亿元（同比 +23.9%）【E1】',
+      '归母净利润：186.00亿元（同比 +12.1%）',
+      '经营现金流净额：420.50亿元',
+      '研发费用：220.00亿元',
+    ].join('\n'),
+    evidence,
+  });
+  assert.ok(filled.modules.length >= 1, 'should surface secondary angles');
+  assert.ok(filled.modules.length <= 5);
+  // Primary volume/price have no 销量/ASP in context → should not dominate with empty stubs.
+  const ids = filled.modules.map((m) => m.id);
+  assert.ok(
+    ids.some((id) => ['revenue_profit', 'cash_conversion', 'rd_intensity', 'gross_opex'].includes(id)),
+    `expected secondary ids, got ${ids.join(',')}`,
+  );
+  for (const row of filled.modules) {
+    assert.match(row.conclusion, /\d/);
+  }
 });

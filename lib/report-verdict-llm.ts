@@ -2,13 +2,12 @@ import { parseSse } from './answer';
 import type { Citation } from './detail-model';
 import { getDb } from './db';
 import {
-  industryAttributionModules,
+  attributionModulePool,
   industryFromStructuredContext,
   industrySkillRetrievalKeywords,
   industrySkillSystemAppend,
   type AttributionModuleDef,
 } from './industry-skills';
-import { FALLBACK_ATTRIBUTION_MODULES } from './industry-skills-ui';
 import { loadRagContext } from './rag';
 import {
   buildVerdictJsonSchema,
@@ -38,25 +37,33 @@ const SYSTEM_PROMPT_CORE = `你是「财报智析 Eva」的速判模块。只根
 10. 不要输出投资建议。`;
 
 function isFallbackModuleDefs(moduleDefs: AttributionModuleDef[]): boolean {
-  return moduleDefs.length > 0 && moduleDefs[0].id === 'business' && moduleDefs[0].title === '主营业务';
+  // Expanded pool still starts with fallback primary「主营业务」.
+  return moduleDefs.some((m) => m.id === 'business' && m.title === '主营业务');
 }
 
 function modulesSystemRule(moduleDefs: AttributionModuleDef[]): string {
-  const lines = moduleDefs.map((m) => `   - ${m.id}（标题必须写「${m.title}」）：${m.hint}`).join('\n');
+  const primary = moduleDefs.filter((m) => (m.priority ?? 99) <= 5);
+  const secondary = moduleDefs.filter((m) => (m.priority ?? 99) > 5);
+  const focus = primary.length ? primary : moduleDefs.slice(0, 5);
+  const lines = moduleDefs.map((m) => {
+    const band = (m.priority ?? 99) <= 5 ? '高优先' : '次优先';
+    return `   - [${band}] ${m.id}（标题必须写「${m.title}」）：${m.hint}`;
+  }).join('\n');
   const ids = moduleDefs.map((m) => m.id).join('、');
   const titles = moduleDefs.map((m) => m.title).join('、');
   if (!isFallbackModuleDefs(moduleDefs)) {
     return `9. modules 是「深度归因」的落库结论，必须按本行业维度组织，而不是复述指标卡。
+   归因角度池约 ${moduleDefs.length} 个（前 ${focus.length} 个高优先，其余次优先兜底）。
    modules[].id 只能是：${ids}。
    modules[].title 必须与 id 对应，只能是：${titles}。
-   **必须为上述每一个 id 各写恰好 1 条**，禁止漏维、禁止整维留空、禁止使用 business、attribution、anomalies、history、peers。
-   每条 conclusion 结构：**先一句定性结论，再跟关键数字**（约 50～90 字，须含数字）。正常人先看结论，再用数据验证。
-   某维原文未单独披露时：写「未单独披露××」，并就近改用已披露的营收/毛利/存货/Capex/销量/ASP/地区/费用/现金流等数字作支撑，禁止只写「暂无」或空话。
-${lines}
-   modules 数组长度应等于维度数（${moduleDefs.length}）。`;
+   **优先为高优先维度写有数字的结论**；某高优先维原文确实未披露时，不要硬凑空话，改为从次优先维度中挑选能归因的角度来写。
+   最终输出 **3～5 条**有实质内容的 modules（须含数字），禁止整块留空；禁止使用 business、attribution、anomalies、history、peers（除非它们出现在枚举中）。
+   每条 conclusion 结构：**先一句定性结论，再跟关键数字**（约 40～80 字）。
+${lines}`;
   }
-  return `9. modules 是「深度归因」的落库结论，用来解释营收、利润、异常指标为什么变动，而不是复述指标卡。id 只能是 business、attribution、anomalies、history、peers。
-   **尽量为这五个 id 各写 1 条**；每条 conclusion 先一句结论再跟数字（约 50～90 字，须含数字）。某维证据不足时写「未单独披露××」并改用邻近已披露指标数字，禁止整维留空。
+  return `9. modules 是「深度归因」的落库结论，用来解释营收、利润、异常指标为什么变动，而不是复述指标卡。
+   优先 id：business、attribution、anomalies；若证据不足，可从次优先角度（营收与净利、经营现金流、研发等）补写。
+   **输出 3～5 条**有数字的结论，禁止整块留空。
 ${lines}`;
 }
 
@@ -74,10 +81,12 @@ function verdictUserPrompt(
   moduleDefs: AttributionModuleDef[],
 ) {
   const industryMode = !isFallbackModuleDefs(moduleDefs);
-  const schema = buildVerdictJsonSchema(industryMode ? moduleDefs : null);
+  // Always enumerate the full priority pool (primary + secondary) in the schema.
+  const schema = buildVerdictJsonSchema(moduleDefs);
+  const primaryTitles = moduleDefs.filter((m) => (m.priority ?? 99) <= 5).map((m) => m.title);
   const moduleHint = industryMode
-    ? `modules（必须 ${moduleDefs.length} 条，每个维度一条；深度归因按行业维度 ${moduleDefs.map((m) => m.title).join('/')}；id/title 必须与 Schema 枚举一致；每条先结论后数字；未披露维写「未单独披露」并改用邻近数字）`
-    : 'modules（尽量 5 条；深度归因，每条先结论后数字；证据不足也要写未披露+邻近数字，不要整维留空）';
+    ? `modules（3～5 条即可，勿强行写满 ${moduleDefs.length} 维；优先高优先维度 ${primaryTitles.join('/') || moduleDefs.slice(0, 5).map((m) => m.title).join('/')}；高优先全无披露时改写次优先维度；id/title 必须与 Schema 枚举一致；每条先结论后数字，禁止整块空）`
+    : 'modules（3～5 条；深度归因，每条先结论后数字；高优先不足时用次优先角度补，不要整块留空）';
   return `请生成当前财报的 AI 速判 JSON。
 
 结构化数据（含已计算同比，不要重新计算核心指标）：
@@ -405,8 +414,7 @@ export async function generateReportVerdict(
     || context.industry
     || industryFromStructuredContext(context.structuredContext);
   const skillAppend = industrySkillSystemAppend(resolvedIndustry);
-  const skillModules = industryAttributionModules(resolvedIndustry);
-  const moduleDefs = skillModules?.length ? skillModules : FALLBACK_ATTRIBUTION_MODULES;
+  const moduleDefs = attributionModulePool(resolvedIndustry);
   const systemPrompt = buildSystemPrompt(moduleDefs);
   const systemContent = skillAppend ? `${systemPrompt}\n\n${skillAppend}` : systemPrompt;
   const result = await completeJson([

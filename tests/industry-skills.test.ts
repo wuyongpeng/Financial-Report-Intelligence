@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   FALLBACK_ATTRIBUTION_MODULES,
+  attributionModulePool,
+  expandAttributionModulePool,
   getIndustrySkill,
   industryAttributionModules,
   industryFromStructuredContext,
@@ -9,6 +11,8 @@ import {
   industrySkillUserFacing,
   depthAttributionLead,
   resetIndustrySkillCache,
+  selectDisplayAttributionModules,
+  SECONDARY_ATTRIBUTION_MODULES,
 } from '../lib/industry-skills';
 
 test('loads 半导体 skill with volume/price skeleton in systemAppend', () => {
@@ -87,4 +91,53 @@ test('depthAttributionLead uses real industry name, not 产业', () => {
   assert.equal(depthAttributionLead('半导体'), '按半导体行业视角组织归因');
   assert.equal(depthAttributionLead('半导体及元件'), '按半导体行业视角组织归因');
   assert.equal(depthAttributionLead(null), '解释营收、利润与异常指标为何变动');
+});
+
+
+test('attributionModulePool expands NEV primary 5 with ~10 secondary (~15 total)', () => {
+  resetIndustrySkillCache();
+  const primary = industryAttributionModules('新能源车');
+  assert.ok(primary);
+  assert.equal(primary!.length, 5);
+  const pool = attributionModulePool('新能源车');
+  assert.ok(pool.length >= 14 && pool.length <= 16, `pool size ${pool.length}`);
+  assert.deepEqual(pool.slice(0, 5).map((m) => m.title), ['量', '价', '结构', '毛利与费用', '存货与现金流']);
+  assert.ok(pool.some((m) => m.id === 'revenue_profit'));
+  assert.ok(pool.some((m) => m.id === 'guidance_outlook'));
+  assert.equal(SECONDARY_ATTRIBUTION_MODULES.length, 10);
+});
+
+test('selectDisplayAttributionModules falls back to secondary when all primary empty', () => {
+  const pool = expandAttributionModulePool([
+    { id: 'volume', title: '量', hint: '', priority: 1 },
+    { id: 'price', title: '价', hint: '', priority: 2 },
+    { id: 'structure', title: '结构', hint: '', priority: 3 },
+    { id: 'gross_margin', title: '毛利与费用', hint: '', priority: 4 },
+    { id: 'inventory', title: '存货与现金流', hint: '', priority: 5 },
+  ]);
+  const modules = [
+    { id: 'volume', conclusion: '' },
+    { id: 'price', conclusion: '本期该维度披露有限' },
+    { id: 'revenue_profit', conclusion: '营收907亿元同比增1.47%，归母净利445亿元。' },
+    { id: 'cash_conversion', conclusion: '经营现金流净额707亿元。' },
+    { id: 'rd_intensity', conclusion: '研发费用率约5.2%。' },
+  ];
+  const picked = selectDisplayAttributionModules(pool, modules, { maxDisplay: 5 });
+  assert.ok(picked.length >= 2 && picked.length <= 5);
+  assert.ok(picked.every((m) => (m.priority ?? 99) > 5), 'should not keep empty primary when secondary filled');
+  assert.ok(picked.some((m) => m.id === 'revenue_profit'));
+});
+
+test('selectDisplayAttributionModules prefers filled primary over secondary', () => {
+  const pool = expandAttributionModulePool([
+    { id: 'volume', title: '量', hint: '', priority: 1 },
+    { id: 'price', title: '价', hint: '', priority: 2 },
+  ]);
+  const modules = [
+    { id: 'volume', conclusion: '新能源车销量同比增20%至150万辆。' },
+    { id: 'revenue_profit', conclusion: '营收3000亿元。' },
+  ];
+  const picked = selectDisplayAttributionModules(pool, modules, { maxDisplay: 5 });
+  assert.equal(picked[0].id, 'volume');
+  assert.ok(picked.some((m) => m.id === 'volume'));
 });
