@@ -26,7 +26,9 @@ RUN npm run build \
   && if [ -d public ]; then cp -r public .next/standalone/public; fi \
   && mkdir -p .next/standalone/data \
   && cp -r data/industry-skills .next/standalone/data/industry-skills \
-  && if [ -f data/companies.json ]; then cp data/companies.json .next/standalone/data/companies.json; fi
+  && if [ -f data/companies.json ]; then cp data/companies.json .next/standalone/data/companies.json; fi \
+  && rm -rf .next/standalone/data/reports data/reports \
+  && find .next/standalone -type f -name '*.pdf' -delete
 
 ENV NODE_ENV=production
 EXPOSE 3000

@@ -1,0 +1,39 @@
+# deps & build
+node_modules
+.next
+out
+dist
+coverage
+*.tsbuildinfo
+
+# vcs / ide
+.git
+.gitignore
+.vscode
+.idea
+**/.DS_Store
+
+# env & secrets (compose injects at runtime)
+.env
+.env.*
+!.env.example
+
+# runtime data — mounted by compose, must NOT bloat the image
+data/reports
+data/postgres
+data/postgres-local
+data/postgres-local.log
+data/runtime
+data/caddy-data
+data/caddy-config
+data/pdf-archive
+**/reports/**/*.pdf
+
+# docs / tests / local noise
+docs
+*.md
+!README.md
+playwright-report
+test-results
+.tmp
+tmp
