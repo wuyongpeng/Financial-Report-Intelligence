@@ -191,3 +191,106 @@ test('retrieveContext preserves out-of-scope and insufficient-evidence policies'
     (error: unknown) => error instanceof ApiError && error.status === 404,
   );
 });
+
+test('营收是多少 scopes to current-report revenue only — no peer/KPI dump', async () => {
+  const repository = new FakeRetrievalRepository();
+  repository.metrics = [
+    { reportId: 'current', metric: 'revenue', value: 90703260964.48, unit: '元', period: '2026H1', sourcePage: 2, sourceLabel: '营业收入' },
+    { reportId: 'current', metric: 'net_profit', value: 44516880421.86, unit: '元', period: '2026H1', sourcePage: 2, sourceLabel: '归母净利润' },
+    { reportId: 'current', metric: 'operating_cash_flow', value: 70690750119.06, unit: '元', period: '2026H1', sourcePage: 3, sourceLabel: '经营现金流净额' },
+    { reportId: 'current', metric: 'total_assets', value: 309050784569.31, unit: '元', period: '2026H1', sourcePage: 4, sourceLabel: '资产总计' },
+  ];
+  repository.industryPeers = [{
+    id: 'peer-fen', code: '600809', companyName: '山西汾酒', industry: '家电', reportType: 'semi',
+    title: '山西汾酒2026年半年度报告', publishedAt: '2026-08-01T00:00:00.000Z',
+  }];
+  repository.metrics.push(
+    { reportId: 'peer-fen', metric: 'revenue', value: 21044387808.34, unit: '元', period: '2026H1', sourcePage: 2, sourceLabel: '营业收入' },
+    { reportId: 'peer-fen', metric: 'net_profit', value: 6439313574.11, unit: '元', period: '2026H1', sourcePage: 2, sourceLabel: '归母净利润' },
+  );
+  repository.report = {
+    id: 'current', code: '600519', companyName: '贵州茅台', industry: '家电', reportType: 'semi',
+    title: '贵州茅台2026年半年度报告', publishedAt: '2026-08-01T00:00:00.000Z',
+  };
+  repository.chunks = [
+    { reportId: 'current', page: 2, content: '营业收入 90,703,260,964.48元。归母净利润 44,516,880,421.86元。' },
+  ];
+
+  const plan = planQuestion({ question: '营收是多少？', history: [], watched: repository.watched, currentCode: '600519' });
+  assert.deepEqual(plan.metricNames, ['revenue']);
+  assert.equal(plan.wantsStructuredValue, true);
+  assert.equal(plan.needsPeers, false);
+  assert.equal(plan.needsHistory, false);
+
+  const context = await retrieveContext({
+    reportId: 'current',
+    question: '营收是多少？',
+    history: [],
+    repository,
+    passageRetriever: new KeywordPassageRetriever(),
+  });
+  assert.equal(context.mode, 'structured-query');
+  assert.match(context.directAnswer ?? '', /贵州茅台 2026H1 营业收入：90703260964\.48元【E1】/);
+  assert.doesNotMatch(context.directAnswer ?? '', /归母净利润|经营现金流|资产总计|山西汾酒|五粮液/);
+  assert.equal(context.peers.length, 0);
+  assert.ok(context.evidence.some(e => e.page === 2 && /营业收入/.test(e.quote ?? '')));
+  // Fallback must stay scoped if AI path later fails validation.
+  assert.doesNotMatch(context.fallback, /山西汾酒|归母净利润：/);
+});
+
+test('茅台学院是什么意思 retrieves page text — no KPI dump lead-in', async () => {
+  const repository = new FakeRetrievalRepository();
+  repository.report = {
+    id: 'current', code: '600519', companyName: '贵州茅台', industry: '白酒', reportType: 'annual',
+    title: '贵州茅台2025年年度报告', publishedAt: '2026-03-01T00:00:00.000Z',
+  };
+  repository.metrics = [
+    { reportId: 'current', metric: 'revenue', value: 90703260964.48, unit: '元', period: '2025FY', sourcePage: 2, sourceLabel: '营业收入' },
+    { reportId: 'current', metric: 'net_profit', value: 44516, unit: '元', period: '2025FY', sourcePage: 2, sourceLabel: '归母净利润' },
+    { reportId: 'current', metric: 'eps', value: 50, unit: '元/股', period: '2025FY', sourcePage: 30, sourceLabel: '每股收益' },
+    { reportId: 'current', metric: 'roe', value: 30, unit: '%', period: '2025FY', sourcePage: 2, sourceLabel: 'ROE' },
+  ];
+  repository.chunks = [
+    { reportId: 'current', page: 2, content: '营业收入907亿元，归母净利润445亿元，ROE 30%。' },
+    { reportId: 'current', page: 88, content: '茅台学院是公司参与举办的应用型本科院校，培养酿酒与营销人才，本期捐赠支出见附注。' },
+    { reportId: 'current', page: 89, content: '与茅台学院相关的产学研合作持续推进。' },
+  ];
+
+  const plan = planQuestion({ question: '茅台学院是什么意思', history: [], watched: [], currentCode: '600519' });
+  assert.deepEqual(plan.metricNames, []);
+  assert.equal(plan.wantsStructuredValue, false);
+  assert.equal(plan.outOfScope, false);
+
+  const context = await retrieveContext({
+    reportId: 'current',
+    question: '茅台学院是什么意思',
+    history: [],
+    repository,
+    passageRetriever: new KeywordPassageRetriever(),
+  });
+  assert.equal(context.mode, 'evidence-retrieval');
+  assert.equal(context.directAnswer, undefined);
+  assert.ok(context.passages.some(p => /茅台学院/.test(p.content) || /茅台学院/.test(p.quote)));
+  assert.ok(context.passages.some(p => p.page === 88 || p.page === 89));
+  // Must not lead with overview KPIs in fallback / structured dump for this ask.
+  assert.doesNotMatch(context.fallback, /贵州茅台 2025FY 营业收入/);
+  assert.doesNotMatch(context.structuredContext, /贵州茅台 2025FY 营业收入：907/);
+  assert.match(context.fallback, /茅台学院/);
+});
+
+test('soft-merged page text must not be used as the planner question', () => {
+  // Documents the chat-route contract: assembleFocusPrompt is for display/LLM framing only.
+  const polluted = '用户在财报pdf中圈定并关注的信息有“营业收入归母净利润经营现金流净额资产总计山西汾酒五粮液同比”。营收是多少？';
+  const pollutedPlan = planQuestion({ question: polluted, history: [], watched: [
+    { code: '600519', companyName: '贵州茅台' },
+    { code: '600809', companyName: '山西汾酒' },
+  ], currentCode: '600519' });
+  assert.ok(pollutedPlan.metricNames.length > 1 || pollutedPlan.needsPeers || pollutedPlan.needsHistory,
+    'polluted assembly would over-fetch — chat must plan on the typed question only');
+  const clean = planQuestion({ question: '营收是多少？', history: [], watched: pollutedPlan.namedPeerCodes.length ? [] : [
+    { code: '600519', companyName: '贵州茅台' },
+    { code: '600809', companyName: '山西汾酒' },
+  ], currentCode: '600519' });
+  assert.deepEqual(clean.metricNames, ['revenue']);
+  assert.equal(clean.needsPeers, false);
+});

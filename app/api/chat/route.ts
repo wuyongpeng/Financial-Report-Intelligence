@@ -21,8 +21,12 @@ export async function POST(request: Request) {
   try {
     const input = parseChatRequest(await readObject(request));
     const { reportId, focus, requestId, conversationId } = input;
-    const question = assembleFocusPrompt(input.question, focus);
-    if (question.length > 12_000) throw new ApiError(413, '关注内容过长，请减少摘录后再试');
+    // Typed question drives retrieval planning (metrics / peers / history).
+    // Focus clips stay in structuredContext only — never rewrite the planner query,
+    // or soft-merged PDF page text will match 利润/资产/现金流 and dump every KPI + peers.
+    const question = input.question.trim();
+    const assembled = assembleFocusPrompt(question, focus);
+    if (assembled.length > 12_000) throw new ApiError(413, '关注内容过长，请减少摘录后再试');
     let history: MemoryMessage[] = [], replay: AnswerResult | null = null;
     let setCookie: string | undefined;
     if (conversationId) {

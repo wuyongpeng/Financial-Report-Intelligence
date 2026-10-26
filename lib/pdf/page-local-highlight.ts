@@ -85,7 +85,22 @@ export function extractQuestionTokens(question: string): { numbers: string[]; te
   // Prefer longer terms first when searching.
   terms.sort((a, b) => b.length - a.length);
 
-  return { numbers: unique(numbers), terms: unique(terms) };
+  // Expand short finance aliases so「营收是多少」can paint 营业收入 on the page.
+  const ALIASES: Record<string, string[]> = {
+    营收: ['营业收入'],
+    收入: ['营业收入'],
+    净利: ['归母净利润', '净利润'],
+    利润: ['归母净利润', '净利润'],
+    现金流: ['经营活动产生的现金流量净额', '经营现金流'],
+    意思: [],
+  };
+  const expanded = [...terms];
+  for (const term of terms) {
+    for (const alias of ALIASES[term] ?? []) expanded.push(alias);
+  }
+  expanded.sort((a, b) => b.length - a.length);
+
+  return { numbers: unique(numbers), terms: unique(expanded) };
 }
 
 type Candidate = { start: number; end: number; score: number; hasNumber: boolean };
@@ -183,6 +198,31 @@ export function findQuoteOnPage(question: string, pageContent: string): string |
           if (hitTerms >= 2) pushCandidate(candidates, start, end, /\d/.test(span), hitTerms);
         }
       }
+    }
+  }
+
+  // Single ≥4-char anchor (e.g. 营收 → 营业收入): paint the label and a nearby amount.
+  // Skip when the question already carries a distinctive number — the number path above is stronger.
+  if (!numbers.length) for (const term of terms.filter(t => t.length >= 4)) {
+    let from = 0;
+    while (from < normalized.length) {
+      const at = normalized.indexOf(term, from);
+      if (at < 0) break;
+      let start = at;
+      let end = at + term.length;
+      const after = normalized.slice(end, Math.min(normalized.length, end + 48));
+      const num = after.match(/-?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?|-?\d+(?:\.\d+)?%?/);
+      if (num && num.index != null) {
+        end = end + num.index + num[0].length;
+      }
+      if (end - start < MIN_QUOTE) {
+        end = Math.min(normalized.length, start + MIN_QUOTE);
+      }
+      const span = normalized.slice(start, end);
+      if (!/[。；;！？]/.test(span.slice(term.length))) {
+        pushCandidate(candidates, start, end, /\d/.test(span), 2);
+      }
+      from = at + Math.max(1, term.length);
     }
   }
 

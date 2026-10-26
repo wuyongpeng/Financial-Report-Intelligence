@@ -88,7 +88,7 @@ export function focusAttachNote(focus: FocusItem[]) {
 export function focusContextBlock(focus: FocusItem[]) {
   if (!focus.length) return '';
   return [
-    '用户本轮主动关注的摘录（优先参考，仍须与库内原文核对）：',
+    '本轮附带的阅读摘录（优先参考，仍须与库内原文核对）：',
     ...focus.map((f, i) => {
       const where = f.kind === 'pdf' || f.kind === 'text'
         ? (f.page ? `财报原文第${f.page}页` : '财报原文')

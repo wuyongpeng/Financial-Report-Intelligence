@@ -135,9 +135,14 @@ export async function retrieveContext(input: {
   const selectedReports = selectUniqueReports(reports, allMetrics, input.reportId);
   const selectedIds = selectedReports.map(report => report.id);
   const metrics = allMetrics.filter(metric => selectedIds.includes(metric.reportId));
+  // Only flood overview KPIs when the plan actually wants a broad read
+  // (summary / history / peers). Bare entity asks like「茅台学院是什么意思」
+  // must not inherit revenue/net_profit/eps/roe just because metricNames is empty.
+  const useDefaultOverview = !plan.metricNames.length
+    && Boolean(input.summary || plan.needsHistory || plan.needsPeers);
   const relevantMetrics = metrics.filter(metric => plan.metricNames.length
     ? plan.metricNames.includes(metric.metric as typeof plan.metricNames[number])
-    : ['revenue', 'net_profit', 'eps', 'roe'].includes(metric.metric));
+    : useDefaultOverview && ['revenue', 'net_profit', 'eps', 'roe'].includes(metric.metric));
 
   const evidence: Evidence[] = [];
   const addEvidence = (item: Omit<Evidence, 'id'>) => {
@@ -230,14 +235,28 @@ export async function retrieveContext(input: {
   ].filter(Boolean).join('\n');
   const decision = decideDirectAnswer({ plan, currentReportId: input.reportId, metrics, factLines, calculations, passages });
   // Never dump overview KPIs for out-of-scope asks (belt-and-suspenders if early return is skipped).
+  // Scoped metric asks: fallback only matched fact lines (current report first).
+  // Entity / page-text asks with no metricNames: passages only — never invent revenue.
   const fallback = decision.directAnswer ?? (plan.outOfScope
     ? outOfScopeReply(plan.outOfScopeKind)
-    : [
-      '当前返回可核验的数据与原文摘录，尚未完成 AI 归纳：',
-      ...factLines.slice(0, plan.needsPeers ? 24 : 8).map(fact => fact.line),
-      ...calculations,
-      ...passages.slice(0, 3).map(passage => `${passage.quote}【${passage.id}】`),
-    ].join('\n'));
+    : (() => {
+      const scopedFacts = plan.metricNames.length && !plan.needsHistory && !plan.needsPeers
+        ? factLines.filter(fact => fact.metric.reportId === input.reportId)
+        : factLines;
+      const factCap = plan.needsPeers ? 24 : (plan.metricNames.length ? 6 : 0);
+      const passageCap = plan.metricNames.length ? 3 : 6;
+      const lines = [
+        scopedFacts.length || passages.length
+          ? (scopedFacts.length
+            ? '当前返回可核验的数据与原文摘录，尚未完成 AI 归纳：'
+            : '当前返回与问题相关的原文摘录，尚未完成 AI 归纳：')
+          : '暂无法回答：当前报告中没有足够的已解析指标或原文证据。',
+        ...scopedFacts.slice(0, factCap).map(fact => fact.line),
+        ...(plan.wantsChangeCalculation ? calculations : []),
+        ...passages.slice(0, passageCap).map(passage => `${passage.quote}【${passage.id}】`),
+      ].filter(Boolean);
+      return lines.join('\n');
+    })());
 
   return {
     question: input.question,

@@ -122,3 +122,13 @@ test('term-only match requires a ≥4-char anchor', () => {
   );
   assert.equal(quote, null);
 });
+
+test('营收是多少 expands to 营业收入 for page highlight', () => {
+  const { terms } = extractQuestionTokens('营收是多少？');
+  assert.ok(terms.includes('营业收入'));
+  const page = '一、营业总收入 其中：营业收入 90,703,260,964.48元 营业成本…';
+  const quote = findQuoteOnPage('营收是多少？', page);
+  assert.ok(quote && /营业收入/.test(quote));
+  const hit = findPageLocalHighlight('营收是多少？', [{ page: 2, content: page }], 2, 1);
+  assert.ok(hit && hit.page === 2 && /营业收入/.test(hit.quote));
+});

@@ -89,6 +89,19 @@ export function isClearOffTopicQuestion(question: string) {
 /** Lexicon that indicates the ask is about report / PDF / financial content. */
 const FINANCE_SIGNAL = /财报|年报|季报|半年报|报告期|PDF|原文|披露|附注|资产负债表|利润表|现金流量表|科目|口径|同比|环比|业绩|经营|管理层|股东|分红|派息|营收|营业收入|收入|净利润|净利|利润|总资产|资产|负债|现金流|ROE|EPS|每股收益|净资产|应收|应付|商誉|存货|借款|债券|职工薪酬|货币资金|费用|成本|毛利|研发|产能|出货|销量|客户|合同负债|审计|风险因素|减值|拨备|息差|不良|资本充足|保费|基本面|亮点|估值|市盈率|市净率|这[一]?页|本页|该页|第\s*\d+\s*页|主营|业务概要|核心竞争力|公司治理|员工人数|非经常性|扣非|同业|竞品|对标/i;
 
+/**
+ * Named-entity / definition asks about something that may appear in the filing
+ * (e.g.「茅台学院是什么意思」). Keep in-scope so keyword passage retrieval can run;
+ * insufficient-evidence handles a true miss. Do not require finance lexicon.
+ */
+export function isReportEntityQuestion(question: string) {
+  const q = question.trim();
+  if (!q || q.length > 80) return false;
+  if (isClearOffTopicQuestion(q) || isMetaModelQuestion(q)) return false;
+  if (INVESTMENT_SCOPE.test(q)) return false;
+  return /是什么意思|是啥意思|指的?是什么|指什么|是什么$|是啥$|什么意思$/.test(q);
+}
+
 export function hasFinanceSignal(question: string) {
   return FINANCE_SIGNAL.test(question) || Object.values(METRIC_PATTERNS).some(pattern => pattern.test(question));
 }
@@ -108,6 +121,10 @@ export function classifyQuestionScope(input: {
   if (input.metricNames.length || input.explicitPage != null) return { outOfScope: false };
   // Follow-ups rewrite into retrievalQuestion with prior finance context — treat as in-scope.
   if (hasFinanceSignal(input.retrievalQuestion) || hasFinanceSignal(original)) return { outOfScope: false };
+  //「茅台学院是什么意思」etc. — try PDF text before refusing as chitchat.
+  if (isReportEntityQuestion(original) || isReportEntityQuestion(input.retrievalQuestion)) {
+    return { outOfScope: false };
+  }
   return { outOfScope: true, outOfScopeKind: 'off-topic' };
 }
 

@@ -4,6 +4,7 @@ import {
   classifyQuestionScope,
   hasFinanceSignal,
   isClearOffTopicQuestion,
+  isReportEntityQuestion,
   isMetaModelQuestion,
   planQuestion,
 } from '../modules/retrieval/application/question-planner';
@@ -80,4 +81,13 @@ test('classifyQuestionScope + outOfScopeReply cover meta, weather, and finance c
   });
   assert.equal(inScope.outOfScope, false);
   assert.equal(inScope.wantsStructuredValue, true);
+});
+
+test('茅台学院是什么意思 stays in-scope for page-text retrieval', () => {
+  assert.equal(isReportEntityQuestion('茅台学院是什么意思'), true);
+  assert.equal(isReportEntityQuestion('北京明天啥天气'), false);
+  const plan = planQuestion({ question: '茅台学院是什么意思', history: [], watched: [], currentCode: '600519' });
+  assert.equal(plan.outOfScope, false);
+  assert.deepEqual(plan.metricNames, []);
+  assert.equal(plan.wantsStructuredValue, false);
 });

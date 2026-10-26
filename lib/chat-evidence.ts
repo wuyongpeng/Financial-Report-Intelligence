@@ -8,6 +8,10 @@ export function relevance(query: string, content: string) {
     else for(let i=0;i<word.length-1;i++) terms.add(word.slice(i,i+2));
   }
   let score = [...terms].reduce((s,t)=>s+(lower.includes(t)?1:0),0);
+  // Exact multi-char CJK phrases (e.g. 茅台学院) beat scattered bigrams / KPI pages.
+  for (const match of query.matchAll(/[\u4e00-\u9fa5]{3,12}/g)) {
+    if (lower.includes(match[0])) score += 20;
+  }
   for (const d of domains) if (query.toLowerCase().includes(d.toLowerCase()) && lower.includes(d.toLowerCase())) score += 8;
   if (/营收/.test(query) && /营业收入/.test(content)) score+=8;
   if (/原因|为什么|变化|概览/.test(query) && /经营情况|管理层|主要原因|同比|变动原因/.test(content)) score+=6;

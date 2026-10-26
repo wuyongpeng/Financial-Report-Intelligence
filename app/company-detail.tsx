@@ -33,7 +33,7 @@ import {
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import { parseVoiceNavIntent } from '@/lib/voice/nav-intent';
-import { findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
+import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer } from '@/lib/voice/client-tts';
@@ -1742,15 +1742,25 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       ...(c.title ? { title: c.title } : {}),
     })));
     let focusPayload: FocusItem[] = [...userFocus];
-    // Soft-merge the page the reader is looking at (scroll-synced sourcePage) for the model only.
-    // Prefer explicit clips / caller focus first; append current page if room and not already present.
-    if (replacing == null) {
+    // Soft-merge the page under the reader's eyes only when it looks relevant to the typed ask.
+    // Blindly attaching whatever page is open (cover / KPI table) used to pollute focus context
+    // and — before the chat-route fix — the retrieval planner itself.
+    if (replacing == null && typed) {
       const page = sourcePageRef.current;
       const alreadyHasPage = focusPayload.some(f => f.page === page && (f.kind === 'pdf' || f.kind === 'text'));
       if (!alreadyHasPage && focusPayload.length < FOCUS_MAX_ITEMS) {
         const pageContent = outlineRef.current.pages.find(p => p.page === page)?.content?.replace(/\s+/g, ' ').trim() ?? '';
-        const focusText = (pageContent || `当前正在阅读第 ${page} 页`).slice(0, FOCUS_QUOTE_MAX);
-        focusPayload = [...focusPayload, { kind: 'pdf', text: focusText, page, title: pageLabel(page) }];
+        const { numbers, terms } = extractQuestionTokens(typed);
+        const needles = [...numbers, ...terms].filter(t => t.length >= 2);
+        const pageHit = Boolean(pageContent) && (
+          needles.length === 0
+            ? false
+            : needles.some(n => pageContent.includes(n))
+        );
+        if (pageHit) {
+          const focusText = pageContent.slice(0, FOCUS_QUOTE_MAX);
+          focusPayload = [...focusPayload, { kind: 'pdf', text: focusText, page, title: pageLabel(page) }];
+        }
       }
     }
     // Pre-highlight: paint a quote on the page the reader is already viewing.
@@ -1848,6 +1858,19 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
     }
     if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
+    /* Typed ask: jump/highlight first in-report cite so「营收是多少」paints 营业收入 without a click. */
+    if (
+      activeId.current === id
+      && !controller.signal.aborted
+      && answer
+      && lastEvidence?.length
+      && !voiceSpeakRef.current
+    ) {
+      const fromMarks = uniqueAnswerSources(answer, lastEvidence, pageLabel);
+      const local = lastEvidence.find(e => e.page && (e.quote ?? '').trim() && (!e.reportId || e.reportId === id));
+      const target = (fromMarks[0] && (!fromMarks[0].reportId || fromMarks[0].reportId === id) ? fromMarks[0] : null) ?? local;
+      if (target?.page) jumpCitation(target);
+    }
     /* voice-after-ask: jump via the same path as clicking an answer [Pxx] chip */
     if (voiceSpeakRef.current) {
       voiceSpeakRef.current = false;
