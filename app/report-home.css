@@ -23,12 +23,16 @@
 .rh-search input::placeholder{color:#95a2b5}
 .rh-search-hint{margin:6px auto 0;max-width:820px;text-align:center;font-size:12px;line-height:1.4;color:#94a3b8;font-weight:400;letter-spacing:.01em;min-height:18px}
 .rh-search-hint-spacer{visibility:hidden}
-.rh-search-submit{background:#111827;color:#fff;border:0;border-radius:999px;width:48px;height:48px;min-height:48px;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1;flex:none;box-shadow:0 1px 2px #0f172a33;transition:background .15s,transform .12s,box-shadow .15s}
-.rh-search-submit:hover:not(:disabled){background:#000;transform:translateY(-1px);box-shadow:0 4px 10px #0f172a33}
-.rh-search-submit:active:not(:disabled){transform:translateY(0)}
-.rh-search-submit svg{display:block;width:18px;height:18px}
+.rh-search-submit{border:0;border-radius:999px;width:48px;height:48px;min-height:48px;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1;flex:none;transition:background .15s,color .15s,transform .12s,box-shadow .15s}
+.rh-search-submit svg,.rh-search-glyph{display:block;width:18px;height:18px}
 .rh-search-submit:disabled{opacity:.45;cursor:not-allowed}
-.rh-search-arrow{display:block}
+.rh-search-voice{background:#e8edf5;color:#3064db;box-shadow:none}
+.rh-search-voice:hover:not(:disabled){background:#dce5f4;color:#2754c0}
+.rh-search-send{background:#3064db;color:#fff;box-shadow:0 1px 2px #2754c033}
+.rh-search-send:hover:not(:disabled){background:#2754c0;transform:translateY(-1px);box-shadow:0 4px 10px #2754c033}
+.rh-search-send:active:not(:disabled){transform:translateY(0)}
+.rh-search-stop{background:#3a4a61;color:#fff;box-shadow:none}
+.rh-search-stop:hover:not(:disabled){background:#2c3b50}
 .rh-search-spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:rh-spin .7s linear infinite}
 @keyframes rh-spin{to{transform:rotate(360deg)}}
 .rh-clear{background:none;border:0;color:#8997ac;width:32px;height:32px;padding:0;display:grid;place-items:center;line-height:0;border-radius:8px}.rh-clear:hover{color:#475569;background:#f1f5f9}

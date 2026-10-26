@@ -39,6 +39,8 @@ import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
+import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
+import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
@@ -246,8 +248,15 @@ export default function ReportHome() {
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [personalizedQuestions, setPersonalizedQuestions] = useState<string[]>([]);
   const [showPersonalizedHint, setShowPersonalizedHint] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
   const coverageRef = useRef(coverage);
   coverageRef.current = coverage;
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const asrSessionRef = useRef<AsrSession | null>(null);
+  const pcmCaptureRef = useRef<PcmCapture | null>(null);
+  const voicePartialRef = useRef('');
+  const voiceUtteranceHandledRef = useRef(false);
+  const voiceFinalTimerRef = useRef<number | null>(null);
 
   const coveragePlaceholderKey = useMemo(
     () => coverage.map((item) => `${item.code}:${item.reportPeriod ?? ''}`).sort().join('|'),
@@ -273,6 +282,117 @@ export default function ReportHome() {
     }, 4800);
     return () => window.clearInterval(timer);
   }, [search, placeholders]);
+
+  function clearVoiceFinalTimer() {
+    if (voiceFinalTimerRef.current != null) {
+      window.clearTimeout(voiceFinalTimerRef.current);
+      voiceFinalTimerRef.current = null;
+    }
+  }
+
+  function endVoiceListening() {
+    clearVoiceFinalTimer();
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    asrSessionRef.current?.close();
+    asrSessionRef.current = null;
+    voicePartialRef.current = '';
+    setVoiceListening(false);
+  }
+
+  function finalizeHomeListening() {
+    if (!asrSessionRef.current && !pcmCaptureRef.current) {
+      endVoiceListening();
+      setSearch('');
+      return;
+    }
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    asrSessionRef.current?.stop();
+    // Keep voiceListening until final/timeout so the stop button does not flash to send.
+    clearVoiceFinalTimer();
+    voiceFinalTimerRef.current = window.setTimeout(() => {
+      voiceFinalTimerRef.current = null;
+      const pending = voicePartialRef.current.trim();
+      asrSessionRef.current?.close();
+      asrSessionRef.current = null;
+      if (pending) handleHomeVoiceUtterance(pending);
+      else {
+        endVoiceListening();
+        setSearch('');
+      }
+    }, 2500);
+  }
+
+  function handleHomeVoiceUtterance(raw: string) {
+    if (voiceUtteranceHandledRef.current) return;
+    voiceUtteranceHandledRef.current = true;
+    const text = raw.replace(/\s+/g, ' ').trim();
+    clearVoiceFinalTimer();
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    asrSessionRef.current?.close();
+    asrSessionRef.current = null;
+    voicePartialRef.current = '';
+    setVoiceListening(false);
+    if (!text) {
+      setSearch('');
+      return;
+    }
+    setSearch(text);
+    void onSearchSubmit(text);
+  }
+
+  async function startHomeVoice() {
+    if (submitting || voiceListening) return;
+    const secureErr = micSecureContextError();
+    if (secureErr) {
+      setWaitToast(secureErr);
+      return;
+    }
+    endVoiceListening();
+    voiceUtteranceHandledRef.current = false;
+    voicePartialRef.current = '';
+    setSearch('');
+    setVoiceListening(true);
+    try {
+      const session = openAsrSession((ev) => {
+        if (ev.type === 'partial') {
+          voicePartialRef.current = ev.text;
+          setSearch(ev.text);
+        }
+        if (ev.type === 'final') {
+          clearVoiceFinalTimer();
+          pcmCaptureRef.current?.stop();
+          pcmCaptureRef.current = null;
+          asrSessionRef.current?.close();
+          asrSessionRef.current = null;
+          setVoiceListening(false);
+          handleHomeVoiceUtterance(ev.text || voicePartialRef.current);
+        }
+        if (ev.type === 'error') {
+          endVoiceListening();
+          setSearch('');
+          setWaitToast(ev.message);
+        }
+      });
+      asrSessionRef.current = session;
+      const capture = await startPcmCapture((chunk) => session.sendPcm(chunk));
+      pcmCaptureRef.current = capture;
+    } catch (err) {
+      endVoiceListening();
+      setSearch('');
+      setWaitToast(err instanceof Error ? err.message : '无法使用麦克风');
+    }
+  }
+
+  useEffect(() => () => {
+    clearVoiceFinalTimer();
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    asrSessionRef.current?.close();
+    asrSessionRef.current = null;
+  }, []);
 
   const refreshCoverage = useCallback(async () => {
     try {
@@ -779,7 +899,9 @@ export default function ReportHome() {
         role="search"
         onSubmit={(e) => {
           e.preventDefault();
-          void onSearchSubmit();
+          if (voiceListening || submitting) return;
+          if (!search.trim()) return;
+          void onSearchSubmit(search.trim());
         }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -787,44 +909,104 @@ export default function ReportHome() {
           <path d="m15.5 15.5 5 5" />
         </svg>
         <input
+          ref={searchInputRef}
           aria-label="搜索或提问：公司名称、股票代码，或自然语言问题"
-          placeholder={activePlaceholder}
+          placeholder={voiceListening ? '正在聆听…' : activePlaceholder}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          disabled={submitting}
+          onKeyDown={(e) => {
+            if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            if (search.trim() || voiceListening || submitting) return;
+            const q = activePlaceholder?.trim();
+            if (!q) return;
+            e.preventDefault();
+            setSearch(q);
+            window.requestAnimationFrame(() => {
+              const el = searchInputRef.current;
+              if (!el) return;
+              el.focus();
+              const end = q.length;
+              el.setSelectionRange(end, end);
+            });
+          }}
+          disabled={submitting || voiceListening}
         />
-        {search && (
+        {search && !voiceListening && (
           <button className="rh-clear" type="button" aria-label="清空搜索" onClick={() => setSearch('')}>
             <Icon name="x" size={16} />
           </button>
         )}
-        <button
-          className="rh-search-submit"
-          type="button"
-          disabled={submitting}
-          aria-label={search.trim() ? '搜索' : '用当前示例提问'}
-          title={search.trim() ? '搜索' : '发送示例问题'}
-          onClick={() => {
-            if (!search.trim()) {
-              const q = activePlaceholder;
-              setSearch(q);
-              void onSearchSubmit(q, { fromPlaceholder: true });
-              return;
-            }
-            void onSearchSubmit(search.trim());
-          }}
-        >
-          {submitting ? (
-            <span className="rh-search-spinner" aria-hidden="true" />
-          ) : (
-            <svg className="rh-search-arrow" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-              <path fill="currentColor" d="M12.75 5.25a.75.75 0 0 1 1.06 0l4.5 4.5a.75.75 0 0 1 0 1.06l-4.5 4.5a.75.75 0 1 1-1.06-1.06L15.94 12H5.25a.75.75 0 0 1 0-1.5h10.69l-3.22-3.22a.75.75 0 0 1 0-1.06Z" />
+        {(() => {
+          const stopGlyph = (
+            <svg className="rh-search-glyph" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" />
             </svg>
-          )}
-        </button>
+          );
+          const sendGlyph = (
+            <svg className="rh-search-glyph" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M12 4l7 7h-4v9H9v-9H5z" />
+            </svg>
+          );
+          const waveGlyph = (
+            <svg className="rh-search-glyph" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <rect x="4" y="9" width="2.2" height="6" rx="1.1" fill="currentColor" />
+              <rect x="8.2" y="6" width="2.2" height="12" rx="1.1" fill="currentColor" />
+              <rect x="12.4" y="3.5" width="2.2" height="17" rx="1.1" fill="currentColor" />
+              <rect x="16.6" y="6" width="2.2" height="12" rx="1.1" fill="currentColor" />
+              <rect x="20.8" y="9" width="2.2" height="6" rx="1.1" fill="currentColor" />
+            </svg>
+          );
+          if (submitting) {
+            return (
+              <button className="rh-search-submit rh-search-stop" type="button" disabled aria-label="提交中" title="提交中">
+                <span className="rh-search-spinner" aria-hidden="true" />
+              </button>
+            );
+          }
+          if (voiceListening) {
+            return (
+              <button
+                className="rh-search-submit rh-search-stop"
+                type="button"
+                aria-label="结束并发送"
+                title="结束并发送"
+                onClick={() => finalizeHomeListening()}
+              >
+                {stopGlyph}
+              </button>
+            );
+          }
+          if (search.trim()) {
+            return (
+              <button
+                className="rh-search-submit rh-search-send"
+                type="submit"
+                aria-label="搜索"
+                title="搜索"
+              >
+                {sendGlyph}
+              </button>
+            );
+          }
+          return (
+            <button
+              className="rh-search-submit rh-search-voice"
+              type="button"
+              aria-label="语音提问"
+              title="语音提问"
+              onClick={() => { void startHomeVoice(); }}
+            >
+              {waveGlyph}
+            </button>
+          );
+        })()}
       </form>
       {showPersonalizedHint ? (
         <p className="rh-search-hint" role="status">已按你最近的提问定制示例</p>
+      ) : !search.trim() && !voiceListening ? (
+        <p className="rh-search-hint" role="status">按 Tab 采用当前示例 · 或点波形语音提问</p>
+      ) : voiceListening ? (
+        <p className="rh-search-hint" role="status">正在聆听… 点停止结束并发送</p>
       ) : (
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
       )}
