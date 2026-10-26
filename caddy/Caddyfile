@@ -1,9 +1,19 @@
 # DOMAIN defaults to :80 for IP-based testing. Set it to a DNS name to enable automatic HTTPS
 # (required for microphone / getUserMedia when not on localhost).
 # reverse_proxy upgrades WebSocket by default; flush_interval -1 keeps streamed responses timely.
+#
+# Domain deploy: APISIX/ALB → this Caddy → app. Without trusted_proxies, Caddy treats the
+# gateway as the client and overwrites X-Forwarded-For, so /admin/audit would store the
+# proxy IP instead of the visitor's public egress IP. Trust RFC1918 so real XFF is kept.
+{
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
 {$DOMAIN} {
-  encode zstd gzip
-  reverse_proxy app:3000 {
-    flush_interval -1
-  }
+	encode zstd gzip
+	reverse_proxy app:3000 {
+		flush_interval -1
+	}
 }

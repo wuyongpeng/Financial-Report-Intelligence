@@ -13,7 +13,7 @@ function firstForwarded(value: string | null): string | null {
   return first || null;
 }
 
-/** Prefer reverse-proxy headers (Caddy), then socket-ish fallbacks. */
+/** Prefer first X-Forwarded-For hop (visitor, once Caddy trusts APISIX), then X-Real-IP / CF. */
 export function readRequestMeta(request: Request): RequestMeta {
   const headers = request.headers;
   const ip =
