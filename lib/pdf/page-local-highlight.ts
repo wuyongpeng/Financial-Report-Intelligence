@@ -66,12 +66,14 @@ export function extractQuestionTokens(question: string): { numbers: string[]; te
 
   const terms: string[] = [];
   for (const chunk of chunks) {
-    // Keep CJK runs of 2–8; also peel 2–4-grams from longer runs.
+    // Keep CJK runs of 2–12 (full 科目名 like 长期应付职工薪酬).
+    // Only peel 3–4-grams from longer runs — 2-grams alone are too collision-prone
+    // (长期/应付/职工 on cover/TOC) and must not drive a pre-answer jump.
     const cjk = chunk.match(/[\u4e00-\u9fff]+/g) ?? [];
     for (const run of cjk) {
-      if (run.length >= 2 && run.length <= 8 && !STOP_TERMS.has(run)) terms.push(run);
+      if (run.length >= 2 && run.length <= 12 && !STOP_TERMS.has(run)) terms.push(run);
       if (run.length > 4) {
-        for (let len = Math.min(4, run.length); len >= 2; len--) {
+        for (let len = Math.min(4, run.length); len >= 3; len--) {
           for (let i = 0; i + len <= run.length; i++) {
             const sub = run.slice(i, i + len);
             if (!STOP_TERMS.has(sub)) terms.push(sub);
@@ -100,7 +102,8 @@ export function findQuoteOnPage(question: string, pageContent: string): string |
   const normalized = normalizeSpace(pageContent);
   if (normalized.length < MIN_QUOTE) return null;
   const { numbers, terms } = extractQuestionTokens(question);
-  if (!numbers.length && terms.length < 2) return null;
+  // Term-only needs ≥2 tokens and at least one ≥4-char anchor (科目名), else cover/TOC collisions.
+  if (!numbers.length && (terms.length < 2 || !terms.some(t => t.length >= 4))) return null;
 
   const candidates: Candidate[] = [];
 
@@ -186,8 +189,12 @@ export function findQuoteOnPage(question: string, pageContent: string): string |
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.score - a.score || (b.end - b.start) - (a.end - a.start));
   const best = candidates[0]!;
-  // Reject weak term-only hits.
-  if (!best.hasNumber && best.score < 60) return null;
+  // Reject weak term-only hits. Require a ≥4-char anchor inside the quote.
+  if (!best.hasNumber) {
+    const slice = normalized.slice(best.start, best.end);
+    const hasAnchor = terms.some(t => t.length >= 4 && slice.includes(t));
+    if (!hasAnchor || best.score < 72) return null;
+  }
   let quote = normalized.slice(best.start, best.end).trim();
   if (quote.length < MIN_QUOTE) return null;
   if (quote.length > MAX_QUOTE) quote = quote.slice(0, MAX_QUOTE);
@@ -196,6 +203,8 @@ export function findQuoteOnPage(question: string, pageContent: string): string |
 
 /**
  * Prefer the current page; only fall back to ±nearbyRadius when current has no match.
+ * Callers that must not yank the viewport (ask pre-highlight) should ignore hits
+ * whose page !== currentPage — adjacent matches are for soft suggestion only.
  */
 export function findPageLocalHighlight(
   question: string,

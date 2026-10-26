@@ -87,3 +87,38 @@ test('findQuoteOnPage multi-term without number still works when strong', () => 
   assert.match(quote!, /应收账款/);
   assert.match(quote!, /坏账准备/);
 });
+
+test('长期应付职工薪酬 matches balance-sheet page, not cover boilerplate', () => {
+  const q = '这一页的长期应付职工薪酬，为什么是空的';
+  const cover = '宁德时代新能源科技股份有限公司 2025年第三季度报告 重要内容提示 公司董事会保证报告内容真实准确完整。';
+  const sheet = '非流动负债：长期借款 应付债券 租赁负债 长期应付款 长期应付职工薪酬 预计负债 递延收益';
+  assert.equal(findQuoteOnPage(q, cover), null);
+  const quote = findQuoteOnPage(q, sheet);
+  assert.ok(quote);
+  assert.match(quote!, /长期应付职工薪酬/);
+
+  const hit = findPageLocalHighlight(q, [
+    { page: 1, content: cover },
+    { page: 7, content: sheet },
+  ], 7, 1);
+  assert.ok(hit);
+  assert.equal(hit!.page, 7);
+
+  // Stale toolbar on p.1 must not invent a cover hit that would yank the reader.
+  assert.equal(
+    findPageLocalHighlight(q, [
+      { page: 1, content: cover },
+      { page: 2, content: '目录 第一节 重要提示 第二节 公司基本情况' },
+      { page: 7, content: sheet },
+    ], 1, 1),
+    null,
+  );
+});
+
+test('term-only match requires a ≥4-char anchor', () => {
+  const quote = findQuoteOnPage(
+    '请看长期和职工',
+    '本段讨论长期发展战略与职工培训计划，与薪酬表无关。',
+  );
+  assert.equal(quote, null);
+});

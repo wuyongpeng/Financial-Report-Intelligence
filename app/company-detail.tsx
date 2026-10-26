@@ -1750,19 +1750,18 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         focusPayload = [...focusPayload, { kind: 'pdf', text: focusText, page, title: pageLabel(page) }];
       }
     }
-    // Pre-highlight: locate distinctive tokens from the question on the current (±1) page
-    // and paint the cite highlight immediately — before the model streams.
+    // Pre-highlight: paint a quote on the page the reader is already viewing.
+    // Never jump away before the answer — adjacent/elsewhere matches wait for citations.
     if (replacing == null && typed && typed !== '怎么看待这些数据') {
-      const hit = findPageLocalHighlight(typed, outlineRef.current.pages, sourcePageRef.current, 1);
-      if (hit) {
-        readingPosition.current = null;
-        scrollPageSync.current = false;
+      const current = sourcePageRef.current;
+      const hit = findPageLocalHighlight(typed, outlineRef.current.pages, current, 1);
+      if (hit && hit.page === current) {
         clearPdfSearchHighlight();
         setCitedMetric(null);
         setResolvedPage(null);
-        setSourcePage(hit.page);
         setHighlight(hit.quote);
-        setPdfJumpNonce(n => n + 1);
+        // Paint only: do not setSourcePage / bump pdfJumpNonce (that yanked readers to p.1
+        // when sourcePage was stale or a weak adjacent hit fired).
         widenSourceForPdf(SOURCE_WIDE);
       }
     }
@@ -2036,7 +2035,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {feedbackError && <small className="cd-verify-hint cd-verify-error">{feedbackError}</small>}
             {feedback[citedMetric] && <small className="cd-verify-hint">{feedback[citedMetric]==='correct'?'已记录你的确认，累计确认会进入复核队列。':'已记录异议，该指标会被优先人工复核。'}</small>}
           </div>}
-          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} searchQuote={searchHighlight?.quote ?? ''} searchPage={searchHighlight?.page ?? 0} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; userScrollAtRef.current = Date.now(); setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark className={highlight?'':'cd-search-mark'}>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
+          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} searchQuote={searchHighlight?.quote ?? ''} searchPage={searchHighlight?.page ?? 0} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; userScrollAtRef.current = Date.now(); sourcePageRef.current = p; setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put; ref synced eagerly for ask() */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark className={highlight?'':'cd-search-mark'}>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
         </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF <Icon name="external" size={12} /></a><button onClick={()=>{draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
       </aside>
       </div>
