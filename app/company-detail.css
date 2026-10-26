@@ -507,6 +507,9 @@
 
 
 .cd-message-user{white-space:pre-wrap}
+.cd-user-turn{display:grid;gap:4px}
+.cd-user-turn>p{margin:0}
+.cd-msg-attach{display:block;font-size:11px;line-height:1.4;color:#7a8eaa;opacity:.85}
 .cd-message-assistant{color:#3a4b61}
 .cd-md{font-size:14px;line-height:1.75;color:#3a4b61}
 .cd-md>*:first-child{margin-top:0}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assembleFocusPrompt, displayFocusPrompt, focusContextBlock, parseFocus } from '../lib/focus-prompt';
+import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, focusContextBlock, parseFocus } from '../lib/focus-prompt';
 
 test('assembles pdf focus frame with typed question', () => {
   const focus = parseFocus([{ kind: 'pdf', text: '营业收入同比增长12%', page: 12 }]);
@@ -21,9 +21,16 @@ test('assembles default closer when only clips', () => {
   assert.match(out, /怎么看待这些数据$/);
 });
 
-test('display mentions attached focus', () => {
+test('display keeps typed question without attach suffix', () => {
   const focus = parseFocus([{ kind: 'metric', text: 'ROE 12%', title: '净资产收益率' }]);
-  assert.equal(displayFocusPrompt('请解读', focus), '请解读（已带上 1 条概览）');
+  assert.equal(displayFocusPrompt('请解读', focus), '请解读');
+  assert.equal(displayFocusPrompt('明天啥天气', focus), '明天啥天气');
+});
+
+test('attach note is separate from bubble text', () => {
+  const focus = parseFocus([{ kind: 'pdf', text: '长期应付职工薪酬', page: 7 }]);
+  assert.equal(focusAttachNote(focus), '已带上 1 段原文');
+  assert.equal(focusAttachNote([]), '');
 });
 
 test('focus context block lists items', () => {

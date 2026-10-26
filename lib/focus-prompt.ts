@@ -67,17 +67,21 @@ export function assembleFocusPrompt(question: string, focus: FocusItem[]) {
   return `${head}怎么看待这些数据`;
 }
 
-/** Chat bubble text: typed question + notice that focus was attached. */
+/** Visible chat bubble text — never mutate the typed question with attach notices. */
 export function displayFocusPrompt(question: string, focus: FocusItem[]) {
-  const typed = question.trim() || (focus.length ? '怎么看待这些数据' : '');
-  if (!focus.length) return typed;
+  return question.trim() || (focus.length ? '怎么看待这些数据' : '');
+}
+
+/** Quiet badge copy for user-selected clips only (not auto page soft-merge). */
+export function focusAttachNote(focus: FocusItem[]) {
+  if (!focus.length) return '';
   const pdf = focus.filter(f => f.kind === 'pdf' || f.kind === 'text').length;
   const brief = focus.filter(f => f.kind === 'finding' || f.kind === 'metric').length;
   const bits = [
     pdf ? `${pdf} 段原文` : '',
     brief ? `${brief} 条概览` : '',
   ].filter(Boolean);
-  return `${typed}（已带上 ${bits.join(' + ') || `${focus.length} 项关注`}）`;
+  return `已带上 ${bits.join(' + ') || `${focus.length} 项关注`}`;
 }
 
 /** Short block for structuredContext so RAG treats focus as evidence. */

@@ -7,7 +7,7 @@ import { verdictTone, type ReportVerdict } from '@/lib/report-verdict';
 import { buildFocusHighlights } from '@/lib/focus-highlights';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
-import { assembleFocusPrompt, displayFocusPrompt, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
+import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
 import { citeFilingLabel, citeHoverText, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '@/lib/answer-cite';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
 import { readContractJson } from '@/contracts/common';
@@ -59,7 +59,8 @@ type Message = {
   followupBusy?: boolean;
   feedback?: 'up' | 'down';
   feedbackDone?: boolean;
-  ask?: { question: string; focus?: FocusItem[] };
+  /** attachNote: user-selected clips only; soft-merged current page never shows here. */
+  ask?: { question: string; focus?: FocusItem[]; attachNote?: string };
 };
 type Clip = { id: string; kind: FocusKind; quote: string; page?: number; title?: string };
 const emptyOutline: Outline = { indexedPages: 0, pages: [], outline: [] };
@@ -1733,13 +1734,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (replacing != null) {
       if (busyRef.current || !memoryReady.current) return;
     } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
-    let focusPayload: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
+    // User-selected clips / explicit caller focus only — never treat soft-merged page as "attached".
+    const userFocus: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
       kind: c.kind,
       text: c.quote,
       ...(c.page !== undefined ? { page: c.page } : {}),
       ...(c.title ? { title: c.title } : {}),
     })));
-    // Soft-merge the page the reader is looking at (scroll-synced sourcePage).
+    let focusPayload: FocusItem[] = [...userFocus];
+    // Soft-merge the page the reader is looking at (scroll-synced sourcePage) for the model only.
     // Prefer explicit clips / caller focus first; append current page if room and not already present.
     if (replacing == null) {
       const page = sourcePageRef.current;
@@ -1765,19 +1768,22 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         widenSourceForPdf(SOURCE_WIDE);
       }
     }
-    const question = typed || (focusPayload.length ? '怎么看待这些数据' : '');
+    const question = typed || (userFocus.length ? '怎么看待这些数据' : '');
     const assembled = assembleFocusPrompt(question, focusPayload);
-    const display = displayFocusPrompt(question, focusPayload);
+    // Bubble shows the typed question only — never append 「已带上 N 段原文」.
+    // Auto soft-merged current page stays in focusPayload for the API, not in the visible text.
+    const display = displayFocusPrompt(question, userFocus);
+    const attachNote = focusAttachNote(userFocus);
     setRegenMenu(null);
     const controller = new AbortController(); requestRef.current = controller; busyRef.current = true;
     const id = selected.id;
     const prior = replacing != null ? messages.slice(0, replacing - 1) : messages;
-    const asked = prior.filter(m => m.role === 'user').map(m => m.text);
+    const asked = prior.filter(m => m.role === 'user').map(m => m.ask?.question ?? m.text);
     const slot = replacing != null ? replacing : messages.length + 1;
     setAsking(true); setThinking(false);
     if (replacing == null) {
       setQuestion(''); setClips([]); setPick(null);
-      setMessages(m => [...m, { role:'user', text:display, ask:{ question, ...(focusPayload.length ? { focus: focusPayload } : {}) } }, { role:'assistant', text:'' }]);
+      setMessages(m => [...m, { role:'user', text:display, ask:{ question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(attachNote ? { attachNote } : {}) } }, { role:'assistant', text:'' }]);
     } else {
       setMessages(m => [...m.slice(0, replacing), { role:'assistant', text:'' }]);
     }
@@ -2333,7 +2339,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                           </details>
                         )}
                     </>
-                  : <p>{m.text}</p>}
+                  : <div className="cd-user-turn">
+                      <p>{m.text}</p>
+                      {m.ask?.attachNote ? <small className="cd-msg-attach">{m.ask.attachNote}</small> : null}
+                    </div>}
               {m.role==='assistant' && m.text.trim() && !streaming && <div className="cd-answer-tools">
                 <div className="cd-actions">
                 <button type="button" className={m.feedback==='up'?'on':''} aria-label="满意" title="满意" aria-pressed={m.feedback==='up'} aria-expanded={m.feedback==='up' && !m.feedbackDone} onClick={()=>setAnswerVote(i,'up')}>
