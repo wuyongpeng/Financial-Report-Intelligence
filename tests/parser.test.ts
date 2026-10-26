@@ -146,6 +146,38 @@ test('does not scale disclosed YoY percent by page 千元 unit', () => {
 
 
 
+
+test('does not label 扣除非经常性损益后…净利润 as 非经常性损益 (alias collision)', () => {
+  // User-facing bug: 重点关注 showed「非经常性损益 1,464.49 亿元，占归母净利润 100.0%」
+  // because short label「非经常性损益」matched inside「扣除非经常性损益后归属于母公司股东的净利润 146,449」.
+  const metrics = parseCoreMetricPages([
+    '报告摘要 主要会计数据 单位：人民币百万元 归属于母公司股东的净利润 146,500 扣除非经常性损益后归属于母公司股东的净利润 146,449 基本每股收益 1.20 加权平均净资产收益率 10.00%',
+  ]);
+  assert.equal(metrics.some((item) => item.metric === 'non_recurring_pnl'), false);
+  const ex = metrics.find((item) => item.metric === 'profit_ex_non_recurring');
+  assert.equal(ex?.value, 146_449_000_000); // 146,449 百万元 → 元
+  assert.match(ex?.sourceLabel ?? '', /扣除非经常性损益后归属于母公司股东的净利润/);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 146_500_000_000);
+});
+
+test('maps 扣非后归母净利润 under 万元 without inventing non_recurring_pnl', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：人民币万元 归属于母公司股东的净利润 150,000 扣除非经常性损益后归属于母公司股东的净利润 146,449',
+  ]);
+  assert.equal(metrics.some((item) => item.metric === 'non_recurring_pnl'), false);
+  const ex = metrics.find((item) => item.metric === 'profit_ex_non_recurring');
+  assert.equal(ex?.value, 1_464_490_000); // 146,449 万元 → 14.6449 亿元
+  assert.equal(ex?.sourceLabel, '扣除非经常性损益后归属于母公司股东的净利润');
+});
+
+test('still extracts explicit 非经常性损益合计 beside 扣非后净利润', () => {
+  const metrics = parseCoreMetricPages([
+    '报告摘要 主要会计数据 单位：人民币万元 归属于母公司股东的净利润 150,000 扣除非经常性损益后归属于母公司股东的净利润 146,449 非经常性损益合计 3,551',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'non_recurring_pnl')?.value, 35_510_000);
+  assert.equal(metrics.find((item) => item.metric === 'profit_ex_non_recurring')?.value, 1_464_490_000);
+});
+
 test('ZTE 2026H1 summary keeps 千元 scale and disclosed YoY for 归母净利润', () => {
   // Layout-normalized excerpt from 中兴通讯 000063 二〇二六年半年度报告 §1.2.3
   // (单位：千元, three columns 本期 | 上年同期 | 同比增减).

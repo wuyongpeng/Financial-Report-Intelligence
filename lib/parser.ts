@@ -55,7 +55,16 @@ const LABELS: MetricDefinition[] = [
   { metric: 'operating_cash_flow', labels: ['经营活动产生的现金流量净额', '经营活动现金流量净额'], unit: '元', minAbs: 0, maxAbs: 1e16 },
   { metric: 'operating_cost', labels: ['营业成本'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
   { metric: 'non_recurring_pnl', labels: ['非经常性损益合计', '非经常性损益净额', '非经常性损益'], unit: '元', minAbs: 0, maxAbs: 1e15 },
-  { metric: 'profit_ex_non_recurring', labels: ['扣除非经常性损益后的净利润', '归属于上市公司股东的扣除非经常性损益的净利润', '扣非后归属于上市公司股东的净利润'], unit: '元', minAbs: 0, maxAbs: 1e15 },
+  { metric: 'profit_ex_non_recurring', labels: [
+    '扣除非经常性损益后归属于母公司股东的净利润',
+    '扣除非经常性损益后归属于上市公司股东的净利润',
+    '扣除非经常性损益后归属于本公司股东的净利润',
+    '扣除非经常性损益后的净利润',
+    '归属于上市公司股东的扣除非经常性损益的净利润',
+    '归属于母公司股东的扣除非经常性损益的净利润',
+    '扣非后归属于上市公司股东的净利润',
+    '扣非后归属于母公司股东的净利润',
+  ], unit: '元', minAbs: 0, maxAbs: 1e15 },
   { metric: 'cash_and_equivalents', labels: ['货币资金'], unit: '元', minAbs: 0, maxAbs: 1e16 },
   { metric: 'restricted_cash', labels: ['受限货币资金', '使用受限的货币资金', '受限制的货币资金'], unit: '元', minAbs: 0, maxAbs: 1e16 },
   { metric: 'short_term_borrowings', labels: ['短期借款'], unit: '元', minAbs: 0, maxAbs: 1e16 },
@@ -254,6 +263,20 @@ function allLabelPositions(text: string, label: string) {
   return positions;
 }
 
+/**
+ * Short label「非经常性损益」is a substring of「扣除非经常性损益后…净利润」.
+ * Reject those embedded hits so 扣非后净利润 never becomes non_recurring_pnl.
+ */
+function isCleanLabelHit(page: string, position: number, label: string, metric: MetricDefinition['metric']) {
+  if (metric !== 'non_recurring_pnl') return true;
+  const before = page.slice(Math.max(0, position - 2), position);
+  if (before === '扣除') return false;
+  const after = page[position + label.length] ?? '';
+  // 「…非经常性损益后归属于…」— the amount belongs to profit_ex_non_recurring.
+  if (after === '后') return false;
+  return true;
+}
+
 function metricCandidates(pages: string[], definition: MetricDefinition) {
   const candidates: Candidate[] = [];
   for (let pageIndex = 0; pageIndex < Math.min(pages.length, PARSE_PAGE_LIMIT); pageIndex += 1) {
@@ -274,6 +297,7 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
     const hasPageUnit = Boolean(pageCurrencyUnit(page));
     for (const [labelIndex, label] of definition.labels.entries()) {
       for (const position of allLabelPositions(page, label)) {
+        if (!isCleanLabelHit(page, position, label, definition.metric)) continue;
         const scopedPage = page.slice(position);
         const parsed = candidateAfterLabel(scopedPage, label, definition, pageCurrencyUnit(page));
         if (!parsed) continue;
