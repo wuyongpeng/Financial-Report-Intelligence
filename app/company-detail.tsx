@@ -324,7 +324,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [overviewPick, setOverviewPick] = useState<null | { quote: string; x: number; y: number; kind: FocusKind; page?: number; title?: string; cardId?: string }>(null);
   const [verdict, setVerdict] = useState<ReportVerdict | null>(null);
   const [verdictStatus, setVerdictStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
-  const [verdictRefreshing, setVerdictRefreshing] = useState(false);
   const [verdictError, setVerdictError] = useState('');
   const [quietToast, setQuietToast] = useState<{ text: string; at: number } | null>(null);
   const autoParsePosted = useRef(new Set<string>());
@@ -339,7 +338,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setSelected(report); onSelect(report.id); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
     setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setDepthOpen(false); setFocused(null);
     setPdfSearch(''); setPdfSearchHits([]); setPdfSearchOpen(false); setSearchHighlight(null);
-    setVerdict(null); setVerdictStatus('loading'); setVerdictRefreshing(false); setVerdictError('');
+    setVerdict(null); setVerdictStatus('loading'); setVerdictError('');
   }
   useEffect(() => {
     const abort = new AbortController();
@@ -490,23 +489,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       abort.abort();
     };
   }, [selected.id, canLoadReportData]);
-  async function refreshVerdict() {
-    if (verdictRefreshing || verdictStatus === 'loading') return;
-    setVerdictRefreshing(true);
-    setVerdictError('');
-    try {
-      const parsed = await requestReportVerdict(selected.id, { refresh: true });
-      setVerdict(parsed);
-      setVerdictStatus('ready');
-      setVerdictError('');
-    } catch (error) {
-      setVerdict(null);
-      setVerdictStatus('unavailable');
-      setVerdictError(error instanceof Error ? error.message : '');
-    } finally {
-      setVerdictRefreshing(false);
-    }
-  }
   useEffect(() => {
     const abort = new AbortController();
     memoryReady.current = false;
@@ -768,7 +750,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const growthStanding = standing(growthRanks, selfGrowth);
   const findings = keyFindings(reports, selected);
   const focusHighlights = buildFocusHighlights(selected, { previous });
-  const verdictGenerating = verdictStatus === 'loading' || verdictRefreshing;
+  const verdictGenerating = verdictStatus === 'loading';
   const flaggedMoves = changes.filter(d => Math.abs(d.amount!) >= 30);
   const skillDepthModules = industryAttributionModules(selected.industry);
   const depthModuleDefs = skillDepthModules?.length ? skillDepthModules : FALLBACK_ATTRIBUTION_MODULES;
@@ -1782,18 +1764,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           >
             <div className="cd-verdict-head">
               <p className="cd-brief-kicker">财报速览</p>
-              <div className="cd-verdict-tools">
-                <button
-                  type="button"
-                  className="cd-verdict-refresh"
-                  aria-label="重新分析"
-                  title="重新分析"
-                  disabled={verdictStatus === 'loading' || verdictRefreshing}
-                  onClick={() => void refreshVerdict()}
-                >
-                  <Icon name="refresh" size={14} className={verdictRefreshing ? 'cd-spin' : undefined} />
-                </button>
-              </div>
             </div>
             {verdictGenerating && <p className="cd-verdict-fallback">{reportIsParsed(selected) ? '正在生成本期概览…' : '正在解析本期财报…'}</p>}
             {!verdictGenerating && verdictStatus === 'unavailable' && (
