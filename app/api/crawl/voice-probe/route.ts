@@ -1,8 +1,9 @@
 import {
   probeVoiceGateways,
+  resolveVoiceApiKey,
   resolveVoiceAsrUrl,
   resolveVoiceTtsUrl,
-  voiceApiKeyConfigured,
+  voiceApiKeyLooksLikeGatewaySk,
   voiceWsHost,
 } from '@/lib/voice/probe';
 
@@ -10,10 +11,14 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET() {
+  const { apiKey, apiKeySource } = resolveVoiceApiKey();
   return Response.json(
     {
       ok: true,
-      apiKeyConfigured: voiceApiKeyConfigured(),
+      apiKeyConfigured: apiKeySource !== 'none',
+      apiKeySource,
+      apiKeyLooksLikeGatewaySk: voiceApiKeyLooksLikeGatewaySk(apiKey),
+      apiKeyLength: apiKey.length,
       asr: { host: voiceWsHost(resolveVoiceAsrUrl()) },
       tts: { host: voiceWsHost(resolveVoiceTtsUrl()) },
       entryHint:

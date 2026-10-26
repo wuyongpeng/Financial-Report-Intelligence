@@ -1,6 +1,6 @@
 /**
  * Server-side voice (ASR/TTS) upstream connectivity probe.
- * Browser never sees LLM_API_KEY; this only reports ok/host/error.
+ * Browser never sees API keys; this only reports ok/host/error and safe key shape.
  *
  * Note for ops: if upstream probe is ok but the browser still gets
  * 「语音服务未连通」, the entry proxy (APISIX/Caddy) likely does not
@@ -16,6 +16,8 @@ export const DEFAULT_VOICE_TTS_WS_URL =
 
 export type VoiceEndpointKind = 'asr' | 'tts';
 
+export type VoiceApiKeySource = 'voice' | 'llm' | 'none';
+
 export type VoiceEndpointProbeResult = {
   ok: boolean;
   ms: number;
@@ -26,6 +28,12 @@ export type VoiceEndpointProbeResult = {
 export type VoiceProbeReport = {
   ok: boolean;
   apiKeyConfigured: boolean;
+  /** Which env supplied the key used for the probe (never the key itself). */
+  apiKeySource: VoiceApiKeySource;
+  /** True when the active key starts with `sk-` (AI-Gateway Dashboard shape). */
+  apiKeyLooksLikeGatewaySk: boolean;
+  /** Length of the active key after trim; 0 when none. */
+  apiKeyLength: number;
   asr: VoiceEndpointProbeResult;
   tts: VoiceEndpointProbeResult;
   /** Hint when upstream is fine but browser WS still fails. */
@@ -42,8 +50,24 @@ export function resolveVoiceTtsUrl(env: EnvLike = process.env): string {
   return (env.VOICE_TTS_WS_URL ?? '').trim() || DEFAULT_VOICE_TTS_WS_URL;
 }
 
+/** Prefer VOICE_API_KEY; fall back to LLM_API_KEY. Never return secrets to clients. */
+export function resolveVoiceApiKey(env: EnvLike = process.env): {
+  apiKey: string;
+  apiKeySource: VoiceApiKeySource;
+} {
+  const voice = (env.VOICE_API_KEY ?? '').trim();
+  if (voice) return { apiKey: voice, apiKeySource: 'voice' };
+  const llm = (env.LLM_API_KEY ?? '').trim();
+  if (llm) return { apiKey: llm, apiKeySource: 'llm' };
+  return { apiKey: '', apiKeySource: 'none' };
+}
+
+export function voiceApiKeyLooksLikeGatewaySk(apiKey: string): boolean {
+  return apiKey.trim().startsWith('sk-');
+}
+
 export function voiceApiKeyConfigured(env: EnvLike = process.env): boolean {
-  return Boolean((env.LLM_API_KEY ?? '').trim());
+  return resolveVoiceApiKey(env).apiKeySource !== 'none';
 }
 
 /** Host only — never return query/key material. */
@@ -63,7 +87,9 @@ export function formatVoiceProbeError(err: unknown): string {
     .replace(/api[_-]?key[=:]\s*\S+/gi, 'api_key=***')
     .slice(0, 200);
 
-  if (/Unexpected server response:\s*401/i.test(scrubbed)) return '鉴权失败（401，检查 LLM_API_KEY）';
+  if (/Unexpected server response:\s*401/i.test(scrubbed)) {
+    return '鉴权失败（401，检查 VOICE_API_KEY 或 LLM_API_KEY）';
+  }
   if (/Unexpected server response:\s*403/i.test(scrubbed)) return '拒绝访问（403）';
   if (/Unexpected server response:\s*404/i.test(scrubbed)) return '上游路径不存在（404）';
   if (/Unexpected server response:\s*(\d{3})/i.test(scrubbed)) {
@@ -134,7 +160,7 @@ export async function probeVoiceEndpoint(opts: {
     return { ok: false, ms: 0, host, error: '语音上游 URL 无效' };
   }
   if (!opts.apiKey.trim()) {
-    return { ok: false, ms: 0, host, error: 'LLM_API_KEY 未配置' };
+    return { ok: false, ms: 0, host, error: 'VOICE_API_KEY / LLM_API_KEY 未配置' };
   }
 
   try {
@@ -156,8 +182,10 @@ export async function probeVoiceGateways(opts?: {
   connect?: VoiceWsConnector;
 }): Promise<VoiceProbeReport> {
   const env = opts?.env ?? process.env;
-  const apiKey = (env.LLM_API_KEY ?? '').trim();
-  const apiKeyConfigured = Boolean(apiKey);
+  const { apiKey, apiKeySource } = resolveVoiceApiKey(env);
+  const apiKeyConfigured = apiKeySource !== 'none';
+  const apiKeyLooksLikeGatewaySk = voiceApiKeyLooksLikeGatewaySk(apiKey);
+  const apiKeyLength = apiKey.length;
   const asrUrl = resolveVoiceAsrUrl(env);
   const ttsUrl = resolveVoiceTtsUrl(env);
   const timeoutMs = opts?.timeoutMs ?? 8_000;
@@ -171,6 +199,9 @@ export async function probeVoiceGateways(opts?: {
   return {
     ok: asr.ok && tts.ok,
     apiKeyConfigured,
+    apiKeySource,
+    apiKeyLooksLikeGatewaySk,
+    apiKeyLength,
     asr,
     tts,
     entryHint:

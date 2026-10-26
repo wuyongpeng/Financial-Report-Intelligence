@@ -671,6 +671,9 @@ export default function CrawlOverview() {
   const [llmProbeError, setLlmProbeError] = useState('');
   const [voiceProbe, setVoiceProbe] = useState<{
     apiKeyConfigured: boolean;
+    apiKeySource?: 'voice' | 'llm' | 'none';
+    apiKeyLooksLikeGatewaySk?: boolean;
+    apiKeyLength?: number;
     asr: { ok: boolean; ms: number; host: string; error?: string };
     tts: { ok: boolean; ms: number; host: string; error?: string };
     entryHint?: string;
@@ -1236,20 +1239,30 @@ export default function CrawlOverview() {
       try {
         const voicePayload = await voiceResponse.json() as {
           apiKeyConfigured?: boolean;
+          apiKeySource?: 'voice' | 'llm' | 'none';
+          apiKeyLooksLikeGatewaySk?: boolean;
+          apiKeyLength?: number;
           asr?: { ok: boolean; ms: number; host: string; error?: string };
           tts?: { ok: boolean; ms: number; host: string; error?: string };
           entryHint?: string;
           error?: string;
         };
+        const keyMeta = {
+          apiKeySource: voicePayload.apiKeySource,
+          apiKeyLooksLikeGatewaySk: voicePayload.apiKeyLooksLikeGatewaySk,
+          apiKeyLength: voicePayload.apiKeyLength,
+        };
         if (!voiceResponse.ok || !voicePayload.asr || !voicePayload.tts) {
           setVoiceProbe({
             apiKeyConfigured: Boolean(voicePayload.apiKeyConfigured),
+            ...keyMeta,
             asr: { ok: false, ms: 0, host: '—', error: voicePayload.error ?? '语音探测失败' },
             tts: { ok: false, ms: 0, host: '—', error: voicePayload.error ?? '语音探测失败' },
           });
         } else {
           setVoiceProbe({
             apiKeyConfigured: Boolean(voicePayload.apiKeyConfigured),
+            ...keyMeta,
             asr: voicePayload.asr,
             tts: voicePayload.tts,
             entryHint: voicePayload.entryHint,
@@ -2553,7 +2566,7 @@ export default function CrawlOverview() {
                     {llmProbeBusy ? '检测中…' : '检测连接'}
                   </button>
                 </div>
-                <p className="co-llm-probe-lead">检测已配置模型，并短连上游语音 ASR/TTS 网关（复用 LLM_API_KEY）。</p>
+                <p className="co-llm-probe-lead">检测已配置模型，并短连上游语音 ASR/TTS 网关（优先 VOICE_API_KEY，否则 LLM_API_KEY）。</p>
                 {llmProbeError ? <p className="co-llm-probe-error" role="status">{llmProbeError}</p> : null}
                 {llmProbeResults ? (
                   <ul className="co-llm-probe-list">
@@ -2568,10 +2581,22 @@ export default function CrawlOverview() {
                 ) : null}
                 {voiceProbe ? (
                   <ul className="co-llm-probe-list" aria-label="语音 ASR/TTS">
-                    <li className={voiceProbe.apiKeyConfigured ? 'ok' : 'bad'}>
+                    <li className={voiceProbe.apiKeyConfigured && voiceProbe.apiKeyLooksLikeGatewaySk !== false ? 'ok' : 'bad'}>
                       <b>语音鉴权</b>
-                      <span className="co-llm-probe-host">LLM_API_KEY</span>
-                      <em>{voiceProbe.apiKeyConfigured ? '已配置' : '未配置（语音不可用）'}</em>
+                      <span className="co-llm-probe-host">
+                        {voiceProbe.apiKeySource === 'voice'
+                          ? 'VOICE_API_KEY'
+                          : voiceProbe.apiKeySource === 'llm'
+                            ? 'LLM_API_KEY（回退）'
+                            : '未配置'}
+                      </span>
+                      <em>
+                        {!voiceProbe.apiKeyConfigured
+                          ? '未配置（语音不可用）'
+                          : `${voiceProbe.apiKeyLooksLikeGatewaySk ? 'sk- 形态' : '非 sk- 形态'} · 长度 ${voiceProbe.apiKeyLength ?? 0}${
+                              voiceProbe.apiKeyLooksLikeGatewaySk ? '' : '（401 时优先换 Dashboard 的 sk-）'
+                            }`}
+                      </em>
                     </li>
                     <li className={voiceProbe.asr.ok ? 'ok' : 'bad'}>
                       <b>语音 ASR</b>
