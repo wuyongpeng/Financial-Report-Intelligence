@@ -33,6 +33,7 @@ import {
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import { parseVoiceNavIntent } from '@/lib/voice/nav-intent';
+import { findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer } from '@/lib/voice/client-tts';
@@ -1272,18 +1273,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       resumeVoiceConversation();
       return;
     }
-    const page = sourcePageRef.current;
-    const pageContent = outlineRef.current.pages.find(p => p.page === page)?.content?.replace(/\s+/g, ' ').trim() ?? '';
-    const focusText = (pageContent || `当前正在阅读第 ${page} 页`).slice(0, FOCUS_QUOTE_MAX);
-    const focus: FocusItem[] = [{ kind: 'pdf', text: focusText, page, title: pageLabel(page) }];
     voiceSpeakRef.current = true;
     voiceEarlyJumpRef.current = false;
     // Keep the float up (思考中…) for the whole conversation.
     setVoiceMode(voiceConvRef.current);
     voicePartialRef.current = ''; setVoicePartial('');
     setChatCollapsed(false);
-    // Keep PDF visible on mobile when possible.
-    void ask(text, { focus });
+    // Shared ask path: current-page focus + pre-highlight, same as typed send.
+    void ask(text);
     if (voiceConvRef.current) void armBargeInAsr('asking');
   }
 
@@ -1736,12 +1733,39 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (replacing != null) {
       if (busyRef.current || !memoryReady.current) return;
     } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
-    const focusPayload: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
+    let focusPayload: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
       kind: c.kind,
       text: c.quote,
       ...(c.page !== undefined ? { page: c.page } : {}),
       ...(c.title ? { title: c.title } : {}),
     })));
+    // Soft-merge the page the reader is looking at (scroll-synced sourcePage).
+    // Prefer explicit clips / caller focus first; append current page if room and not already present.
+    if (replacing == null) {
+      const page = sourcePageRef.current;
+      const alreadyHasPage = focusPayload.some(f => f.page === page && (f.kind === 'pdf' || f.kind === 'text'));
+      if (!alreadyHasPage && focusPayload.length < FOCUS_MAX_ITEMS) {
+        const pageContent = outlineRef.current.pages.find(p => p.page === page)?.content?.replace(/\s+/g, ' ').trim() ?? '';
+        const focusText = (pageContent || `当前正在阅读第 ${page} 页`).slice(0, FOCUS_QUOTE_MAX);
+        focusPayload = [...focusPayload, { kind: 'pdf', text: focusText, page, title: pageLabel(page) }];
+      }
+    }
+    // Pre-highlight: locate distinctive tokens from the question on the current (±1) page
+    // and paint the cite highlight immediately — before the model streams.
+    if (replacing == null && typed && typed !== '怎么看待这些数据') {
+      const hit = findPageLocalHighlight(typed, outlineRef.current.pages, sourcePageRef.current, 1);
+      if (hit) {
+        readingPosition.current = null;
+        scrollPageSync.current = false;
+        clearPdfSearchHighlight();
+        setCitedMetric(null);
+        setResolvedPage(null);
+        setSourcePage(hit.page);
+        setHighlight(hit.quote);
+        setPdfJumpNonce(n => n + 1);
+        widenSourceForPdf(SOURCE_WIDE);
+      }
+    }
     const question = typed || (focusPayload.length ? '怎么看待这些数据' : '');
     const assembled = assembleFocusPrompt(question, focusPayload);
     const display = displayFocusPrompt(question, focusPayload);
