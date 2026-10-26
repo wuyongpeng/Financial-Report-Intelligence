@@ -1,5 +1,5 @@
 import { fillCoverageGaps, processBacklog, prioritizeCompanyCrawl, runIngestion, enqueueParseFront, parseAnnouncementById } from '@/lib/ingest';
-import { demoAccessEnabled, isAppUser } from '@/lib/auth';
+import { authorizeProductWrite } from '@/lib/auth';
 import { getIngestControl } from '@/lib/ingest-control';
 import { getIngestSettings } from '@/lib/ingest-settings';
 import { after } from 'next/server';
@@ -7,13 +7,7 @@ import { after } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 function authorized(request: Request) {
-  const token = process.env.INTERNAL_INGEST_TOKEN;
-  const bearer = request.headers.get('authorization');
-  if (token && bearer === `Bearer ${token}`) return 'token';
-  if (isAppUser(request)) return 'session';
-  if (demoAccessEnabled()) return 'demo';
-  // Product is open for evaluators / guests — allow soft crawl without login.
-  return 'guest';
+  return authorizeProductWrite(request);
 }
 
 function sanitizeCodes(raw: unknown): string[] {

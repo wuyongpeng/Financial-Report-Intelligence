@@ -1,4 +1,4 @@
-import { demoAccessEnabled, isAppUser } from '@/lib/auth';
+import { authorizeProductWrite } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { discardAnnouncement } from '@/lib/discard-announcement';
 import { matchesDiscardPassword } from '@/lib/discard-password';
@@ -6,12 +6,7 @@ import { matchesDiscardPassword } from '@/lib/discard-password';
 export const dynamic = 'force-dynamic';
 
 function authorized(request: Request) {
-  const token = process.env.INTERNAL_INGEST_TOKEN;
-  const bearer = request.headers.get('authorization');
-  if (token && bearer === 'Bearer ' + token) return 'token';
-  if (isAppUser(request)) return 'session';
-  if (demoAccessEnabled()) return 'demo';
-  return null;
+  return authorizeProductWrite(request);
 }
 
 /**

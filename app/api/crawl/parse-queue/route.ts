@@ -1,4 +1,4 @@
-import { demoAccessEnabled, isAppUser } from '@/lib/auth';
+import { authorizeProductWrite } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { abortParseAnnouncements } from '@/lib/ingest';
 import { PARSE_ABORT_MESSAGE } from '@/lib/parse-abort';
@@ -6,12 +6,7 @@ import { PARSE_ABORT_MESSAGE } from '@/lib/parse-abort';
 export const dynamic = 'force-dynamic';
 
 function authorized(request: Request) {
-  const token = process.env.INTERNAL_INGEST_TOKEN;
-  const bearer = request.headers.get('authorization');
-  if (token && bearer === 'Bearer ' + token) return 'token';
-  if (isAppUser(request)) return 'session';
-  if (demoAccessEnabled()) return 'demo';
-  return null;
+  return authorizeProductWrite(request);
 }
 
 /**

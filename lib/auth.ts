@@ -191,6 +191,23 @@ export function ensureConversationOwner(request: Request): { owner: string; setC
   return ensureGuestSession(request);
 }
 
+export type ProductWriteAuth = 'token' | 'session' | 'demo' | 'public';
+
+/**
+ * Shared gate for anonymous-facing product mutations (monitor claim, /sources crawl
+ * queues, soft trigger). Eva is open 2C: do not require APP_DEMO_ACCESS or login.
+ * Still recognizes ingest bearer / app session / demo for audit labels.
+ * Admin audit and internal ingest/process stay on requireAdmin / bearer-only.
+ */
+export function authorizeProductWrite(request: Request): ProductWriteAuth {
+  const token = process.env.INTERNAL_INGEST_TOKEN;
+  const bearer = request.headers.get('authorization');
+  if (token && bearer === `Bearer ${token}`) return 'token';
+  if (isAppUser(request)) return 'session';
+  if (demoAccessEnabled()) return 'demo';
+  return 'public';
+}
+
 export function requireAppUser(request: Request) {
   if (!isAppUser(request)) return Response.json({ error: '请先登录' }, { status: 401 });
   return null;

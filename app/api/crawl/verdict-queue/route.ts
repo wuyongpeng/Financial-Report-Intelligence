@@ -1,4 +1,4 @@
-import { demoAccessEnabled, isAppUser } from '@/lib/auth';
+import { authorizeProductWrite } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { listVerdictJobsByIds } from '@/lib/report-verdict-store';
 import { periodFromTitle } from '@/lib/ingest-period';
@@ -18,12 +18,7 @@ import { BATCH_VERDICT_QUEUE_CHUNK } from '@/lib/crawl-display';
 export const dynamic = 'force-dynamic';
 
 function authorized(request: Request) {
-  const token = process.env.INTERNAL_INGEST_TOKEN;
-  const bearer = request.headers.get('authorization');
-  if (token && bearer === 'Bearer ' + token) return 'token';
-  if (isAppUser(request)) return 'session';
-  if (demoAccessEnabled()) return 'demo';
-  return null;
+  return authorizeProductWrite(request);
 }
 
 /** 「已跳过 N 份」entry point. */

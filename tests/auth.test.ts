@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appUserRole, createDemoCookie, demoAccessEnabled, ensureConversationOwner, ensureGuestSession, validAdminPassword } from '../lib/auth';
+import { appUserRole, authorizeProductWrite, createDemoCookie, demoAccessEnabled, ensureConversationOwner, ensureGuestSession, requireAdmin, validAdminPassword } from '../lib/auth';
 
 test('legacy demo cookie only validates while APP_DEMO_ACCESS is true', () => {
   const previousAccess = process.env.APP_DEMO_ACCESS;
@@ -66,4 +66,29 @@ test('validAdminPassword accepts built-in EVA and optional env password', () => 
   assert.equal(validAdminPassword('custom-admin-pass'), true);
   assert.equal(validAdminPassword('nope'), false);
   if (previous === undefined) delete process.env.ADMIN_PASSWORD; else process.env.ADMIN_PASSWORD = previous;
+});
+
+test('authorizeProductWrite stays open for anonymous product mutations even when APP_DEMO_ACCESS is false', () => {
+  const previousAccess = process.env.APP_DEMO_ACCESS;
+  const previousToken = process.env.INTERNAL_INGEST_TOKEN;
+  process.env.APP_DEMO_ACCESS = 'false';
+  delete process.env.INTERNAL_INGEST_TOKEN;
+  assert.equal(authorizeProductWrite(new Request('http://localhost/api/companies/watch', { method: 'POST' })), 'public');
+  process.env.INTERNAL_INGEST_TOKEN = 'ingest-token-for-tests-only';
+  const withBearer = new Request('http://localhost/api/crawl/verdict-queue', {
+    method: 'POST',
+    headers: { authorization: 'Bearer ingest-token-for-tests-only' },
+  });
+  assert.equal(authorizeProductWrite(withBearer), 'token');
+  if (previousAccess === undefined) delete process.env.APP_DEMO_ACCESS; else process.env.APP_DEMO_ACCESS = previousAccess;
+  if (previousToken === undefined) delete process.env.INTERNAL_INGEST_TOKEN; else process.env.INTERNAL_INGEST_TOKEN = previousToken;
+});
+
+test('requireAdmin still rejects anonymous requests', () => {
+  const previousSecret = process.env.ADMIN_SESSION_SECRET;
+  process.env.ADMIN_SESSION_SECRET = 'test-admin-secret-at-least-24-chars';
+  const denied = requireAdmin(new Request('http://localhost/api/admin/audit'));
+  assert.ok(denied);
+  assert.equal(denied!.status, 401);
+  if (previousSecret === undefined) delete process.env.ADMIN_SESSION_SECRET; else process.env.ADMIN_SESSION_SECRET = previousSecret;
 });

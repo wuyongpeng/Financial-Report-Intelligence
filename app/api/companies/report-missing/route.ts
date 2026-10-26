@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { demoAccessEnabled, isAppUser } from '@/lib/auth';
+import { authorizeProductWrite } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,12 +13,7 @@ type ReportRow = {
 };
 
 function authorized(request: Request) {
-  const token = process.env.INTERNAL_INGEST_TOKEN;
-  const bearer = request.headers.get('authorization');
-  if (token && bearer === `Bearer ${token}`) return true;
-  if (isAppUser(request)) return true;
-  if (demoAccessEnabled()) return true;
-  return false;
+  return Boolean(authorizeProductWrite(request));
 }
 
 function queuePath() {

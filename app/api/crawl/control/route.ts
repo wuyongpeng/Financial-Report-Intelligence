@@ -1,4 +1,4 @@
-import { demoAccessEnabled, isAppUser } from '@/lib/auth';
+import { authorizeProductWrite } from '@/lib/auth';
 import { getIngestControl, setIngestControl } from '@/lib/ingest-control';
 import { getDownloadGate, setDownloadGate } from '@/lib/ingest-progress';
 import { getIngestSettings, setIngestSettings, type IngestSettings } from '@/lib/ingest-settings';
@@ -6,12 +6,7 @@ import { getIngestSettings, setIngestSettings, type IngestSettings } from '@/lib
 export const dynamic = 'force-dynamic';
 
 function authorized(request: Request) {
-  const token = process.env.INTERNAL_INGEST_TOKEN;
-  const bearer = request.headers.get('authorization');
-  if (token && bearer === 'Bearer ' + token) return 'token';
-  if (isAppUser(request)) return 'session';
-  if (demoAccessEnabled()) return 'demo';
-  return null;
+  return authorizeProductWrite(request);
 }
 
 function payload(control: Awaited<ReturnType<typeof getIngestControl>>, settings: IngestSettings) {

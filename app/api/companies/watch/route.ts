@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import ashareUniverse from '@/data/ashare-universe.json';
-import { demoAccessEnabled, isAppUser } from '@/lib/auth';
+import { authorizeProductWrite } from '@/lib/auth';
 import { classifyCompany } from '@/lib/company-classify';
 import { getDb } from '@/lib/db';
 
@@ -21,12 +21,7 @@ type CompanyFileRow = {
 };
 
 function authorized(request: Request) {
-  const token = process.env.INTERNAL_INGEST_TOKEN;
-  const bearer = request.headers.get('authorization');
-  if (token && bearer === `Bearer ${token}`) return true;
-  if (isAppUser(request)) return true;
-  if (demoAccessEnabled()) return true;
-  return false;
+  return Boolean(authorizeProductWrite(request));
 }
 
 function companiesJsonPath() {
