@@ -43,6 +43,9 @@ import './company-detail.css';
 const VOICE_ENDPOINT_MS = 1600;
 /** Voice conversation: nothing heard this long after listen start → empty turn. */
 const VOICE_NO_SPEECH_MS = 8000;
+/** Consecutive empty listen turns before idle-exit toast (≈ 2 × VOICE_NO_SPEECH_MS). */
+const VOICE_IDLE_EMPTY_TURNS = 2;
+const VOICE_IDLE_EXIT_TOAST = '长时间未互动，语音交互已退出';
 /** Barge-in: first ASR partial at least this many chars interrupts TTS / ask. */
 const VOICE_BARGE_MIN_CHARS = 2;
 
@@ -1253,8 +1256,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         return;
       }
       voiceEmptyTurnsRef.current += 1;
-      if (voiceEmptyTurnsRef.current >= 2) {
-        endVoiceConversation('没听到声音，已退出语音');
+      if (voiceEmptyTurnsRef.current >= VOICE_IDLE_EMPTY_TURNS) {
+        endVoiceConversation(VOICE_IDLE_EXIT_TOAST);
         return;
       }
       resumeVoiceConversation();
