@@ -2013,7 +2013,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                       }
                     }}
                   >
-                    <Icon name="mic" size={16} className="cd-send-icon" />
+                    <Icon name="waveform" size={16} className="cd-send-icon" />
                   </button>}
           </div>
           {memoryLoading && <small>正在恢复历史会话…</small>}</form>

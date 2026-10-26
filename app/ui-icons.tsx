@@ -54,11 +54,14 @@ const icons = {
       <path d="M18 14v4H6V6h4" />
     </>
   ),
-  mic: (
+  /** Voice interaction: waveform bars (not a speaker / one-way TTS glyph). */
+  waveform: (
     <>
-      <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
-      <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
-      <path d="M12 18v3" />
+      <path d="M4 9v6" />
+      <path d="M8 6v12" />
+      <path d="M12 3v18" />
+      <path d="M16 6v12" />
+      <path d="M20 9v6" />
     </>
   ),
   search: (
