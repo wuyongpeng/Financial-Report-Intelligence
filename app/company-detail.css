@@ -72,6 +72,10 @@
 .cd-rail>span{writing-mode:vertical-rl;letter-spacing:.16em;font-size:12px;color:#7d8b9f}
 .cd-rail-left{order:-1}
 .cd-rail-right{order:1}
+.cd-rail-middle{order:0;flex:0 0 46px}
+.cd-middle-collapsed .cd-dashboard{display:none}
+.cd-pane-note{font-size:12px;color:var(--cd-muted)}
+.cd-dock:disabled,.cd-dock:disabled:hover{opacity:.45;cursor:not-allowed;background:none;color:#a0aec0}
 .cd-source-collapsed .cd-source-slot{display:none}
 .cd-columns{position:relative}
 
@@ -96,6 +100,7 @@
   .cd-gutter{display:none!important}
   .cd-source-drawer.cd-sources{width:100%}
   .cd-rail{display:none}
+  .cd-middle-collapsed .cd-dashboard{display:flex}
 }
 
 /* Flex ratios come from inline styles (~25/48/25); gutters are fixed. */

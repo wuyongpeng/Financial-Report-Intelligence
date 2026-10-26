@@ -36,6 +36,7 @@ import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFli
 import { parseVoiceNavIntent, pickVoiceHomeLine } from '@/lib/voice/nav-intent';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
+import { paneCollapseGate } from '@/lib/pane-collapse';
 import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer } from '@/lib/voice/client-tts';
@@ -268,6 +269,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [feedbackError, setFeedbackError] = useState('');
   const [chatCollapsed, setChatCollapsed] = useState(false);
+  const [middleCollapsed, setMiddleCollapsed] = useState(false);
   // Session column ratios (~25 / 48 / 25); gutters are fixed px outside the %.
   const SOURCE_DEFAULT = 25;
   const SOURCE_WIDE = 40;
@@ -2183,20 +2185,32 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const el = columnsRef.current;
     if (!drag || !el) return;
     const gutter = 7, rail = 46, pad = 24;
-    const nGutters = (!sourceCollapsed && !chatCollapsed) ? 2 : ((!sourceCollapsed || !chatCollapsed) ? 1 : 0);
-    const rails = (sourceCollapsed ? rail : 0) + (chatCollapsed ? rail : 0);
+    // When middle is collapsed, at most one resize gutter remains (source↔chat).
+    const nGutters = middleCollapsed
+      ? ((!sourceCollapsed && !chatCollapsed) ? 1 : 0)
+      : ((!sourceCollapsed && !chatCollapsed) ? 2 : ((!sourceCollapsed || !chatCollapsed) ? 1 : 0));
+    const rails = (sourceCollapsed ? rail : 0) + (middleCollapsed ? rail : 0) + (chatCollapsed ? rail : 0);
     const usable = Math.max(el.clientWidth - pad - nGutters * gutter - rails, 1);
     const dxPct = (e.clientX - drag.startX) / usable * 100;
     const minS = Math.min(40, 200 / usable * 100), minC = Math.min(40, 220 / usable * 100), minM = Math.min(50, 360 / usable * 100);
     if (drag.side === 'source') {
-      let source = drag.source + dxPct;
-      let middle = drag.middle - dxPct;
-      if (source < minS) { middle -= (minS - source); source = minS; }
-      if (middle < minM) { source -= (minM - middle); middle = minM; }
-      if (!chatCollapsed && source + middle + drag.chat > 100.01) {
-        middle = 100 - source - drag.chat;
+      if (middleCollapsed) {
+        // Source↔chat resize while overview is a rail.
+        let source = drag.source + dxPct;
+        let chat = drag.chat - dxPct;
+        if (source < minS) { chat -= (minS - source); source = minS; }
+        if (chat < minC) { source -= (minC - chat); chat = minC; }
+        setColRatios({ source, middle: drag.middle, chat });
+      } else {
+        let source = drag.source + dxPct;
+        let middle = drag.middle - dxPct;
+        if (source < minS) { middle -= (minS - source); source = minS; }
+        if (middle < minM) { source -= (minM - middle); middle = minM; }
+        if (!chatCollapsed && source + middle + drag.chat > 100.01) {
+          middle = 100 - source - drag.chat;
+        }
+        setColRatios({ source, middle, chat: drag.chat });
       }
-      setColRatios({ source, middle, chat: drag.chat });
     } else {
       let chat = drag.chat - dxPct;
       let middle = drag.middle + dxPct;
@@ -2212,14 +2226,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const highlightRange = sourceText && textHighlight ? sourceRange(sourceText, textHighlight) : null;
   // Trailing control: send arrow as soon as there is typed text or any AI-analysis clip.
   const canSend = question.trim().length > 0 || clips.length > 0;
-  return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''}`} >
+  const collapseGate = paneCollapseGate({ source: sourceCollapsed, middle: middleCollapsed, chat: chatCollapsed });
+  return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''} ${middleCollapsed?'cd-middle-collapsed':''}`} >
     <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div>{onApprove && selected.status !== 'online' && <div className="cd-head-actions"><button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button></div>}</header>
     {error && <div role="alert" className="cd-error">{error}</div>}
-    <nav className="cd-mobile-tabs" aria-label="详情页分栏">{[['sources','来源'],['dashboard','数据概览'],['chat','对话']].map(([id,label]) => <button key={id} className={mobilePane===id?'active':''} onClick={()=>{setMobilePane(id);if(id==='chat')setChatCollapsed(false);if(id==='sources')setSourceCollapsed(false);}}>{label}</button>)}</nav>
+    <nav className="cd-mobile-tabs" aria-label="详情页分栏">{[['sources','来源'],['dashboard','数据概览'],['chat','对话']].map(([id,label]) => <button key={id} className={mobilePane===id?'active':''} onClick={()=>{setMobilePane(id);if(id==='chat')setChatCollapsed(false);if(id==='sources')setSourceCollapsed(false);if(id==='dashboard')setMiddleCollapsed(false);}}>{label}</button>)}</nav>
     <div className="cd-columns" ref={columnsRef}>
       <div id="cd-source-panel" className={`cd-source-slot ${mobilePane==='sources'?'mobile-active':''}`} style={!sourceCollapsed ? { flex: `${colRatios.source} 1 0%`, minWidth: 200 } : undefined}>
       <aside className={`cd-sources cd-pane ${sourceDrawerOpen?'cd-source-drawer':''}`} role={sourceDrawerOpen?'dialog':undefined} aria-modal={sourceDrawerOpen?false:undefined} aria-label={sourceDrawerOpen?'财报原文阅读抽屉':'财报来源'} ref={sourcePaneRef}>
-        <div className="cd-pane-head cd-source-head"><h2><span>◇</span> 来源</h2><div className="cd-pane-tools"><div className="cd-pdf-search"><input type="search" className="cd-pdf-search-input" value={pdfSearch} placeholder="搜原文" aria-label="页内搜索原文" aria-expanded={pdfSearchOpen} aria-controls="cd-pdf-search-results" onChange={e=>runPdfSearch(e.target.value)} onFocus={()=>{ if (pdfSearch.trim()) setPdfSearchOpen(true); }} onKeyDown={e=>{ if (e.key==='Enter' && pdfSearchHits[0]) { e.preventDefault(); goPdfSearchHit(pdfSearchHits[0]); } }} /><button type="button" className="cd-pdf-search-clear" hidden={!pdfSearch} aria-label="清空搜索" title="清空搜索" onClick={()=>{ setPdfSearch(''); setPdfSearchHits([]); setPdfSearchOpen(false); setSearchHighlight(null); }}>×</button>{pdfSearchOpen && pdfSearch.trim() ? <div id="cd-pdf-search-results" className="cd-pdf-search-results" role="listbox" aria-label="搜索命中页">{pdfSearchHits.length===0 ? <div className="cd-pdf-search-empty" role="status">无命中</div> : pdfSearchHits.map(hit=><button key={hit.page} type="button" role="option" className={searchHighlight?.page===hit.page?'is-active':''} onClick={()=>goPdfSearchHit(hit)}><b>{pageLabel(hit.page)}</b><small>{hit.snippet}</small></button>)}</div> : null}</div><button type="button" className="cd-dock cd-source-width" aria-label={colRatios.source > SOURCE_DEFAULT + 2 ? '恢复默认宽度' : '加宽来源栏'} title={colRatios.source > SOURCE_DEFAULT + 2 ? '快速回到默认宽度（约25%）' : '加宽到来源阅读宽度（约40%）'} onClick={toggleSourceWidth}><Icon name={colRatios.source > SOURCE_DEFAULT + 2 ? 'chevronsLeft' : 'chevronsRight'} size={16} /></button><button className="cd-dock" aria-label="收起来源栏" title="收起来源栏（可用中间分隔条再调宽）" aria-controls="cd-source-panel" onClick={()=>{setSourceCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="left" /></button></div></div>
+        <div className="cd-pane-head cd-source-head"><h2><span>◇</span> 来源</h2><div className="cd-pane-tools"><div className="cd-pdf-search"><input type="search" className="cd-pdf-search-input" value={pdfSearch} placeholder="搜原文" aria-label="页内搜索原文" aria-expanded={pdfSearchOpen} aria-controls="cd-pdf-search-results" onChange={e=>runPdfSearch(e.target.value)} onFocus={()=>{ if (pdfSearch.trim()) setPdfSearchOpen(true); }} onKeyDown={e=>{ if (e.key==='Enter' && pdfSearchHits[0]) { e.preventDefault(); goPdfSearchHit(pdfSearchHits[0]); } }} /><button type="button" className="cd-pdf-search-clear" hidden={!pdfSearch} aria-label="清空搜索" title="清空搜索" onClick={()=>{ setPdfSearch(''); setPdfSearchHits([]); setPdfSearchOpen(false); setSearchHighlight(null); }}>×</button>{pdfSearchOpen && pdfSearch.trim() ? <div id="cd-pdf-search-results" className="cd-pdf-search-results" role="listbox" aria-label="搜索命中页">{pdfSearchHits.length===0 ? <div className="cd-pdf-search-empty" role="status">无命中</div> : pdfSearchHits.map(hit=><button key={hit.page} type="button" role="option" className={searchHighlight?.page===hit.page?'is-active':''} onClick={()=>goPdfSearchHit(hit)}><b>{pageLabel(hit.page)}</b><small>{hit.snippet}</small></button>)}</div> : null}</div><button type="button" className="cd-dock cd-source-width" aria-label={colRatios.source > SOURCE_DEFAULT + 2 ? '恢复默认宽度' : '加宽来源栏'} title={colRatios.source > SOURCE_DEFAULT + 2 ? '快速回到默认宽度（约25%）' : '加宽到来源阅读宽度（约40%）'} onClick={toggleSourceWidth}><Icon name={colRatios.source > SOURCE_DEFAULT + 2 ? 'chevronsLeft' : 'chevronsRight'} size={16} /></button><button className="cd-dock" aria-label="收起来源栏" title={collapseGate.canCollapseSource ? '收起来源栏（可用中间分隔条再调宽）' : '至少保留一栏展开'} aria-controls="cd-source-panel" disabled={!collapseGate.canCollapseSource} onClick={()=>{if(!collapseGate.canCollapseSource)return;setSourceCollapsed(true);setMobilePane(middleCollapsed?'chat':'dashboard');}}><DockIcon side="left" /></button></div></div>
         <details className="cd-outline"><summary><svg className="cd-outline-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg><b>提纲导航</b><span>{outline.outline.length} 个章节</span></summary><nav>{outline.outline.map(o=><button key={o.id} onClick={()=>cite({page:o.page,quote:o.highlight})}><b>{o.title}</b><span className="cd-outline-page">{pageLabel(o.page)}</span></button>)}</nav></details>
         <div className="cd-source-toolbar">
           <label><select aria-label="原文模式" value={sourceMode} onChange={e=>{const m=e.target.value as 'pdf'|'text';setSourceMode(m);if(m==='pdf')pageEnter.current='start';}}><option value="pdf">原始PDF</option><option value="text">原文文本</option></select></label>
@@ -2254,9 +2269,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF <Icon name="external" size={12} /></a><button onClick={()=>{draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
       </aside>
       </div>
-      {!sourceCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整来源栏宽度" onPointerDown={e=>onGutterDown('source', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
-      <main className={`cd-dashboard cd-pane ${mobilePane==='dashboard'?'mobile-active':''}`} aria-label="概览" style={{ flex: `${colRatios.middle} 1 0%`, minWidth: 360 }}>
-        <div className="cd-pane-head"><h2><span>◫</span> 概览</h2><span>基于公开财报生成</span></div>
+      {!sourceCollapsed && !middleCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整来源栏宽度" onPointerDown={e=>onGutterDown('source', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
+      {!sourceCollapsed && middleCollapsed && !chatCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整来源与对话栏宽度" onPointerDown={e=>onGutterDown('source', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
+      <main id="cd-dashboard-panel" className={`cd-dashboard cd-pane ${mobilePane==='dashboard'?'mobile-active':''}`} aria-label="概览" style={!middleCollapsed ? { flex: `${colRatios.middle} 1 0%`, minWidth: 360 } : undefined}>
+        <div className="cd-pane-head"><h2><span>◫</span> 概览</h2><div className="cd-pane-tools"><span className="cd-pane-note">基于公开财报生成</span><button type="button" className="cd-dock" aria-label="收起概览栏" title={collapseGate.canCollapseMiddle ? '收起概览栏' : '至少保留一栏展开'} aria-controls="cd-dashboard-panel" disabled={!collapseGate.canCollapseMiddle} onClick={()=>{if(!collapseGate.canCollapseMiddle)return;setMiddleCollapsed(true);setMobilePane(chatCollapsed?'sources':'chat');}}><DockIcon side="right" /></button></div></div>
         <div className="cd-dashboard-scroll" ref={overviewRef} onDoubleClick={onOverviewDblClick}>
           <div className="cd-overview-top">
           {overviewPick && <div className="cd-pick-bar" style={{ top: overviewPick.y, left: overviewPick.x }}>
@@ -2491,9 +2507,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           <p className="cd-data-note">数据来自已解析财报 · 数字旁角标可定位原文 · 未复核指标请结合 PDF 核验</p>
         </div>
       </main>
-      {!chatCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整对话栏宽度" onPointerDown={e=>onGutterDown('chat', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
+      {middleCollapsed && <div className="cd-rail cd-rail-middle"><button type="button" aria-label="展开概览栏" title="展开概览栏" aria-expanded={false} aria-controls="cd-dashboard-panel" onClick={()=>{setMiddleCollapsed(false);setMobilePane('dashboard');}}><DockIcon side="right" /></button><span>概览</span></div>}
+      {!chatCollapsed && !middleCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整对话栏宽度" onPointerDown={e=>onGutterDown('chat', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
       <aside id="cd-chat-panel" className={`cd-chat cd-pane ${mobilePane==='chat'?'mobile-active':''}`} aria-label="财报对话" style={!chatCollapsed ? { flex: `${colRatios.chat} 1 0%`, minWidth: 220 } : undefined}>
-        <div className="cd-pane-head"><h2><span>✧</span> 追问</h2><div className="cd-chat-actions"><button aria-label="新建对话" title="新建对话" disabled={asking||memoryLoading} onClick={()=>void newConversation()}><Icon name="plus" size={16} /></button><button className="cd-dock" aria-label="收起对话" title="收起对话" onClick={()=>{setChatCollapsed(true);setMobilePane('dashboard');}}><DockIcon side="right" /></button></div></div>
+        <div className="cd-pane-head"><h2><span>✧</span> 追问</h2><div className="cd-chat-actions"><button aria-label="新建对话" title="新建对话" disabled={asking||memoryLoading} onClick={()=>void newConversation()}><Icon name="plus" size={16} /></button><button className="cd-dock" aria-label="收起对话" title={collapseGate.canCollapseChat ? '收起对话' : '至少保留一栏展开'} disabled={!collapseGate.canCollapseChat} onClick={()=>{if(!collapseGate.canCollapseChat)return;setChatCollapsed(true);setMobilePane(middleCollapsed?'sources':'dashboard');}}><DockIcon side="right" /></button></div></div>
         <div className="cd-chat-scroll">
           {messages.length === 0 && <div className="cd-ask-empty">
             <aside className="cd-ask-tips">
