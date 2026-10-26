@@ -669,6 +669,12 @@ export default function CrawlOverview() {
     error?: string;
   }> | null>(null);
   const [llmProbeError, setLlmProbeError] = useState('');
+  const [voiceProbe, setVoiceProbe] = useState<{
+    apiKeyConfigured: boolean;
+    asr: { ok: boolean; ms: number; host: string; error?: string };
+    tts: { ok: boolean; ms: number; host: string; error?: string };
+    entryHint?: string;
+  } | null>(null);
   const settingsOpenGen = useRef(0);
 
   const refreshCoverage = useCallback(async () => {
@@ -1197,9 +1203,14 @@ export default function CrawlOverview() {
   async function probeLlm() {
     setLlmProbeBusy(true);
     setLlmProbeError('');
+    setVoiceProbe(null);
     try {
-      const response = await fetch('/api/crawl/llm-probe', { method: 'POST', cache: 'no-store' });
-      const payload = await response.json() as {
+      const [llmResponse, voiceResponse] = await Promise.all([
+        fetch('/api/crawl/llm-probe', { method: 'POST', cache: 'no-store' }),
+        fetch('/api/crawl/voice-probe', { method: 'POST', cache: 'no-store' }),
+      ]);
+
+      const payload = await llmResponse.json() as {
         ok?: boolean;
         error?: string;
         results?: Array<{
@@ -1212,20 +1223,49 @@ export default function CrawlOverview() {
           error?: string;
         }>;
       };
-      if (!response.ok) {
+      if (!llmResponse.ok) {
         setLlmProbeError(payload.error ?? '检测失败');
         setLlmProbeResults(null);
-        return;
-      }
-      if (payload.error && !payload.results?.length) {
+      } else if (payload.error && !payload.results?.length) {
         setLlmProbeError(payload.error);
         setLlmProbeResults([]);
-        return;
+      } else {
+        setLlmProbeResults(payload.results ?? []);
       }
-      setLlmProbeResults(payload.results ?? []);
+
+      try {
+        const voicePayload = await voiceResponse.json() as {
+          apiKeyConfigured?: boolean;
+          asr?: { ok: boolean; ms: number; host: string; error?: string };
+          tts?: { ok: boolean; ms: number; host: string; error?: string };
+          entryHint?: string;
+          error?: string;
+        };
+        if (!voiceResponse.ok || !voicePayload.asr || !voicePayload.tts) {
+          setVoiceProbe({
+            apiKeyConfigured: Boolean(voicePayload.apiKeyConfigured),
+            asr: { ok: false, ms: 0, host: '—', error: voicePayload.error ?? '语音探测失败' },
+            tts: { ok: false, ms: 0, host: '—', error: voicePayload.error ?? '语音探测失败' },
+          });
+        } else {
+          setVoiceProbe({
+            apiKeyConfigured: Boolean(voicePayload.apiKeyConfigured),
+            asr: voicePayload.asr,
+            tts: voicePayload.tts,
+            entryHint: voicePayload.entryHint,
+          });
+        }
+      } catch (voiceErr) {
+        setVoiceProbe({
+          apiKeyConfigured: false,
+          asr: { ok: false, ms: 0, host: '—', error: `语音探测异常：${String(voiceErr)}` },
+          tts: { ok: false, ms: 0, host: '—', error: `语音探测异常：${String(voiceErr)}` },
+        });
+      }
     } catch (err) {
       setLlmProbeError(`网络异常：${String(err)}`);
       setLlmProbeResults(null);
+      setVoiceProbe(null);
     } finally {
       setLlmProbeBusy(false);
     }
@@ -2513,7 +2553,7 @@ export default function CrawlOverview() {
                     {llmProbeBusy ? '检测中…' : '检测连接'}
                   </button>
                 </div>
-                <p className="co-llm-probe-lead">向已配置模型发送「直接回复ok」，逐个检查连通性。</p>
+                <p className="co-llm-probe-lead">检测已配置模型，并短连上游语音 ASR/TTS 网关（复用 LLM_API_KEY）。</p>
                 {llmProbeError ? <p className="co-llm-probe-error" role="status">{llmProbeError}</p> : null}
                 {llmProbeResults ? (
                   <ul className="co-llm-probe-list">
@@ -2524,6 +2564,31 @@ export default function CrawlOverview() {
                         <em>{item.ok ? `正常 · ${item.latencyMs}ms${item.reply ? ` · ${item.reply}` : ''}` : (item.error || '异常')}</em>
                       </li>
                     )) : <li className="bad">未配置可用模型</li>}
+                  </ul>
+                ) : null}
+                {voiceProbe ? (
+                  <ul className="co-llm-probe-list" aria-label="语音 ASR/TTS">
+                    <li className={voiceProbe.apiKeyConfigured ? 'ok' : 'bad'}>
+                      <b>语音鉴权</b>
+                      <span className="co-llm-probe-host">LLM_API_KEY</span>
+                      <em>{voiceProbe.apiKeyConfigured ? '已配置' : '未配置（语音不可用）'}</em>
+                    </li>
+                    <li className={voiceProbe.asr.ok ? 'ok' : 'bad'}>
+                      <b>语音 ASR</b>
+                      <span className="co-llm-probe-host">{voiceProbe.asr.host}</span>
+                      <em>{voiceProbe.asr.ok ? `正常 · ${voiceProbe.asr.ms}ms` : (voiceProbe.asr.error || '异常')}</em>
+                    </li>
+                    <li className={voiceProbe.tts.ok ? 'ok' : 'bad'}>
+                      <b>语音 TTS</b>
+                      <span className="co-llm-probe-host">{voiceProbe.tts.host}</span>
+                      <em>{voiceProbe.tts.ok ? `正常 · ${voiceProbe.tts.ms}ms` : (voiceProbe.tts.error || '异常')}</em>
+                    </li>
+                    {voiceProbe.asr.ok && voiceProbe.tts.ok && voiceProbe.entryHint ? (
+                      <li>
+                        <b>入口提示</b>
+                        <em>{voiceProbe.entryHint}</em>
+                      </li>
+                    ) : null}
                   </ul>
                 ) : null}
               </section>

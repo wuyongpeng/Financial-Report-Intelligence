@@ -55,7 +55,12 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
       chunks.push(event.data as ArrayBuffer);
     };
 
-    ws.onerror = () => finish(new Error('语音朗读未连通（服务器未启用语音通道或网关不可达）'));
+    ws.onerror = () =>
+      finish(
+        new Error(
+          '语音朗读通道未接通：浏览器连不上本站 /api/voice/tts（入口未放行 WebSocket，或非 HTTPS）。可在「信源」设置 → AI 连接性检测上游',
+        ),
+      );
     ws.onclose = () => {
       if (!settled) playAndFinish();
     };

@@ -42,6 +42,13 @@ export function openAsrSession(onEvent: (ev: AsrEvent) => void): AsrSession {
 
   const ws = new WebSocket(voiceWsUrl('/api/voice/asr'));
   ws.binaryType = 'arraybuffer';
+  let ready = false;
+  let reported = false;
+  const reportError = (message: string) => {
+    if (reported) return;
+    reported = true;
+    onEvent({ type: 'error', message });
+  };
 
   ws.onmessage = (event) => {
     if (typeof event.data !== 'string') return;
@@ -51,17 +58,25 @@ export function openAsrSession(onEvent: (ev: AsrEvent) => void): AsrSession {
     } catch {
       return;
     }
-    if (msg.type === 'ready') onEvent({ type: 'ready' });
-    else if (msg.type === 'partial') onEvent({ type: 'partial', text: msg.text ?? '' });
+    if (msg.type === 'ready') {
+      ready = true;
+      onEvent({ type: 'ready' });
+    } else if (msg.type === 'partial') onEvent({ type: 'partial', text: msg.text ?? '' });
     else if (msg.type === 'final') onEvent({ type: 'final', text: msg.text ?? '' });
-    else if (msg.type === 'error') onEvent({ type: 'error', message: msg.message ?? 'ASR 错误' });
+    else if (msg.type === 'error') reportError(msg.message ?? 'ASR 错误');
   };
 
   ws.onerror = () =>
-    onEvent({
-      type: 'error',
-      message: '语音服务未连通（服务器未启用语音通道或网关不可达）',
-    });
+    reportError(
+      '语音通道未接通：浏览器连不上本站 /api/voice/asr（入口未放行 WebSocket，或非 HTTPS）。可在「信源」设置 → AI 连接性检测上游网关',
+    );
+
+  ws.onclose = (ev) => {
+    if (ready || reported) return;
+    reportError(
+      `语音通道关闭（code ${ev.code}）。若「信源」里 ASR 上游正常，多半是入口网关未 Upgrade WebSocket`,
+    );
+  };
 
   return {
     sendPcm(chunk) {
