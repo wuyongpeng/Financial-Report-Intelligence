@@ -33,7 +33,7 @@ for(const truth of truths) {
  assert.equal(answer.status,200);const events=await answer.text();assert.ok(events.includes('[DONE]'));assert.ok(events.includes('evidence'));assert.ok(events.includes('90703260964.48')||report.code!=='600519','Revenue answer must use parsed amount');
  const scope=await fetch(`${base}/api/chat`,{method:'POST',headers,body:JSON.stringify({reportId:report.id,question:'2099年的营业收入是多少？'})});
  assert.match((await scope.json()).answer,/暂无法回答/);
- console.log(`PASS ${truth.companyName}: four source-verified metrics, PDF, outline, analysis, history, streaming Q&A, out-of-scope refusal`);
+ console.log(`PASS ${truth.companyName}: four source-verified metrics, PDF, outline, analysis, history, streaming Q&A, soft-scope / investment OOS`);
 }
 const anonymous=await fetch(`${base}/api/reports`);assert.equal(anonymous.status,401);
 console.log('PASS unauthenticated data access denied');

@@ -76,8 +76,8 @@ test('QuestionPlanner produces an explicit, testable retrieval plan', () => {
   assert.equal(meta.needsPeers, false);
 
   const weather = planQuestion({ question: '北京明天啥天气', history: [], watched: [], currentCode: '000333' });
-  assert.equal(weather.outOfScope, true);
-  assert.equal(weather.outOfScopeKind, 'off-topic');
+  assert.equal(weather.outOfScope, false);
+  assert.equal(weather.softScopeHint, true);
 
   const followup = planQuestion({
     question: '为什么是空的',
@@ -179,10 +179,24 @@ test('retrieveContext preserves out-of-scope and insufficient-evidence policies'
     reportId: 'current', question: '北京明天啥天气', history: [], repository,
     passageRetriever: new KeywordPassageRetriever(),
   });
-  assert.equal(weather.mode, 'out-of-scope');
-  assert.match(weather.directAnswer ?? '', /超出当前财报范围/);
-  assert.doesNotMatch(weather.directAnswer ?? '', /尚未完成 AI 归纳|每股收益|ROE|营业收入/);
-  assert.equal(weather.fallback, weather.directAnswer);
+  assert.equal(weather.softScopeHint, true);
+  assert.notEqual(weather.mode, 'out-of-scope');
+  assert.equal(weather.directAnswer, undefined);
+  assert.doesNotMatch(weather.fallback ?? '', /请换一个关于本期业绩/);
+
+  const unitFollow = await retrieveContext({
+    reportId: 'current',
+    question: '单位是多少',
+    history: [
+      { role: 'user', content: '星宇股份的劳务支出费用是多少' },
+      { role: 'assistant', content: '劳务外包支出见附注。' },
+    ],
+    repository,
+    passageRetriever: new KeywordPassageRetriever(),
+  });
+  assert.equal(unitFollow.softScopeHint, false);
+  assert.notEqual(unitFollow.mode, 'out-of-scope');
+  assert.match(unitFollow.retrievalQuestion, /劳务支出/);
 
   const missing = new FakeRetrievalRepository();
   missing.report = null;

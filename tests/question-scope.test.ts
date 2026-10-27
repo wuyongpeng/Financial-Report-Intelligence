@@ -12,7 +12,7 @@ import {
   planQuestion,
   retrievalQuestion,
 } from '../modules/retrieval/application/question-planner';
-import { outOfScopeReply } from '../modules/retrieval/application/answer-policy';
+import { ensureSoftScopeFooter, outOfScopeReply, SOFT_SCOPE_FOOTER } from '../modules/retrieval/application/answer-policy';
 
 test('meta-model phrasings are detected without false-positive on 估值模型 alone when not asking which LLM', () => {
   assert.equal(isMetaModelQuestion('当前用的哪个大语言模型'), true);
@@ -48,7 +48,8 @@ test('classifyQuestionScope + outOfScopeReply cover meta, weather, and finance c
     metricNames: [],
     explicitPage: null,
   });
-  assert.deepEqual(weather, { outOfScope: true, outOfScopeKind: 'off-topic' });
+  assert.equal(weather.outOfScope, false);
+  assert.equal(weather.softScopeHint, true);
 
   const finance = classifyQuestionScope({
     originalQuestion: '营业收入数值是多少？',
@@ -68,7 +69,8 @@ test('classifyQuestionScope + outOfScopeReply cover meta, weather, and finance c
     const reply = outOfScopeReply('meta-model');
     assert.match(reply, /thudm\/glm-5\.2/);
     assert.doesNotMatch(reply, /尚未完成 AI 归纳|每股收益|ROE/);
-    assert.match(outOfScopeReply('off-topic'), /超出当前财报范围/);
+    assert.equal(outOfScopeReply('off-topic'), SOFT_SCOPE_FOOTER);
+    assert.match(ensureSoftScopeFooter('北京明天多云。'), /北京明天多云。[\s\S]*超出当前财报范围/);
   } finally {
     for (const key of keys) {
       const value = previous[key];
@@ -117,4 +119,38 @@ test('short anaphoric follow-ups still merge prior finance topic', () => {
   assert.equal(isAnaphoricFollowUp('具体原因呢？'), true);
   assert.match(retrievalQuestion('具体原因呢？', history), /净利润为什么下降/);
   assert.equal(retrievalQuestion('营业收入是多少？', history), '营业收入是多少？');
+});
+
+test('单位是多少 after a report ask is anaphoric in-scope — never hard OOS', () => {
+  const history = [
+    { role: 'user' as const, content: '星宇股份的劳务支出费用是多少' },
+    { role: 'assistant' as const, content: '报告披露劳务外包约若干万元。' },
+  ];
+  assert.equal(isAnaphoricFollowUp('单位是多少'), true);
+  assert.equal(isAnaphoricFollowUp('哪一页'), true);
+  assert.equal(isAnaphoricFollowUp('什么意思'), true);
+  const merged = retrievalQuestion('单位是多少', history);
+  assert.match(merged, /劳务支出费用是多少/);
+  assert.match(merged, /当前追问：单位是多少/);
+  const plan = planQuestion({
+    question: '单位是多少',
+    history,
+    watched: [],
+    currentCode: '601799',
+  });
+  assert.equal(plan.outOfScope, false);
+  assert.equal(Boolean(plan.softScopeHint), false);
+  assert.match(plan.retrievalQuestion, /劳务支出/);
+});
+
+test('weather is soft-scope — not hard refuse-only', () => {
+  const plan = planQuestion({
+    question: '北京明天啥天气',
+    history: [],
+    watched: [],
+    currentCode: '000333',
+  });
+  assert.equal(plan.outOfScope, false);
+  assert.equal(plan.softScopeHint, true);
+  assert.equal(isClearOffTopicQuestion('北京明天啥天气'), true);
 });

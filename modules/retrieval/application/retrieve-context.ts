@@ -117,6 +117,7 @@ export async function retrieveContext(input: {
       fallback: directAnswer,
       directAnswer,
       mode: 'out-of-scope',
+      softScopeHint: false,
       metrics: [],
       peers: [],
     };
@@ -226,6 +227,9 @@ export async function retrieveContext(input: {
   const relatedPeriods = [...new Set(metrics.map(metric => metric.period))].filter(Boolean);
   const structuredContext = [
     `当前报告：${target.companyName}（${target.code}），${period || '报告期尚未解析'}，行业 ${target.industry}。`,
+    plan.softScopeHint
+      ? '本轮问题与财报关联度可能偏低：请先用一两句简短有用的话回答用户（含常识性问题如天气），再在末尾加软提示；边界不要过硬，天气/宏观因素也可能影响业绩。不要编造本份报告里没有的财务数字。'
+      : '',
     '以下数据来自服务端数据库，可含同公司其他报告期及同业已入库财报；不同公司、不同报告期严格分开。金额为原单位，ROE 变化若以差值表达请用百分点。',
     related.length ? `本轮已附带 ${related.length} 份相关财报（同公司跨期 ${related.filter(report => report.code === target.code).length} 份，同业/点名公司 ${related.filter(report => report.code !== target.code).length} 份）。可用报告期：${relatedPeriods.join('、') || '无'}。` : '',
     '同比仅当报告期后缀相同（如 2026Q1 对 2025Q1）。年报与季报可作补充参考，不得称为同比。若已提供上期或同业数据，评估业绩好坏应使用这些对比，不要以「仅有单期」为由拒绝回答。',
@@ -268,6 +272,7 @@ export async function retrieveContext(input: {
     fallback,
     directAnswer: decision.directAnswer,
     mode: decision.mode,
+    softScopeHint: Boolean(plan.softScopeHint),
     metrics: current.map(metric => ({
       announcement_id: metric.reportId,
       metric: metric.metric,

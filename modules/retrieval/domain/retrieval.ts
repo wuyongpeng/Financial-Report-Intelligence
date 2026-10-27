@@ -68,6 +68,11 @@ export type QueryPlan = {
   outOfScope: boolean;
   /** Present when outOfScope is true; drives the direct-answer copy. */
   outOfScopeKind?: OutOfScopeKind;
+  /**
+   * Low report-relevance (weather / chitchat / unclear): answer briefly via LLM,
+   * then append a soft footer. Never a hard refuse-only reply.
+   */
+  softScopeHint?: boolean;
 };
 
 export type RetrievedPassage = Evidence & { content: string };
@@ -83,6 +88,8 @@ export type RetrievalContext = {
   fallback: string;
   directAnswer?: string;
   mode: string;
+  /** Soft off-topic / low relevance — append soft footer after a helpful answer. */
+  softScopeHint?: boolean;
   metrics: Array<{
     announcement_id: string;
     metric: string;

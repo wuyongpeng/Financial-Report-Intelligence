@@ -39,6 +39,13 @@ export function isAnaphoricFollowUp(question: string) {
   }
   if (/那它|该指标|上述|这项|这张|具体原因呢|那为什么|为何如此/.test(q)) return true;
   if (/^(为什么|为何)[？?]?$/.test(q)) return true;
+  // Clarifying follow-ups that inherit the prior report topic (单位 / 多少 / 哪一页…).
+  // Never treat these as bare off-topic — they must merge prior finance context.
+  if (/^(单位|金额|数值|口径|币种|含义|页码|出处)(是|为)?(多少|什么|啥|哪|哪个)?/.test(q)) return true;
+  if (/^(多少|哪一?页|哪页|第几页|什么意思|啥意思|同比呢?|环比呢?|具体呢?|呢)[？?！!。.]*$/.test(q)) return true;
+  if (q.length <= 16 && /单位|多少|哪一?页|什么意思|同比|环比/.test(q) && !hasFinanceSignal(q)) {
+    return true;
+  }
   // Very short deixis without its own metric/finance topic.
   const hasTopic = Object.values(METRIC_PATTERNS).some(pattern => pattern.test(q));
   if (!hasTopic && !hasFinanceSignal(q) && /^(那|这个|该项|它|为啥)/.test(q) && q.length < 24) {
@@ -153,20 +160,24 @@ export function classifyQuestionScope(input: {
   summary?: boolean;
   metricNames: RetrievalMetricName[];
   explicitPage: number | null;
-}): { outOfScope: boolean; outOfScopeKind?: OutOfScopeKind } {
+}): { outOfScope: boolean; outOfScopeKind?: OutOfScopeKind; softScopeHint?: boolean } {
   const original = input.originalQuestion.trim();
+  // Hard refuse only for investment advice — everything else stays answerable.
   if (INVESTMENT_SCOPE.test(original)) return { outOfScope: true, outOfScopeKind: 'investment' };
+  // Meta-model: answer from config (not a hard reject-only message).
   if (isMetaModelQuestion(original)) return { outOfScope: true, outOfScopeKind: 'meta-model' };
-  if (isClearOffTopicQuestion(original)) return { outOfScope: true, outOfScopeKind: 'off-topic' };
   if (input.summary) return { outOfScope: false };
   if (input.metricNames.length || input.explicitPage != null) return { outOfScope: false };
   // Follow-ups rewrite into retrievalQuestion with prior finance context — treat as in-scope.
   if (hasFinanceSignal(input.retrievalQuestion) || hasFinanceSignal(original)) return { outOfScope: false };
-  //「茅台学院是什么意思」etc. — try PDF text before refusing as chitchat.
+  //「茅台学院是什么意思」etc. — try PDF text before soft-scoping.
   if (isReportEntityQuestion(original) || isReportEntityQuestion(input.retrievalQuestion)) {
     return { outOfScope: false };
   }
-  return { outOfScope: true, outOfScopeKind: 'off-topic' };
+  // Anaphoric clarifiers already merged above via finance signal on retrievalQuestion.
+  // Weather / chitchat / unknown short asks: soft boundary — answer briefly, append note.
+  // Do NOT hard-refuse; El Niño / weather may relate to weather-sensitive earnings.
+  return { outOfScope: false, softScopeHint: true };
 }
 
 export function planQuestion(input: {
@@ -206,5 +217,6 @@ export function planQuestion(input: {
     wantsChangeCalculation: /同比|增长|下降/.test(input.question),
     outOfScope: scope.outOfScope,
     outOfScopeKind: scope.outOfScopeKind,
+    softScopeHint: Boolean(scope.softScopeHint),
   };
 }

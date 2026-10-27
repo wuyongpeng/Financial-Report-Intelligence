@@ -4,6 +4,7 @@ import type { AnswerResult, MemoryMessage } from './conversations';
 import { fetchChatCompletions, withLlmSlot } from './llm-gate';
 import { llmConfigured } from './llm-providers';
 import { historyForModel } from '@/modules/retrieval/application/question-planner';
+import { ensureSoftScopeFooter, SOFT_SCOPE_FOOTER, SOFT_SCOPE_FOOTER_SPOKEN } from '@/modules/retrieval/application/answer-policy';
 
 export type AnswerRewrite = 'detailed' | 'brief' | 'retry';
 
@@ -70,6 +71,16 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
   const style = spoken
     ? '用口语化短句中文回答，优先短、快、直接。禁止表格与多列布局，数字写入句子。不要输出 HTML。'
     : '用简洁中文回答。比较或多列数字时用 Markdown 表格；分层说明可用标题与列表。不要输出 HTML。';
+  const softHint = context.softScopeHint
+    ? (
+      '本轮问题与财报关联度可能偏低（闲聊/天气/常识也可能与天气敏感型业绩相关，边界不要过硬）。'
+      + '先用一两句简短有用的话直接回答用户；不要用「超出范围」整段拒绝作为唯一回复。'
+      + '财务数字仍不得编造：报告未披露就说找不到或未披露。'
+      + (spoken
+        ? `末尾用一句短提示带过：${SOFT_SCOPE_FOOTER_SPOKEN}`
+        : `末尾另起一行加软提示：${SOFT_SCOPE_FOOTER}`)
+    )
+    : '';
   const systemBase = (
     '你是「财报智析 Eva」，严谨友好的中文财报助手。自我介绍时用 Eva，自然简短即可，不必每句自称。'
     + continuity
@@ -79,6 +90,7 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
     + '计算优先使用服务端结果；同比仅当报告期口径相同（如 2026Q1 对 2025Q1）；年报与季报可作参考但不得称为同比。'
     + '本轮若已提供上期或同业数据，评估「好不好」时应使用这些对比，不得以「仅有单期」为由拒绝。'
     + '缺失依据明确回答暂无法回答，不编造原因、排名或页码。不提供投资建议。'
+    + softHint
     + style
   );
   const systemContent = skillAppend ? `${systemBase}\n\n${skillAppend}` : systemBase;
@@ -111,17 +123,30 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
   const rewrite = opts.rewrite;
   const spoken = Boolean(opts.spoken);
   const start = Date.now();
-  const result = (answer: string, mode: string, status: AnswerResult['status'] = 'complete', warnings: string[] = []): AnswerResult => ({
-    answer, mode, status, evidence: validateCitations(answer, context).evidence, durationMs: Date.now() - start, warnings,
-  });
-  if (signal.aborted) return result('', 'cancelled', 'interrupted');
+  const soft = Boolean(context.softScopeHint);
+  const finish = (answer: string, mode: string, status: AnswerResult['status'] = 'complete', warnings: string[] = []): AnswerResult => {
+    const text = soft ? ensureSoftScopeFooter(answer, spoken) : answer;
+    return {
+      answer: text,
+      mode,
+      status,
+      evidence: validateCitations(text, context).evidence,
+      durationMs: Date.now() - start,
+      warnings,
+    };
+  };
+  if (signal.aborted) return finish('', 'cancelled', 'interrupted');
   if (context.directAnswer) {
     const direct = spoken ? formatSpokenDirectAnswer(context.directAnswer) : context.directAnswer;
-    return result(direct, context.mode);
+    return finish(direct, context.mode);
   }
   if (!llmConfigured()) {
+    if (soft) {
+      // No model: still avoid the old hard refuse-only copy; soft note only.
+      return finish(spoken ? SOFT_SCOPE_FOOTER_SPOKEN : SOFT_SCOPE_FOOTER, 'soft-scope', 'complete', ['model-not-configured']);
+    }
     const fb = spoken ? formatSpokenDirectAnswer(context.fallback) : context.fallback;
-    return result(fb, context.mode, 'complete', ['model-not-configured']);
+    return finish(fb, context.mode, 'complete', ['model-not-configured']);
   }
   const setting = Number(process.env.LLM_TIMEOUT_MS ?? 60_000);
   const timeoutMs = Number.isFinite(setting) ? Math.min(Math.max(setting, 1000), 120_000) : 60_000;
@@ -165,16 +190,19 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
           }
         } finally { await reader.cancel().catch(() => undefined); }
       }
-      if (signal.aborted) return result(answer, 'cancelled', 'interrupted');
-      if (!answer) return result(context.fallback, context.mode, 'complete', ['model-empty']);
-      if (truncated) return result(`${answer}\n\n回答未完整生成，请重试。`, 'llm-interrupted', 'interrupted', ['incomplete-answer']);
+      if (signal.aborted) return finish(answer, 'cancelled', 'interrupted');
+      if (!answer) return finish(context.fallback, context.mode, 'complete', ['model-empty']);
+      if (truncated) return finish(`${answer}\n\n回答未完整生成，请重试。`, 'llm-interrupted', 'interrupted', ['incomplete-answer']);
       const citations = validateCitations(answer, context);
-      if (citations.invalid.length || (context.evidence.length && !citations.evidence.length)) return result(context.fallback, context.mode, 'complete', ['citation-validation-failed']);
-      return result(answer, 'llm-rag');
+      // Soft-scope (weather/chitchat) answers need no evidence citations.
+      if (!soft && (citations.invalid.length || (context.evidence.length && !citations.evidence.length))) {
+        return finish(context.fallback, context.mode, 'complete', ['citation-validation-failed']);
+      }
+      return finish(answer, soft ? 'soft-scope' : 'llm-rag');
     }, signal);
   } catch {
-    if (signal.aborted) return result(answer, 'cancelled', 'interrupted');
-    if (answer) return result(`${answer}\n\n回答中断，以上内容尚不完整，请重试。`, 'llm-interrupted', 'interrupted', ['model-interrupted']);
-    return result(context.fallback, context.mode, 'complete', ['model-unavailable']);
+    if (signal.aborted) return finish(answer, 'cancelled', 'interrupted');
+    if (answer) return finish(`${answer}\n\n回答中断，以上内容尚不完整，请重试。`, 'llm-interrupted', 'interrupted', ['model-interrupted']);
+    return finish(context.fallback, context.mode, 'complete', ['model-unavailable']);
   }
 }
