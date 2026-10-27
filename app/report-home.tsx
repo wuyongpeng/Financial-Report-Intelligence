@@ -247,7 +247,6 @@ export default function ReportHome() {
   const [placeholders, setPlaceholders] = useState<string[]>(DEFAULT_HOME_PLACEHOLDERS);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [personalizedQuestions, setPersonalizedQuestions] = useState<string[]>([]);
-  const [showPersonalizedHint, setShowPersonalizedHint] = useState(false);
   const voice = useVoiceSession();
   const voiceListening = voice.listening;
   const coverageRef = useRef(coverage);
@@ -372,7 +371,6 @@ export default function ReportHome() {
           : [];
         if (!questions.length || cancelled) return;
         setPersonalizedQuestions(questions);
-        setShowPersonalizedHint(true);
         const base = buildHomePlaceholders(coverageToPlaceholderSeeds(coverageRef.current));
         setPlaceholders(prependPersonalizedPlaceholders(questions, base));
         setPlaceholderIndex(0);
@@ -586,7 +584,6 @@ export default function ReportHome() {
           : [];
         if (!questions.length) return;
         setPersonalizedQuestions(questions);
-        setShowPersonalizedHint(true);
       } catch {
         /* personalization must not block navigation */
       }
@@ -940,9 +937,7 @@ export default function ReportHome() {
           );
         })()}
       </form>
-      {showPersonalizedHint ? (
-        <p className="rh-search-hint" role="status">已按你最近的提问定制示例</p>
-      ) : voiceListening ? (
+      {voiceListening ? (
         <p className="rh-search-hint" role="status">正在聆听… 也可在底部语音浮层点「说完了」</p>
       ) : (
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
