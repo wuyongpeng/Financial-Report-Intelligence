@@ -5,6 +5,7 @@ import {
   parseVoiceZoomIntent,
   nextPdfZoom,
   VOICE_PDF_ZOOM_DEFAULT,
+  VOICE_PDF_ZOOM_LEVELS,
   VOICE_PDF_ZOOM_MAX,
   VOICE_PDF_ZOOM_MIN,
 } from '../lib/voice/zoom-intent';
@@ -47,7 +48,7 @@ test('toc intent does not steal read or finance questions', () => {
   assert.equal(parseVoiceTocIntent('管理层讨论写了什么'), null);
 });
 
-test('zoom intent + nextPdfZoom', () => {
+test('zoom intent + nextPdfZoom discrete levels', () => {
   assert.deepEqual(parseVoiceZoomIntent('放大一点'), { kind: 'in' });
   assert.deepEqual(parseVoiceZoomIntent('缩小'), { kind: 'out' });
   assert.deepEqual(parseVoiceZoomIntent('适合宽度'), { kind: 'fit' });
@@ -55,14 +56,15 @@ test('zoom intent + nextPdfZoom', () => {
   assert.deepEqual(parseVoiceZoomIntent('实际大小'), { kind: 'actual' });
   assert.equal(parseVoiceZoomIntent('毛利率多少'), null);
 
-  let z = VOICE_PDF_ZOOM_DEFAULT;
-  z = nextPdfZoom(z, { kind: 'in' });
-  assert.ok(z > 1);
-  z = nextPdfZoom(z, { kind: 'out' });
-  assert.equal(z, VOICE_PDF_ZOOM_DEFAULT);
-  assert.equal(nextPdfZoom(0.5, { kind: 'out' }), VOICE_PDF_ZOOM_MIN);
-  assert.equal(nextPdfZoom(3, { kind: 'in' }), VOICE_PDF_ZOOM_MAX);
+  assert.deepEqual([...VOICE_PDF_ZOOM_LEVELS], [0.76, 0.88, 1, 1.12, 1.24]);
+  assert.equal(nextPdfZoom(VOICE_PDF_ZOOM_DEFAULT, { kind: 'in' }), 1.12);
+  assert.equal(nextPdfZoom(1.12, { kind: 'in' }), 1.24);
+  assert.equal(nextPdfZoom(1.24, { kind: 'in' }), VOICE_PDF_ZOOM_MAX);
+  assert.equal(nextPdfZoom(VOICE_PDF_ZOOM_DEFAULT, { kind: 'out' }), 0.88);
+  assert.equal(nextPdfZoom(0.88, { kind: 'out' }), 0.76);
+  assert.equal(nextPdfZoom(0.76, { kind: 'out' }), VOICE_PDF_ZOOM_MIN);
   assert.equal(nextPdfZoom(1.5, { kind: 'fit' }), VOICE_PDF_ZOOM_DEFAULT);
+  assert.equal(nextPdfZoom(0.9, { kind: 'in' }), 1); // snap nearest 0.88 then +1
 });
 
 test('cite / layout / style / meta intents', () => {

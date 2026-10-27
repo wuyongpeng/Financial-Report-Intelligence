@@ -2427,9 +2427,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {sourceMode==='pdf' && (
               <div className="cd-pdf-zoom" role="group" aria-label="PDF 缩放">
                 <button type="button" className="cd-pdf-zoom-btn" aria-label="缩小" title="缩小" disabled={pdfZoom<=VOICE_PDF_ZOOM_MIN} onClick={()=>setPdfZoom(z=>nextPdfZoom(z,{kind:'out'}))}>−</button>
-                <button type="button" className="cd-pdf-zoom-pct" aria-label={`当前缩放 ${Math.round(pdfZoom*100)}%，点击适合宽度`} title="适合宽度" onClick={()=>setPdfZoom(VOICE_PDF_ZOOM_DEFAULT)}>{Math.round(pdfZoom*100)}%</button>
                 <button type="button" className="cd-pdf-zoom-btn" aria-label="放大" title="放大" disabled={pdfZoom>=VOICE_PDF_ZOOM_MAX} onClick={()=>setPdfZoom(z=>nextPdfZoom(z,{kind:'in'}))}>+</button>
-                <button type="button" className="cd-pdf-zoom-fit" aria-label="适合宽度" title="适合宽度" onClick={()=>setPdfZoom(VOICE_PDF_ZOOM_DEFAULT)}>适合宽度</button>
               </div>
             )}
             <span className="cd-pdf-pick-hint" tabIndex={0}>

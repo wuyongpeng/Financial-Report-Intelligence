@@ -93,7 +93,6 @@
 .cd-source-drawer .cd-outline nav{max-height:180px}
 .cd-source-drawer .cd-outline nav button{padding:6px 0}
 .cd-source-drawer .cd-source-toolbar{padding:5px 16px;gap:5px}
-.cd-source-drawer .cd-pdf-zoom-fit{padding:0 5px}
 .cd-source-drawer .cd-source-scroll{padding:12px 16px}
 .cd-source-drawer .cd-source-footer{padding:8px 16px}
 
@@ -303,12 +302,9 @@
 .cd-pdf-textlayer::selection,.cd-pdf-textlayer *::selection{background:rgba(48,100,219,.45);color:transparent}
 .cd-source-toolbar{overflow:visible;position:relative;z-index:6}
 .cd-source-toolbar-right{margin-left:auto;display:flex;align-items:center;gap:8px;min-width:0;flex-shrink:1}
-.cd-pdf-zoom{display:inline-flex;align-items:center;gap:1px;flex-shrink:0;border:1px solid #dee5f0;border-radius:6px;background:#fff;padding:1px;height:26px}
-.cd-pdf-zoom-btn,.cd-pdf-zoom-pct,.cd-pdf-zoom-fit{border:0;background:transparent;color:#54657f;font-size:12px;line-height:1;padding:0 6px;height:22px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
-.cd-pdf-zoom-btn{width:22px;padding:0;font-size:14px;font-weight:600;color:#5a6d87}
-.cd-pdf-zoom-pct{min-width:2.6em;justify-content:center;font-variant-numeric:tabular-nums;font-size:11px;color:#6b7a8d;padding:0 4px}
-.cd-pdf-zoom-fit{font-size:11px;color:#6482af;padding:0 7px;border-left:1px solid #e5eaf1;margin-left:1px;border-radius:0 4px 4px 0}
-.cd-pdf-zoom-btn:hover:not(:disabled),.cd-pdf-zoom-pct:hover,.cd-pdf-zoom-fit:hover{background:#f1f5ff;color:#3064db}
+.cd-pdf-zoom{display:inline-flex;align-items:center;gap:0;flex-shrink:0;border:1px solid #dee5f0;border-radius:6px;background:#fff;padding:1px;height:26px}
+.cd-pdf-zoom-btn{border:0;background:transparent;width:24px;height:22px;padding:0;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;line-height:1;color:#5a6d87;cursor:pointer}
+.cd-pdf-zoom-btn:hover:not(:disabled){background:#f1f5ff;color:#3064db}
 .cd-pdf-zoom-btn:disabled{opacity:.35;cursor:not-allowed}
 .cd-pdf-pick-hint,.cd-source-toolbar .cd-pdf-pick-hint{
   position:relative;margin-left:0;padding:2px 0;border:0;background:none;

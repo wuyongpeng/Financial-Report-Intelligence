@@ -7,12 +7,13 @@ export type VoiceZoomIntent =
   | { kind: 'actual' }
   | null;
 
+/** Five discrete zoom levels: −2 … +2 around fit-width default. */
+export const VOICE_PDF_ZOOM_LEVELS = [0.76, 0.88, 1, 1.12, 1.24] as const;
 export const VOICE_PDF_ZOOM_DEFAULT = 1;
-export const VOICE_PDF_ZOOM_MIN = 0.6;
-export const VOICE_PDF_ZOOM_MAX = 2;
-export const VOICE_PDF_ZOOM_STEP = 1.15;
+export const VOICE_PDF_ZOOM_MIN = VOICE_PDF_ZOOM_LEVELS[0];
+export const VOICE_PDF_ZOOM_MAX = VOICE_PDF_ZOOM_LEVELS[VOICE_PDF_ZOOM_LEVELS.length - 1];
 
-/** 「放大一点 / 缩小 / 适合宽度」. */
+/** 「放大一点 / 缩小 / 适合宽度」——适合宽度与实际大小都回到默认档. */
 export function parseVoiceZoomIntent(text: string): VoiceZoomIntent {
   const t = normalizeVoiceText(text);
   if (!t) return null;
@@ -37,11 +38,26 @@ export function parseVoiceZoomIntent(text: string): VoiceZoomIntent {
   return null;
 }
 
-export function nextPdfZoom(current: number, intent: Exclude<VoiceZoomIntent, null>): number {
+function nearestZoomIndex(current: number): number {
   const cur = Number.isFinite(current) && current > 0 ? current : VOICE_PDF_ZOOM_DEFAULT;
-  if (intent.kind === 'fit' || intent.kind === 'actual') return VOICE_PDF_ZOOM_DEFAULT;
-  if (intent.kind === 'in') {
-    return Math.min(VOICE_PDF_ZOOM_MAX, Math.round(cur * VOICE_PDF_ZOOM_STEP * 100) / 100);
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < VOICE_PDF_ZOOM_LEVELS.length; i++) {
+    const d = Math.abs(VOICE_PDF_ZOOM_LEVELS[i] - cur);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
   }
-  return Math.max(VOICE_PDF_ZOOM_MIN, Math.round((cur / VOICE_PDF_ZOOM_STEP) * 100) / 100);
+  return best;
+}
+
+/** Snap any value onto the discrete ladder, then step ±1 or reset to default. */
+export function nextPdfZoom(current: number, intent: Exclude<VoiceZoomIntent, null>): number {
+  if (intent.kind === 'fit' || intent.kind === 'actual') return VOICE_PDF_ZOOM_DEFAULT;
+  const idx = nearestZoomIndex(current);
+  if (intent.kind === 'in') {
+    return VOICE_PDF_ZOOM_LEVELS[Math.min(VOICE_PDF_ZOOM_LEVELS.length - 1, idx + 1)];
+  }
+  return VOICE_PDF_ZOOM_LEVELS[Math.max(0, idx - 1)];
 }
