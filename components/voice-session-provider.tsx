@@ -414,7 +414,9 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     setPartial, stopMic, resumeListen, finalizeListen,
   ]);
 
-  const showFloat = active || listening || speaking || busy || Boolean(partial);
+  // Typed ask sets busy via detail page — must NOT open the float.
+  // Float only after explicit voice.start() (waveform / voice logo).
+  const showFloat = active;
 
   return (
     <VoiceSessionContext.Provider value={api}>

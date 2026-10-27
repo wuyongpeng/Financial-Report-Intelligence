@@ -1101,7 +1101,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }, []);
   useEffect(() => { outlineRef.current = outline; }, [outline]);
   useEffect(() => { voiceAutoJumpRef.current = voiceAutoJump; }, [voiceAutoJump]);
-  useEffect(() => { voice.setBusy(asking); }, [asking, voice]);
+  // Only mirror ask busy into the voice session while voice is active.
+  // Otherwise typed send (加入AI分析 → 发送) would set busy and used to pop the float.
+  useEffect(() => {
+    voice.setBusy(Boolean(voiceSession && asking));
+  }, [asking, voiceSession, voice]);
 
   // Global float: barge-in + auto-jump chrome (page-owned; cleared on leave).
   useEffect(() => {
