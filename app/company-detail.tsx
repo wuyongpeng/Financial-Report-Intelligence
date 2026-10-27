@@ -35,22 +35,16 @@ import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import { parseVoiceNavIntent, pickVoiceHomeLine } from '@/lib/voice/nav-intent';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
+import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
+import { VOICE_IDLE_EMPTY_TURNS, VOICE_IDLE_EXIT_TOAST } from '@/lib/voice/timing';
 import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { effectivePaneFlex, paneCollapseGate } from '@/lib/pane-collapse';
-import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
-import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
+import { type AsrSession } from '@/lib/voice/client-asr';
+import { type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer } from '@/lib/voice/client-tts';
 import './company-detail.css';
 
-/** Voice conversation: partial text unchanged this long → end of utterance. */
-const VOICE_ENDPOINT_MS = 1600;
-/** Voice conversation: nothing heard this long after listen start → empty turn. */
-const VOICE_NO_SPEECH_MS = 8000;
-/** Consecutive empty listen turns before idle-exit toast (≈ 2 × VOICE_NO_SPEECH_MS). */
-const VOICE_IDLE_EMPTY_TURNS = 2;
-const VOICE_IDLE_EXIT_TOAST = '长时间未互动，语音交互已退出';
 /** Barge-in: first ASR partial at least this many chars interrupts TTS / ask. */
-const VOICE_BARGE_MIN_CHARS = 2;
 
 type Outline = { pageLabels?: PdfPageLabel[]; indexedPages: number; pages: { page: number; content: string }[]; outline: { id: string; title: string; page: number; highlight: string }[] };
 type Peer = { code: string; company_name: string; metric: string; value: number; unit: string };
@@ -298,14 +292,23 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [clipsFlash, setClipsFlash] = useState(false);
   const pageEnter = useRef<'start' | 'next' | 'prev'>('start');
   const [asking, setAsking] = useState(false);
-  const [voiceMode, setVoiceMode] = useState(false);
-  /** Continuous voice conversation on (mic button → listen/ask/read loop until ended). */
-  const [voiceSession, setVoiceSession] = useState(false);
-  const [voiceListening, setVoiceListening] = useState(false);
-  const [voiceSpeaking, setVoiceSpeaking] = useState(false);
-  const [voicePartial, setVoicePartial] = useState('');
+  const voice = useVoiceSession();
+  /** Mirror global realtime voice — float/ASR live in VoiceSessionProvider. */
+  const voiceSession = voice.active;
+  const voiceListening = voice.listening;
+  const voiceSpeaking = voice.speaking;
+  const voicePartial = voice.partial;
+  const voiceMode = voice.active || voice.listening || voice.speaking || voice.busy;
+  const setVoiceMode = (_v: boolean) => { /* global */ };
+  const setVoiceSession = (v: boolean) => { if (!v) voice.end(); };
+  const setVoiceListening = (_v: boolean) => { /* global */ };
+  const setVoiceSpeaking = (v: boolean) => { voice.setSpeaking(v); };
+  const setVoicePartial = (v: string) => { voice.setPartial(v); };
   const [voiceJumpHint, setVoiceJumpHint] = useState<Citation | null>(null);
   const [voiceAutoJump, setVoiceAutoJump] = useState(true);
+  const voiceHandoffHomeRef = useRef(false);
+  const handleVoiceUtteranceRef = useRef<(raw: string) => Promise<void> | void>(async () => undefined);
+  const bargeInFromVoiceRef = useRef<() => void>(() => undefined);
   const [regenMenu, setRegenMenu] = useState<number | null>(null);
   const [jumpAsk, setJumpAsk] = useState<null | { href: string; title: string; detail: ReactNode }>(null);
   const [jumpBlocked, setJumpBlocked] = useState(false);
@@ -1079,26 +1082,74 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   useEffect(() => { sourcePageRef.current = sourcePage; }, [sourcePage]);
   useEffect(() => {
     return () => {
-      /* voice unmount cleanup */
-      voiceConvRef.current = false;
+      /* Detail unmount must NOT end global voice — only abort local TTS and clear handler. */
+      voiceTtsAbortRef.current?.abort();
+      voiceTtsAbortRef.current = null;
       voiceSpeakRef.current = false;
-      voiceGenRef.current += 1;
-      for (const t of [voiceFinalTimerRef, voiceNoSpeechTimerRef, voiceEndpointTimerRef]) {
-        if (t.current != null) {
-          window.clearTimeout(t.current);
-          t.current = null;
-        }
-      }
+      // Local barge-in ASR only (global listen lives in provider).
       pcmCaptureRef.current?.stop();
       pcmCaptureRef.current = null;
       asrSessionRef.current?.close();
       asrSessionRef.current = null;
-      voiceTtsAbortRef.current?.abort();
-      voiceTtsAbortRef.current = null;
+      voice.setUtteranceHandler(null);
+      // If leaving for home handoff, keep voiceConvRef true so session continuity is intentional.
+      if (!voiceHandoffHomeRef.current) {
+        // Soft page leave without handoff: do not force-end; provider keeps going if still active.
+      }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { outlineRef.current = outline; }, [outline]);
   useEffect(() => { voiceAutoJumpRef.current = voiceAutoJump; }, [voiceAutoJump]);
+  useEffect(() => { voice.setBusy(asking); }, [asking, voice]);
+
+  // Global float: barge-in + auto-jump chrome (page-owned; cleared on leave).
+  useEffect(() => {
+    voice.setBargeInHandler(() => bargeInFromVoiceRef.current());
+    voice.setFloatHeadExtra(
+      <label className="eva-voice-float-jump" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 10, fontWeight: 400, fontSize: 12 }}>
+        <input
+          type="checkbox"
+          checked={voiceAutoJump}
+          onChange={(e) => setVoiceAutoJump(e.target.checked)}
+        />
+        自动跳转到答案页
+      </label>,
+    );
+    return () => {
+      voice.setBargeInHandler(null);
+      voice.setFloatHeadExtra(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceAutoJump]);
+
+  // Register detail utterance handler with the GLOBAL voice session.
+  useEffect(() => {
+    const handler = async (text: string): Promise<VoiceUtteranceResult> => {
+      voiceConvRef.current = true;
+      voiceUtteranceHandledRef.current = false;
+      await handleVoiceUtteranceRef.current(text);
+      // Detail owns resume/end via resumeVoiceConversation / endVoiceConversation.
+      return { action: 'hold' };
+    };
+    voice.setUtteranceHandler(handler);
+    if (voice.active) {
+      voiceConvRef.current = true;
+      // Arrived from home with live session — ensure listening continues.
+      if (!voice.listening && !voice.speaking && !voice.busy) {
+        const t = window.setTimeout(() => voice.resumeListen(), 350);
+        return () => {
+          window.clearTimeout(t);
+          voice.setUtteranceHandler(null);
+        };
+      }
+    }
+    return () => {
+      voice.setUtteranceHandler(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!selected?.id) return;
     postClientAudit({
@@ -1173,48 +1224,26 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setVoiceMode(false);
   }
 
-  /** End the continuous voice conversation (user stop, error, silence, unmount). */
+  /** End the continuous voice conversation (user stop, farewell, idle). */
   function endVoiceConversation(toast?: string) {
     voiceConvRef.current = false;
     voiceEmptyTurnsRef.current = 0;
     voiceEarlyJumpRef.current = false;
-    setVoiceSession(false);
+    voiceHandoffHomeRef.current = false;
     endVoiceMode();
+    voice.end(toast);
     if (toast) setQuietToast({ text: toast, at: Date.now() });
   }
 
   /** After a turn (answer read / nav / empty): listen again while the conversation is on. */
   function resumeVoiceConversation() {
-    if (!voiceConvRef.current) {
+    if (!voiceConvRef.current || !voice.active) {
       endVoiceMode();
       return;
     }
-    void listenTurn();
+    voice.resumeListen();
   }
 
-  /** Stop mic capture and ask ASR to finalize; keep HUD until final or timeout. */
-  function finalizeListening() {
-    clearVoiceTurnTimers();
-    if (!asrSessionRef.current && !pcmCaptureRef.current) {
-      if (voiceConvRef.current) void handleVoiceUtterance(voicePartialRef.current);
-      else endVoiceMode();
-      return;
-    }
-    pcmCaptureRef.current?.stop();
-    pcmCaptureRef.current = null;
-    asrSessionRef.current?.stop();
-    setVoiceListening(false);
-    clearVoiceFinalTimer();
-    const gen = voiceGenRef.current;
-    voiceFinalTimerRef.current = window.setTimeout(() => {
-      voiceFinalTimerRef.current = null;
-      if (gen !== voiceGenRef.current) return;
-      const pending = voicePartialRef.current.trim();
-      asrSessionRef.current?.close();
-      asrSessionRef.current = null;
-      void handleVoiceUtterance(pending);
-    }, 2500);
-  }
 
   function stopVoiceSession(opts?: { finalize?: boolean }) {
     clearVoiceFinalTimer();
@@ -1290,7 +1319,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       resumeVoiceConversation();
       return;
     }
-    // Switch company / go home — leave detail for product home/search (not farewell).
+    // Switch company / go home — keep GLOBAL voice session; only leave detail route.
     if (nav?.kind === 'home') {
       voicePartialRef.current = ''; setVoicePartial('');
       setChatCollapsed(false);
@@ -1298,19 +1327,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const priorTts = voiceTtsAbortRef.current;
       voiceTtsAbortRef.current = null;
       priorTts?.abort();
-      stopVoiceSession();
+      voice.stopMic();
+      stopVoiceSession(); // local barge-in ASR only
       const line = pickVoiceHomeLine();
       setMessages(m => [...m, { role: 'user', text, ask: { question: text } }, { role: 'assistant', text: line }]);
       const abort = new AbortController();
       voiceTtsAbortRef.current = abort;
       voiceSpeakRef.current = false;
       setVoiceSpeaking(true);
-      setVoiceMode(true);
-      try {
-        sessionStorage.setItem('eva-home-voice', '1');
-      } catch {
-        /* ignore */
-      }
+      voiceHandoffHomeRef.current = true;
+      // Keep voiceConvRef true so continuity is intentional across home.
       void speakAnswer(line, abort.signal)
         .catch(() => undefined)
         .finally(() => {
@@ -1318,11 +1344,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             voiceTtsAbortRef.current = null;
             setVoiceSpeaking(false);
           }
-          voiceConvRef.current = false;
-          voiceEmptyTurnsRef.current = 0;
-          setVoiceSession(false);
-          endVoiceMode();
-          onBack();
+          onBack(); // provider float + session survive; home resumes listen
         });
       return;
     }
@@ -1369,87 +1391,20 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setChatCollapsed(false);
     // Shared ask path: current-page focus + pre-highlight, same as typed send.
     void ask(text, { spoken: true });
-    if (voiceConvRef.current) void armBargeInAsr('asking');
+    if (voiceConvRef.current) voice.stopMic();
   }
 
-  /** One listen turn of the voice conversation: open ASR + mic, auto-endpoint on silence. */
-  async function listenTurn() {
-    if (!voiceConvRef.current) return;
-    // Never run two ASR sessions: tear down any previous listen / TTS first.
-    releaseVoiceIo();
-    const gen = ++voiceGenRef.current;
-    voiceUtteranceHandledRef.current = false;
-    setVoiceJumpHint(null);
-    setVoiceSpeaking(false);
-    setVoiceMode(true);
-    voicePartialRef.current = ''; setVoicePartial('');
-    setVoiceListening(true);
-    const fail = (message: string) => {
-      if (gen !== voiceGenRef.current) return;
-      endVoiceConversation(message);
-    };
-    try {
-      const session = openAsrSession((ev) => {
-        if (gen !== voiceGenRef.current) return; // stale session
-        if (ev.type === 'partial') {
-          const prev = voicePartialRef.current;
-          voicePartialRef.current = ev.text; setVoicePartial(ev.text);
-          // Only while the mic is live (late partials after 说完了 must not re-finalize).
-          if (ev.text.trim() && pcmCaptureRef.current) {
-            if (voiceNoSpeechTimerRef.current != null) {
-              window.clearTimeout(voiceNoSpeechTimerRef.current);
-              voiceNoSpeechTimerRef.current = null;
-            }
-            // Endpoint: text stopped changing for a while → treat as 说完了.
-            if (ev.text !== prev || voiceEndpointTimerRef.current == null) {
-              if (voiceEndpointTimerRef.current != null) window.clearTimeout(voiceEndpointTimerRef.current);
-              voiceEndpointTimerRef.current = window.setTimeout(() => {
-                voiceEndpointTimerRef.current = null;
-                if (gen !== voiceGenRef.current) return;
-                finalizeListening();
-              }, VOICE_ENDPOINT_MS);
-            }
-          }
-        }
-        if (ev.type === 'final') {
-          clearVoiceFinalTimer();
-          stopVoiceSession();
-          void handleVoiceUtterance(ev.text || voicePartialRef.current);
-        }
-        if (ev.type === 'error') fail(ev.message);
-      });
-      asrSessionRef.current = session;
-      const capture = await startPcmCapture((chunk) => session.sendPcm(chunk));
-      if (gen !== voiceGenRef.current || asrSessionRef.current !== session) {
-        capture.stop(); // turn was ended / superseded while the mic was opening
-        return;
-      }
-      pcmCaptureRef.current = capture;
-      // Count silence from when the mic is actually live (permission prompt can take a while).
-      voiceNoSpeechTimerRef.current = window.setTimeout(() => {
-        voiceNoSpeechTimerRef.current = null;
-        if (gen !== voiceGenRef.current) return;
-        if (!voicePartialRef.current.trim()) finalizeListening();
-      }, VOICE_NO_SPEECH_MS);
-    } catch (err) {
-      fail(err instanceof Error ? err.message : '无法使用麦克风');
-    }
-  }
+  handleVoiceUtteranceRef.current = handleVoiceUtterance;
 
   /** Waveform button: start a continuous voice conversation (listen → ask → read → listen …). */
   async function startVoiceMode() {
     if (asking || memoryLoading || voiceListening) return;
-    const secureErr = micSecureContextError();
-    if (secureErr) {
-      setQuietToast({ text: secureErr, at: Date.now() });
-      return;
-    }
     voiceConvRef.current = true;
     voiceEmptyTurnsRef.current = 0;
     voiceEarlyJumpRef.current = false;
+    voiceHandoffHomeRef.current = false;
     setVoiceAutoJump(true); // voice session defaults to auto-jump + highlight
-    setVoiceSession(true);
-    await listenTurn();
+    await voice.start();
   }
 
   /**
@@ -1464,112 +1419,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     voiceSpeakRef.current = false; // ask()'s post-TTS path must not also resume
     requestRef.current?.abort();
-    void listenTurn();
+    const tts = voiceTtsAbortRef.current;
+    voiceTtsAbortRef.current = null;
+    tts?.abort();
+    voice.setSpeaking(false);
+    voice.resumeListen();
   }
 
-  /**
-   * While TTS is playing (and optionally while ask is streaming), keep ASR open.
-   * First meaningful partial (>= VOICE_BARGE_MIN_CHARS) aborts TTS/ask and becomes the next utterance.
-   * Echo of TTS into the mic is mitigated by getUserMedia echoCancellation + the length gate.
-   */
-  async function armBargeInAsr(mode: 'speaking' | 'asking') {
-    if (!voiceConvRef.current) return;
-    // Tear down any prior ASR/mic only — leave TTS abort controller alone until we barge.
-    clearVoiceFinalTimer();
-    clearVoiceTurnTimers();
-    pcmCaptureRef.current?.stop();
-    pcmCaptureRef.current = null;
-    asrSessionRef.current?.close();
-    asrSessionRef.current = null;
-
-    const gen = ++voiceGenRef.current;
-    voiceUtteranceHandledRef.current = false;
-    voicePartialRef.current = '';
-    setVoicePartial('');
-    let barged = false;
-
-    const takeOver = (seed: string) => {
-      if (barged) return;
-      barged = true;
-      voiceSpeakRef.current = false;
-      requestRef.current?.abort();
-      const tts = voiceTtsAbortRef.current;
-      voiceTtsAbortRef.current = null;
-      tts?.abort();
-      setVoiceSpeaking(false);
-      setVoiceListening(true);
-      setVoiceMode(true);
-      if (seed.trim()) {
-        voicePartialRef.current = seed;
-        setVoicePartial(seed);
-      }
-    };
-
-    const scheduleEndpoint = () => {
-      if (voiceEndpointTimerRef.current != null) window.clearTimeout(voiceEndpointTimerRef.current);
-      voiceEndpointTimerRef.current = window.setTimeout(() => {
-        voiceEndpointTimerRef.current = null;
-        if (gen !== voiceGenRef.current || !barged) return;
-        finalizeListening();
-      }, VOICE_ENDPOINT_MS);
-    };
-
-    try {
-      const session = openAsrSession((ev) => {
-        if (gen !== voiceGenRef.current) return;
-        if (ev.type === 'partial') {
-          const text = ev.text ?? '';
-          voicePartialRef.current = text;
-          setVoicePartial(text);
-          const meaningful = text.trim().length >= VOICE_BARGE_MIN_CHARS;
-          if (!barged) {
-            if (meaningful) {
-              takeOver(text);
-              scheduleEndpoint();
-            }
-            return;
-          }
-          if (text.trim() && pcmCaptureRef.current) {
-            scheduleEndpoint();
-          }
-        }
-        if (ev.type === 'final') {
-          const text = ev.text || voicePartialRef.current;
-          if (!barged) {
-            // Ignore empty/noise finals while still reading — likely TTS echo.
-            if (text.trim().length < VOICE_BARGE_MIN_CHARS) return;
-            takeOver(text);
-            clearVoiceFinalTimer();
-            stopVoiceSession();
-            void handleVoiceUtterance(text);
-            return;
-          }
-          clearVoiceFinalTimer();
-          stopVoiceSession();
-          void handleVoiceUtterance(text);
-        }
-        if (ev.type === 'error') {
-          // Barge-in ASR failure must not kill the conversation; TTS/ask can finish normally.
-          if (asrSessionRef.current === session) asrSessionRef.current = null;
-          pcmCaptureRef.current?.stop();
-          pcmCaptureRef.current = null;
-        }
-      });
-      asrSessionRef.current = session;
-      const capture = await startPcmCapture((chunk) => session.sendPcm(chunk));
-      if (gen !== voiceGenRef.current || asrSessionRef.current !== session) {
-        capture.stop();
-        return;
-      }
-      pcmCaptureRef.current = capture;
-      // Soft hint in UI while armed (listening flag stays false until barge so float keeps 朗读/思考中).
-      if (mode === 'speaking' || mode === 'asking') {
-        /* armed silently */
-      }
-    } catch {
-      // Mic denied mid-session: leave TTS/ask alone; user can still tap 打断 / 结束语音.
-    }
-  }
+  bargeInFromVoiceRef.current = bargeInFromVoice;
 
   function draftAsk(text: string) {
     setQuestion(text);
@@ -1840,22 +1697,18 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         setQuestion(''); setClips([]); clearPendingSelection(); setPick(null);
         setChatCollapsed(false);
         setMessages(m => [...m, { role: 'user', text: typed, ask: { question: typed } }, { role: 'assistant', text: line }]);
-        try {
-          sessionStorage.setItem('eva-home-voice', '1');
-        } catch {
-          /* ignore */
-        }
-        if (voiceConvRef.current) {
+        if (voiceConvRef.current || voice.active) {
           requestRef.current?.abort();
           const priorTts = voiceTtsAbortRef.current;
           voiceTtsAbortRef.current = null;
           priorTts?.abort();
+          voice.stopMic();
           stopVoiceSession();
           const abort = new AbortController();
           voiceTtsAbortRef.current = abort;
           voiceSpeakRef.current = false;
           setVoiceSpeaking(true);
-          setVoiceMode(true);
+          voiceHandoffHomeRef.current = true;
           void speakAnswer(line, abort.signal)
             .catch(() => undefined)
             .finally(() => {
@@ -1863,10 +1716,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 voiceTtsAbortRef.current = null;
                 setVoiceSpeaking(false);
               }
-              voiceConvRef.current = false;
-              voiceEmptyTurnsRef.current = 0;
-              setVoiceSession(false);
-              endVoiceMode();
               onBack();
             });
         } else {
@@ -2082,7 +1931,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         voiceTtsAbortRef.current = abort;
         setVoiceSpeaking(true);
         setVoiceMode(true);
-        if (voiceConvRef.current) void armBargeInAsr('speaking');
+        if (voiceConvRef.current) voice.stopMic();
         void speakAnswer(answer, abort.signal)
           .catch(() => undefined)
           .finally(() => {
@@ -2642,7 +2491,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                     onClick={() => {
                       if (asking || voiceSpeaking) bargeInFromVoice();
                       else if (voiceListening) {
-                        if (voicePartial.trim()) finalizeListening();
+                        if (voicePartial.trim()) voice.finalizeListen();
                         else endVoiceConversation();
                       } else endVoiceConversation();
                     }}
@@ -2690,23 +2539,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         </div>
       </div>
     )}
-    {(voiceSession || voiceMode || voiceListening || voicePartial || voiceSpeaking) && (
-      <div className="cd-voice-float" role="status" aria-live="polite">
-        <div className="cd-voice-float-head">
-          <b>{voiceListening ? '正在聆听…' : voiceSpeaking ? '正在朗读…' : asking ? '思考中…' : '语音'}</b>
-          <label style={{display:'inline-flex',alignItems:'center',gap:6,fontSize:12}}>
-            <input type="checkbox" checked={voiceAutoJump} onChange={e => setVoiceAutoJump(e.target.checked)} />
-            自动跳到出处
-          </label>
-        </div>
-        <div className="cd-voice-float-text">{voicePartial || (voiceSpeaking ? '回答朗读中，说话或点「打断」可直接接着问' : asking ? '正在生成回答，说话或点「打断」可取消并接着说' : '说出问题，或说「下一页」「第 12 页」；停顿即发送')}</div>
-        <div className="cd-voice-float-actions">
-          <button type="button" onClick={() => endVoiceConversation()}>结束语音</button>
-          {voiceListening ? <button type="button" className="primary" onClick={() => finalizeListening()}>说完了</button> : null}
-          {(voiceSpeaking || asking) && !voiceListening ? <button type="button" className="primary" onClick={() => bargeInFromVoice()}>打断</button> : null}
-        </div>
-      </div>
-    )}
+    {/* Realtime voice float is global (VoiceSessionProvider). */}
+
     {voiceJumpHint && (
       <button
         type="button"

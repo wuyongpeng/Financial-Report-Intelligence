@@ -39,8 +39,8 @@ import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
-import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
-import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
+import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
+import { isVoiceFarewell } from '@/lib/voice/farewell-intent';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
@@ -248,15 +248,13 @@ export default function ReportHome() {
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [personalizedQuestions, setPersonalizedQuestions] = useState<string[]>([]);
   const [showPersonalizedHint, setShowPersonalizedHint] = useState(false);
-  const [voiceListening, setVoiceListening] = useState(false);
+  const voice = useVoiceSession();
+  const voiceListening = voice.listening;
   const coverageRef = useRef(coverage);
   coverageRef.current = coverage;
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const asrSessionRef = useRef<AsrSession | null>(null);
-  const pcmCaptureRef = useRef<PcmCapture | null>(null);
-  const voicePartialRef = useRef('');
-  const voiceUtteranceHandledRef = useRef(false);
-  const voiceFinalTimerRef = useRef<number | null>(null);
+  const onSearchSubmitRef = useRef<(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) => Promise<void>>(async () => undefined);
+  const voiceNavigatingRef = useRef(false);
 
   const coveragePlaceholderKey = useMemo(
     () => coverage.map((item) => `${item.code}:${item.reportPeriod ?? ''}`).sort().join('|'),
@@ -283,132 +281,41 @@ export default function ReportHome() {
     return () => window.clearInterval(timer);
   }, [search, placeholders]);
 
-  function clearVoiceFinalTimer() {
-    if (voiceFinalTimerRef.current != null) {
-      window.clearTimeout(voiceFinalTimerRef.current);
-      voiceFinalTimerRef.current = null;
-    }
-  }
-
-  function endVoiceListening() {
-    clearVoiceFinalTimer();
-    pcmCaptureRef.current?.stop();
-    pcmCaptureRef.current = null;
-    asrSessionRef.current?.close();
-    asrSessionRef.current = null;
-    voicePartialRef.current = '';
-    setVoiceListening(false);
-  }
-
-  function finalizeHomeListening() {
-    if (!asrSessionRef.current && !pcmCaptureRef.current) {
-      endVoiceListening();
-      setSearch('');
-      return;
-    }
-    pcmCaptureRef.current?.stop();
-    pcmCaptureRef.current = null;
-    asrSessionRef.current?.stop();
-    // Keep voiceListening until final/timeout so the stop button does not flash to send.
-    clearVoiceFinalTimer();
-    voiceFinalTimerRef.current = window.setTimeout(() => {
-      voiceFinalTimerRef.current = null;
-      const pending = voicePartialRef.current.trim();
-      asrSessionRef.current?.close();
-      asrSessionRef.current = null;
-      if (pending) handleHomeVoiceUtterance(pending);
-      else {
-        endVoiceListening();
-        setSearch('');
+  // Global voice session: register home utterance handler; do not own ASR/float.
+  useEffect(() => {
+    const handler = async (text: string): Promise<VoiceUtteranceResult> => {
+      if (isVoiceFarewell(text)) {
+        return { action: 'end' };
       }
-    }, 2500);
-  }
-
-  function handleHomeVoiceUtterance(raw: string) {
-    if (voiceUtteranceHandledRef.current) return;
-    voiceUtteranceHandledRef.current = true;
-    const text = raw.replace(/\s+/g, ' ').trim();
-    clearVoiceFinalTimer();
-    pcmCaptureRef.current?.stop();
-    pcmCaptureRef.current = null;
-    asrSessionRef.current?.close();
-    asrSessionRef.current = null;
-    voicePartialRef.current = '';
-    setVoiceListening(false);
-    if (!text) {
-      setSearch('');
-      return;
-    }
-    setSearch(text);
-    void onSearchSubmit(text);
-  }
-
-  async function startHomeVoice() {
-    if (submitting || voiceListening) return;
-    const secureErr = micSecureContextError();
-    if (secureErr) {
-      setWaitToast(secureErr);
-      return;
-    }
-    endVoiceListening();
-    voiceUtteranceHandledRef.current = false;
-    voicePartialRef.current = '';
-    setSearch('');
-    setVoiceListening(true);
-    try {
-      const session = openAsrSession((ev) => {
-        if (ev.type === 'partial') {
-          voicePartialRef.current = ev.text;
-          setSearch(ev.text);
-        }
-        if (ev.type === 'final') {
-          clearVoiceFinalTimer();
-          pcmCaptureRef.current?.stop();
-          pcmCaptureRef.current = null;
-          asrSessionRef.current?.close();
-          asrSessionRef.current = null;
-          setVoiceListening(false);
-          handleHomeVoiceUtterance(ev.text || voicePartialRef.current);
-        }
-        if (ev.type === 'error') {
-          endVoiceListening();
-          setSearch('');
-          setWaitToast(ev.message);
-        }
-      });
-      asrSessionRef.current = session;
-      const capture = await startPcmCapture((chunk) => session.sendPcm(chunk));
-      pcmCaptureRef.current = capture;
-    } catch (err) {
-      endVoiceListening();
-      setSearch('');
-      setWaitToast(err instanceof Error ? err.message : '无法使用麦克风');
-    }
-  }
-
-  useEffect(() => () => {
-    clearVoiceFinalTimer();
-    pcmCaptureRef.current?.stop();
-    pcmCaptureRef.current = null;
-    asrSessionRef.current?.close();
-    asrSessionRef.current = null;
+      setSearch(text);
+      voice.setBusy(true);
+      try {
+        await onSearchSubmitRef.current(text, { fromVoice: true });
+      } finally {
+        voice.setBusy(false);
+      }
+      if (voiceNavigatingRef.current) {
+        // Detail will keep the same global session after route change.
+        return { action: 'hold' };
+      }
+      return { action: 'resume' };
+    };
+    voice.setUtteranceHandler(handler);
+    return () => {
+      // Unmount must NOT end the global session — only clear this page's handler.
+      voice.setUtteranceHandler(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Detail voice said 「回首页 / 换一家」 → land here and open mic for next company.
+  // If we landed on home while a session is already active (detail → 返回主页), resume listen.
   useEffect(() => {
-    let flag = '';
-    try {
-      flag = sessionStorage.getItem('eva-home-voice') || '';
-      if (flag) sessionStorage.removeItem('eva-home-voice');
-    } catch {
-      return;
-    }
-    if (flag !== '1') return;
+    if (!voice.active) return;
+    if (voice.listening || voice.speaking || voice.busy) return;
     const timer = window.setTimeout(() => {
-      void startHomeVoice();
-    }, 350);
+      voice.resumeListen();
+    }, 300);
     return () => window.clearTimeout(timer);
-    // startHomeVoice is stable enough for mount-only auto-listen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -613,7 +520,7 @@ export default function ReportHome() {
     setWaitToast(`${item.name}（${item.code}）：等待抓取`);
   }
 
-  async function navigateWithAsk(company: CrawlCompanyCoverage, question: string, period: ParsedPeriod) {
+  async function navigateWithAsk(company: CrawlCompanyCoverage, question: string, period: ParsedPeriod, opts?: { fromVoice?: boolean }) {
     const pre = coverageHasMatchingReport(company, period);
     let periodToken = period.token ?? null;
     let matched: Report | null = null;
@@ -636,6 +543,10 @@ export default function ReportHome() {
       return;
     }
 
+    if (opts?.fromVoice && voice.active) {
+      voiceNavigatingRef.current = true;
+      voice.stopMic();
+    }
     const url = buildCompanyAskUrl(company.code, question, periodToken);
     router.push(url);
   }
@@ -682,17 +593,25 @@ export default function ReportHome() {
     })();
   }
 
-  async function onSearchSubmit(override?: string, opts?: { fromPlaceholder?: boolean }) {
+  async function onSearchSubmit(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) {
     const raw = (override ?? search).trim();
     if (!raw || submitting) return;
     const parsed = parseHomeQuery(raw);
     const isActiveTypedAsk = Boolean(parsed.hasQuestionIntent && !opts?.fromPlaceholder && search.trim());
+    const handoffVoice = Boolean(opts?.fromVoice && voice.active);
+    const goCompany = (code: string) => {
+      if (handoffVoice) {
+        voiceNavigatingRef.current = true;
+        voice.stopMic(); // keep session; detail handler will resume
+      }
+      router.push(`/${code}`);
+    };
 
     // Pure 6-digit code without question → open, join if listed, or offer code-join dialog
     if (/^\d{6}$/.test(raw) && !parsed.hasQuestionIntent) {
       const hit = matchCompany(raw, coverage);
       if (hit) {
-        router.push(`/${hit.code}`);
+        goCompany(hit.code);
         return;
       }
       const listed = resolveListedCompany(raw);
@@ -709,7 +628,7 @@ export default function ReportHome() {
       const hit = matchCompany(parsed.companyQuery || raw, coverage)
         ?? matchCompany(raw, coverage);
       if (hit) {
-        router.push(`/${hit.code}`);
+        goCompany(hit.code);
         return;
       }
       const listed = resolveListedCompany(raw) ?? resolveListedCompany(parsed.companyQuery || raw);
@@ -738,11 +657,13 @@ export default function ReportHome() {
         return;
       }
       if (isActiveTypedAsk) rememberActiveAsk(raw, company);
-      await navigateWithAsk(company, raw, parsed.period);
+      await navigateWithAsk(company, raw, parsed.period, { fromVoice: opts?.fromVoice });
     } finally {
       setSubmitting(false);
     }
   }
+
+  onSearchSubmitRef.current = onSearchSubmit;
 
   async function confirmMissingCompany() {
     if (!dialog || dialog.kind !== 'missing-company') return;
@@ -988,7 +909,7 @@ export default function ReportHome() {
                 type="button"
                 aria-label="结束并发送"
                 title="结束并发送"
-                onClick={() => finalizeHomeListening()}
+                onClick={() => voice.finalizeListen()}
               >
                 {stopGlyph}
               </button>
@@ -1012,7 +933,7 @@ export default function ReportHome() {
               type="button"
               aria-label="语音提问"
               title="语音提问"
-              onClick={() => { void startHomeVoice(); }}
+              onClick={() => { void voice.start(); }}
             >
               {waveGlyph}
             </button>
@@ -1022,7 +943,7 @@ export default function ReportHome() {
       {showPersonalizedHint ? (
         <p className="rh-search-hint" role="status">已按你最近的提问定制示例</p>
       ) : voiceListening ? (
-        <p className="rh-search-hint" role="status">正在聆听… 点停止结束并发送</p>
+        <p className="rh-search-hint" role="status">正在聆听… 也可在底部语音浮层点「说完了」</p>
       ) : (
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
       )}
