@@ -1,5 +1,9 @@
 .eva-voice-float{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;min-width:min(420px,92vw);max-width:520px;background:#fff;border:1px solid #dce6f8;border-radius:14px;box-shadow:0 10px 30px rgba(32,48,71,.16);padding:12px 14px;display:grid;gap:8px}
-.eva-voice-float-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#5d6e85}
+.eva-voice-float.is-placed{transform:none}
+.eva-voice-float.is-dragging{user-select:none}
+.eva-voice-float-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:#5d6e85;cursor:grab;touch-action:none;user-select:none}
+.eva-voice-float.is-dragging .eva-voice-float-head{cursor:grabbing}
+.eva-voice-float-head button,.eva-voice-float-head a,.eva-voice-float-head input,.eva-voice-float-head label,.eva-voice-float-head select{cursor:pointer;touch-action:auto;user-select:auto}
 .eva-voice-float-head b{color:#b91c1c;font-weight:650}
 .eva-voice-float-text{font-size:14px;line-height:1.55;color:#203047;min-height:1.55em}
 .eva-voice-float-actions{display:flex;gap:8px;justify-content:flex-end}
