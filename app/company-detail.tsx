@@ -1246,8 +1246,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     } else if (intent.kind === 'prev') {
       const before = pages.filter(p => p < cur);
       target = before.length ? before[before.length - 1]! : Math.max(1, cur - 1);
-    } else {
+    } else if (intent.kind === 'goto') {
       target = intent.page;
+    } else {
+      // home is handled at the call site; do not treat as page jump
+      return;
     }
     readingPosition.current = null;
     pageEnter.current = 'start';
