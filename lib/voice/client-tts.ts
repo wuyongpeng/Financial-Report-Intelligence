@@ -5,6 +5,66 @@ function voiceWsUrl(path: string) {
   return `${proto}//${window.location.host}${path}`;
 }
 
+type ActivePlayback = {
+  audio: HTMLAudioElement | null;
+  url: string | null;
+  paused: boolean;
+  done: boolean;
+  /** True once MP3 blob is ready (even if paused before play). */
+  ready: boolean;
+};
+
+let activePlayback: ActivePlayback | null = null;
+
+function clearPlayback() {
+  if (!activePlayback) return;
+  const cur = activePlayback;
+  activePlayback = null;
+  cur.done = true;
+  try {
+    cur.audio?.pause();
+  } catch { /* ignore */ }
+  if (cur.url) {
+    try { URL.revokeObjectURL(cur.url); } catch { /* ignore */ }
+  }
+}
+
+/** Pause current TTS audio without ending the voice session / mic. */
+export function pauseVoiceTts(): boolean {
+  if (!activePlayback || activePlayback.done) return false;
+  const audio = activePlayback.audio;
+  if (!audio) {
+    // Still buffering — mark paused so playAndFinish respects it.
+    activePlayback.paused = true;
+    return true;
+  }
+  if (!audio.paused) audio.pause();
+  activePlayback.paused = true;
+  return true;
+}
+
+/** Resume paused TTS. Returns false when nothing to resume. */
+export function resumeVoiceTts(): boolean {
+  if (!activePlayback || activePlayback.done) return false;
+  if (!activePlayback.paused && activePlayback.audio && !activePlayback.audio.paused) return false;
+  activePlayback.paused = false;
+  const audio = activePlayback.audio;
+  if (audio) {
+    void audio.play().catch(() => undefined);
+    return true;
+  }
+  // Still buffering — pause flag cleared so play starts normally when ready.
+  return activePlayback.ready === false;
+}
+
+export function isVoiceTtsPaused(): boolean {
+  return Boolean(activePlayback && !activePlayback.done && activePlayback.paused);
+}
+
+export function hasVoiceTtsPlayback(): boolean {
+  return Boolean(activePlayback && !activePlayback.done);
+}
+
 /** Stream speakable text to TTS and play MP3 chunks as they arrive. */
 export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
   const text = speakableText(raw);
@@ -15,6 +75,11 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
       resolve();
       return;
     }
+    // Supersede any prior playback (including a paused one).
+    clearPlayback();
+    const playback: ActivePlayback = { audio: null, url: null, paused: false, done: false, ready: false };
+    activePlayback = playback;
+
     const ws = new WebSocket(voiceWsUrl('/api/voice/tts'));
     ws.binaryType = 'arraybuffer';
     const chunks: ArrayBuffer[] = [];
@@ -24,6 +89,14 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
       if (settled) return;
       settled = true;
       try { ws.close(); } catch { /* ignore */ }
+      if (activePlayback === playback) clearPlayback();
+      else {
+        playback.done = true;
+        try { playback.audio?.pause(); } catch { /* ignore */ }
+        if (playback.url) {
+          try { URL.revokeObjectURL(playback.url); } catch { /* ignore */ }
+        }
+      }
       if (err) reject(err);
       else resolve();
     };
@@ -34,7 +107,6 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
     signal?.addEventListener('abort', onAbort, { once: true });
 
     ws.onopen = () => {
-      // Send in modest chunks so BidirectionalTTS can stream.
       const runes = Array.from(text);
       const step = 24;
       for (let i = 0; i < runes.length; i += step) {
@@ -74,24 +146,27 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
         const blob = new Blob(chunks, { type: 'audio/mpeg' });
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        if (signal?.aborted) {
-          URL.revokeObjectURL(url);
+        playback.url = url;
+        playback.audio = audio;
+        playback.ready = true;
+        if (signal?.aborted || activePlayback !== playback) {
           finish();
           return;
         }
         const stop = () => {
           audio.pause();
-          URL.revokeObjectURL(url);
         };
         signal?.addEventListener('abort', stop, { once: true });
         audio.onended = () => {
-          URL.revokeObjectURL(url);
           finish();
         };
         audio.onerror = () => {
-          URL.revokeObjectURL(url);
           finish(new Error('音频播放失败'));
         };
+        if (playback.paused) {
+          // User said 先别念了 while buffering — stay paused until 接着念.
+          return;
+        }
         await audio.play();
       } catch (err) {
         finish(err instanceof Error ? err : new Error('音频播放失败'));

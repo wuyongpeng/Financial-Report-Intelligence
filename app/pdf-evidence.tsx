@@ -158,13 +158,15 @@ function PageCanvas({
 }
 
 /** Continuous multi-page PDF viewer (NotebookLM-like vertical scroll). */
-export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, searchQuote = '', searchPage = 0, onResolvePage, onTextPick, onVisiblePage }: {
+export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, searchQuote = '', searchPage = 0, zoom = 1, onResolvePage, onTextPick, onVisiblePage }: {
   reportId: string; page: number; quote: string;
   /** Bumped only on cite / toolbar jump — scroll-follow must NOT bump this or the viewport yanks back. */
   jumpNonce?: number;
   /** In-page search highlight — independent from cite `quote`; never written into cite state by this viewer. */
   searchQuote?: string;
   searchPage?: number;
+  /** CSS zoom for voice / toolbar scale (1 = fit width as rendered). */
+  zoom?: number;
   onResolvePage?: (resolved: number) => void;
   onTextPick?: (text: string, page: number) => void;
   /** Fired when continuous scroll changes the page under the reading line (not during cite jumps). */
@@ -488,8 +490,15 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
     return <div className="cd-pdf-page" role="status"><p>{error}</p></div>;
   }
 
+  const zoomSafe = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   return (
-    <div className="cd-pdf-stack" ref={stackRef} aria-busy={busy}>
+    <div
+      className="cd-pdf-stack"
+      ref={stackRef}
+      aria-busy={busy}
+      style={zoomSafe === 1 ? undefined : { zoom: zoomSafe }}
+      data-pdf-zoom={zoomSafe}
+    >
       {shifted !== null && (
         <p className="cd-pdf-shift-note" role="status">已按引用原文校正至 PDF 第 {shifted} 页</p>
       )}

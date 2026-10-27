@@ -35,13 +35,22 @@ import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
 import { parseVoiceNavIntent, parseVoicePageContinue, pickVoiceHomeLine } from '@/lib/voice/nav-intent';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
+import { parseVoiceTocIntent } from '@/lib/voice/toc-intent';
+import { parseVoiceZoomIntent, nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT } from '@/lib/voice/zoom-intent';
+import { isVoiceCiteIntent, VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
+import { parseVoiceLayoutIntent } from '@/lib/voice/layout-intent';
+import { parseVoiceStyleIntent, voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
+import { parseVoiceTtsControlIntent } from '@/lib/voice/tts-control-intent';
+import { isVoiceCapabilityIntent, voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
+import { parseVoiceReadIntent } from '@/lib/voice/read-intent';
+import { findTocPage, matchSection, buildSectionReadChunks } from '@/lib/voice/section-match';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
 import { VOICE_IDLE_EMPTY_TURNS, VOICE_IDLE_EXIT_TOAST } from '@/lib/voice/timing';
 import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { effectivePaneFlex, paneCollapseGate } from '@/lib/pane-collapse';
 import { type AsrSession } from '@/lib/voice/client-asr';
 import { type PcmCapture } from '@/lib/voice/client-pcm';
-import { speakAnswer } from '@/lib/voice/client-tts';
+import { speakAnswer, pauseVoiceTts, resumeVoiceTts, isVoiceTtsPaused, hasVoiceTtsPlayback } from '@/lib/voice/client-tts';
 import './company-detail.css';
 
 /** Barge-in: first ASR partial at least this many chars interrupts TTS / ask. */
@@ -309,6 +318,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const voiceHandoffHomeRef = useRef(false);
   /** Last successful voice next/prev — seeds short-lived 「继续 / 再翻」 (12s). */
   const lastVoicePageNavRef = useRef<{ kind: 'next' | 'prev'; at: number } | null>(null);
+  /** Last answer citation for 「出处在哪」. */
+  const lastVoiceCiteRef = useRef<Citation | null>(null);
+  /** Session answer length preference for subsequent voice asks. */
+  const voiceAnswerStyleRef = useRef<VoiceAnswerStyle | null>(null);
+  /** Continuous section-read job (page chunks + generation token). */
+  const sectionReadRef = useRef<{ gen: number; chunks: { page: number; text: string }[]; index: number } | null>(null);
+  const [pdfZoom, setPdfZoom] = useState(VOICE_PDF_ZOOM_DEFAULT);
   const handleVoiceUtteranceRef = useRef<(raw: string) => Promise<void> | void>(async () => undefined);
   const bargeInFromVoiceRef = useRef<() => void>(() => undefined);
   const [regenMenu, setRegenMenu] = useState<number | null>(null);
@@ -1236,6 +1252,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voiceEmptyTurnsRef.current = 0;
     voiceEarlyJumpRef.current = false;
     voiceHandoffHomeRef.current = false;
+    sectionReadRef.current = null;
+    voiceAnswerStyleRef.current = null;
     endVoiceMode();
     voice.end(toast);
     if (toast) setQuietToast({ text: toast, at: Date.now() });
@@ -1264,10 +1282,113 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
 
   /** Same path as clicking an in-answer [Pxx] / 参考来源 chip. */
   function revealVoiceCitation(c: Citation) {
+    lastVoiceCiteRef.current = c;
     setSourceMode('pdf');
     setSourceCollapsed(false);
     setMobilePane('sources');
     jumpCitation(c);
+  }
+
+  function cancelSectionRead() {
+    if (!sectionReadRef.current) {
+      sectionReadRef.current = null;
+      return;
+    }
+    sectionReadRef.current = null;
+    const prior = voiceTtsAbortRef.current;
+    voiceTtsAbortRef.current = null;
+    prior?.abort();
+    setVoiceSpeaking(false);
+  }
+
+  /** Short confirm TTS that keeps the continuous voice session listening afterward. */
+  function speakVoiceConfirm(line: string, opts?: { resume?: boolean }) {
+    const resume = opts?.resume !== false;
+    const prior = voiceTtsAbortRef.current;
+    voiceTtsAbortRef.current = null;
+    prior?.abort();
+    const abort = new AbortController();
+    voiceTtsAbortRef.current = abort;
+    voiceSpeakRef.current = false;
+    setVoiceSpeaking(true);
+    if (voiceConvRef.current) voice.stopMic();
+    void speakAnswer(line, abort.signal)
+      .catch(() => undefined)
+      .finally(() => {
+        if (voiceTtsAbortRef.current !== abort) return;
+        voiceTtsAbortRef.current = null;
+        setVoiceSpeaking(false);
+        if (resume && voiceConvRef.current) resumeVoiceConversation();
+      });
+  }
+
+  function jumpToPageHighlight(page: number, quote: string, toast: string) {
+    readingPosition.current = null;
+    pageEnter.current = 'start';
+    scrollPageSync.current = false;
+    setSourceMode('pdf');
+    setSourceCollapsed(false);
+    setMobilePane('sources');
+    sourcePageRef.current = page;
+    setSourcePage(page);
+    setPdfJumpNonce(n => n + 1);
+    setHighlight(quote || '');
+    setSearchHighlight(null);
+    setVoiceJumpHint(null);
+    setQuietToast({ text: toast, at: Date.now() });
+  }
+
+  function startSectionRead(chunks: { page: number; text: string }[], title: string) {
+    if (!chunks.length) {
+      speakVoiceConfirm('没找到这一节的正文');
+      return;
+    }
+    const gen = voiceGenRef.current + 1;
+    voiceGenRef.current = gen;
+    sectionReadRef.current = { gen, chunks, index: 0 };
+    const first = chunks[0]!;
+    jumpToPageHighlight(first.page, title.slice(0, 24), `开始朗读 · 第 ${first.page} 页`);
+    void runSectionReadStep(gen);
+  }
+
+  async function runSectionReadStep(gen: number) {
+    const job = sectionReadRef.current;
+    if (!job || job.gen !== gen) return;
+    const chunk = job.chunks[job.index];
+    if (!chunk) {
+      cancelSectionRead();
+      setQuietToast({ text: '本节朗读结束', at: Date.now() });
+      if (voiceConvRef.current) resumeVoiceConversation();
+      return;
+    }
+    jumpToPageHighlight(chunk.page, chunk.text.slice(0, 24), `朗读第 ${chunk.page} 页`);
+    const prior = voiceTtsAbortRef.current;
+    voiceTtsAbortRef.current = null;
+    prior?.abort();
+    const abort = new AbortController();
+    voiceTtsAbortRef.current = abort;
+    voiceSpeakRef.current = false;
+    setVoiceSpeaking(true);
+    if (voiceConvRef.current) voice.stopMic();
+    try {
+      await speakAnswer(chunk.text, abort.signal);
+    } catch { /* ignore */ }
+    if (voiceTtsAbortRef.current !== abort) return;
+    voiceTtsAbortRef.current = null;
+    setVoiceSpeaking(false);
+    const latest = sectionReadRef.current;
+    if (!latest || latest.gen !== gen) {
+      if (voiceConvRef.current) resumeVoiceConversation();
+      return;
+    }
+    latest.index += 1;
+    if (latest.index >= latest.chunks.length) {
+      cancelSectionRead();
+      setQuietToast({ text: '本节朗读结束', at: Date.now() });
+      if (voiceConvRef.current) resumeVoiceConversation();
+      return;
+    }
+    await runSectionReadStep(gen);
   }
 
   function applyVoiceNav(intent: NonNullable<ReturnType<typeof parseVoiceNavIntent>>) {
@@ -1321,10 +1442,191 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       return;
     }
     voiceEmptyTurnsRef.current = 0;
+
+    // —— Local command pack (before page-nav / ask) ——
+    if (isVoiceCapabilityIntent(text)) {
+      cancelSectionRead();
+      voicePartialRef.current = ''; setVoicePartial('');
+      const line = voiceCapabilitySpeech();
+      setMessages(m => [...m, { role: 'user', text, ask: { question: text } }, { role: 'assistant', text: line }]);
+      speakVoiceConfirm(line);
+      return;
+    }
+
+    const ttsCtrl = parseVoiceTtsControlIntent(text);
+    if (ttsCtrl?.kind === 'pause') {
+      voicePartialRef.current = ''; setVoicePartial('');
+      const ok = pauseVoiceTts();
+      setQuietToast({ text: ok ? '已暂停朗读' : '现在没有在朗读', at: Date.now() });
+      // Keep mic open — do not end session. If nothing was speaking, just resume listen.
+      if (!ok && voiceConvRef.current) resumeVoiceConversation();
+      else if (ok) {
+        setVoiceSpeaking(false);
+        if (voiceConvRef.current) resumeVoiceConversation();
+      }
+      return;
+    }
+    if (ttsCtrl?.kind === 'resume') {
+      voicePartialRef.current = ''; setVoicePartial('');
+      // Prefer TTS resume; do not steal from page-nav (接着念 ≠ 继续).
+      if (isVoiceTtsPaused() || hasVoiceTtsPlayback()) {
+        const ok = resumeVoiceTts();
+        if (ok) {
+          setVoiceSpeaking(true);
+          if (voiceConvRef.current) voice.stopMic();
+          setQuietToast({ text: '继续朗读', at: Date.now() });
+        } else {
+          setQuietToast({ text: '没有可继续的朗读', at: Date.now() });
+          if (voiceConvRef.current) resumeVoiceConversation();
+        }
+      } else {
+        setQuietToast({ text: '没有可继续的朗读', at: Date.now() });
+        if (voiceConvRef.current) resumeVoiceConversation();
+      }
+      return;
+    }
+
+    const styleIntent = parseVoiceStyleIntent(text);
+    if (styleIntent) {
+      cancelSectionRead();
+      voiceAnswerStyleRef.current = styleIntent.kind;
+      voicePartialRef.current = ''; setVoicePartial('');
+      const line = voiceStyleConfirmLine(styleIntent.kind);
+      setQuietToast({ text: line, at: Date.now() });
+      speakVoiceConfirm(line);
+      return;
+    }
+
+    const layoutIntent = parseVoiceLayoutIntent(text);
+    if (layoutIntent) {
+      voicePartialRef.current = ''; setVoicePartial('');
+      if (layoutIntent.kind === 'collapse-mid') {
+        const gate = paneCollapseGate({ source: sourceCollapsed, middle: middleCollapsed, chat: chatCollapsed });
+        if (!middleCollapsed && gate.canCollapseMiddle) {
+          middleShareRef.current = colRatios.middle;
+          setMiddleCollapsed(true);
+          setMobilePane(chatCollapsed ? 'sources' : 'chat');
+          setQuietToast({ text: '已收起概览', at: Date.now() });
+        } else if (middleCollapsed) {
+          setQuietToast({ text: '概览已收起', at: Date.now() });
+        } else {
+          setQuietToast({ text: '至少保留一栏展开', at: Date.now() });
+        }
+      } else {
+        setMiddleCollapsed(false);
+        setMobilePane('dashboard');
+        setQuietToast({ text: '已展开概览', at: Date.now() });
+      }
+      resumeVoiceConversation();
+      return;
+    }
+
+    const zoomIntent = parseVoiceZoomIntent(text);
+    if (zoomIntent) {
+      voicePartialRef.current = ''; setVoicePartial('');
+      setPdfZoom(z => {
+        const next = nextPdfZoom(z, zoomIntent);
+        const pct = Math.round(next * 100);
+        const tip = zoomIntent.kind === 'in' ? `已放大到 ${pct}%`
+          : zoomIntent.kind === 'out' ? `已缩小到 ${pct}%`
+          : zoomIntent.kind === 'fit' ? '已适合宽度'
+          : '已恢复实际大小';
+        setQuietToast({ text: tip, at: Date.now() });
+        return next;
+      });
+      resumeVoiceConversation();
+      return;
+    }
+
+    if (isVoiceCiteIntent(text)) {
+      voicePartialRef.current = ''; setVoicePartial('');
+      const citeTarget = lastVoiceCiteRef.current ?? voiceJumpHint;
+      if (citeTarget?.page) {
+        revealVoiceCitation(citeTarget);
+        setQuietToast({ text: `出处在第 ${citeTarget.page} 页`, at: Date.now() });
+        resumeVoiceConversation();
+      } else {
+        speakVoiceConfirm(VOICE_CITE_MISSING_LINE);
+      }
+      return;
+    }
+
+    const readIntent = parseVoiceReadIntent(text);
+    if (readIntent?.kind === 'page-head') {
+      cancelSectionRead();
+      voicePartialRef.current = ''; setVoicePartial('');
+      const page = sourcePageRef.current;
+      const content = outlineRef.current.pages.find(p => p.page === page)?.content?.replace(/\s+/g, ' ').trim() ?? '';
+      if (!content) {
+        speakVoiceConfirm('这一页没有可朗读的文字');
+        return;
+      }
+      const head = content.slice(0, 180);
+      speakVoiceConfirm(head);
+      return;
+    }
+    if (readIntent?.kind === 'section') {
+      voicePartialRef.current = ''; setVoicePartial('');
+      const hit = matchSection(readIntent.query, outlineRef.current.outline, outlineRef.current.pages);
+      if (!hit) {
+        speakVoiceConfirm('没找到这一节，没法朗读');
+        return;
+      }
+      const chunks = buildSectionReadChunks(outlineRef.current.pages, hit);
+      startSectionRead(chunks, hit.highlight || hit.title);
+      return;
+    }
+
+    const tocIntent = parseVoiceTocIntent(text);
+    if (tocIntent?.kind === 'open-toc') {
+      voicePartialRef.current = ''; setVoicePartial('');
+      const tocPage = findTocPage(outlineRef.current.pages);
+      const first = outlineRef.current.outline[0];
+      try {
+        const details = document.querySelector('.cd-outline');
+        if (details instanceof HTMLDetailsElement) details.open = true;
+      } catch { /* ignore */ }
+      if (tocPage != null) {
+        jumpToPageHighlight(tocPage, '目录', `已打开目录 · 第 ${tocPage} 页`);
+      } else if (first) {
+        jumpToPageHighlight(first.page, first.highlight || first.title, `已打开提纲 · 第 ${first.page} 页`);
+      } else {
+        setQuietToast({ text: '这份报告还没有目录', at: Date.now() });
+      }
+      resumeVoiceConversation();
+      return;
+    }
+    if (tocIntent?.kind === 'jump-section') {
+      cancelSectionRead();
+      voicePartialRef.current = ''; setVoicePartial('');
+      const hit = matchSection(tocIntent.query, outlineRef.current.outline, outlineRef.current.pages);
+      if (!hit) {
+        speakVoiceConfirm('没找到这一节');
+        return;
+      }
+      jumpToPageHighlight(hit.page, hit.highlight, `已跳到${hit.title}`.slice(0, 24));
+      resumeVoiceConversation();
+      return;
+    }
+
+    // New non-command utterance cancels continuous section read.
+    cancelSectionRead();
+
     let nav = parseVoiceNavIntent(text);
     if (!nav) {
-      // Short-lived 「继续 / 再翻」 after next/prev (12s). No recent last → leave to chat.
+      // Bare 「继续」 after next/prev (12s). Explicit 「接着念」 already handled above.
       nav = parseVoicePageContinue(text, lastVoicePageNavRef.current);
+    }
+    // Soft: bare 继续 with no page-nav, but TTS paused → resume TTS.
+    if (!nav && /^继续$/.test(text.replace(/\s+/g, '').replace(/[。！？.!?,，]/g, ''))) {
+      if (isVoiceTtsPaused()) {
+        voicePartialRef.current = ''; setVoicePartial('');
+        resumeVoiceTts();
+        setVoiceSpeaking(true);
+        if (voiceConvRef.current) voice.stopMic();
+        setQuietToast({ text: '继续朗读', at: Date.now() });
+        return;
+      }
     }
     if (nav && nav.kind !== 'home') {
       applyVoiceNav(nav);
@@ -1430,6 +1732,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       endVoiceMode();
       return;
     }
+    sectionReadRef.current = null;
     voiceSpeakRef.current = false; // ask()'s post-TTS path must not also resume
     requestRef.current?.abort();
     const tts = voiceTtsAbortRef.current;
@@ -1869,6 +2172,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         const target = fromMarks[0] ?? withQuote ?? citations[0];
         if (target?.page) {
           voiceEarlyJumpRef.current = true;
+          lastVoiceCiteRef.current = target;
           revealVoiceCitation(target);
           setVoiceJumpHint(null);
         }
@@ -1885,7 +2189,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         } catch { /* ignore — anonymous users can ask without persisted memory */ }
       }
       const spoken = Boolean(extra?.spoken ?? voiceSpeakRef.current ?? voiceConvRef.current);
-      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(extra?.rewrite ? { rewrite: extra.rewrite } : {}), ...(spoken ? { spoken: true } : {}), stream:true }) });
+      const styleRewrite = spoken ? (voiceAnswerStyleRef.current ?? undefined) : undefined;
+      const rewrite = extra?.rewrite ?? styleRewrite;
+      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(rewrite ? { rewrite } : {}), ...(spoken ? { spoken: true } : {}), stream:true }) });
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
@@ -1932,6 +2238,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         const withQuote = lastEvidence?.find(e => e.page && (e.quote ?? '').trim());
         const target = fromMarks[0] ?? withQuote ?? lastEvidence?.[0];
         if (target?.page) {
+          lastVoiceCiteRef.current = target;
           // Voice conversation: always auto-jump (checkbox still respected); ignore recent manual scroll.
           if (voiceAutoJumpRef.current) {
             if (!voiceEarlyJumpRef.current) revealVoiceCitation(target);
@@ -2142,7 +2449,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {feedbackError && <small className="cd-verify-hint cd-verify-error">{feedbackError}</small>}
             {feedback[citedMetric] && <small className="cd-verify-hint">{feedback[citedMetric]==='correct'?'已记录你的确认，累计确认会进入复核队列。':'已记录异议，该指标会被优先人工复核。'}</small>}
           </div>}
-          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} searchQuote={searchHighlight?.quote ?? ''} searchPage={searchHighlight?.page ?? 0} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; userScrollAtRef.current = Date.now(); sourcePageRef.current = p; setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put; ref synced eagerly for ask() */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark className={highlight?'':'cd-search-mark'}>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
+          {sourceMode==='pdf' ? <PdfEvidence key={selected.id} reportId={selected.id} page={sourcePage} quote={highlight} jumpNonce={pdfJumpNonce} searchQuote={searchHighlight?.quote ?? ''} searchPage={searchHighlight?.page ?? 0} zoom={pdfZoom} onResolvePage={setResolvedPage} onTextPick={onSourceTextPick} onVisiblePage={(p)=>{ if (p === sourcePage) return; scrollPageSync.current = true; userScrollAtRef.current = Date.now(); sourcePageRef.current = p; setSourcePage(p); setResolvedPage(null); /* toolbar only — jumpNonce unchanged so viewport stays put; ref synced eagerly for ask() */ }} /> : <article className="cd-source-text"><div>{pageDescription(sourcePage)} · 划词智析</div>{sourceText ? <p>{highlightRange ? <>{sourceText.slice(0,highlightRange[0])}<mark className={highlight?'':'cd-search-mark'}>{sourceText.slice(...highlightRange)}</mark>{sourceText.slice(highlightRange[1])}</> : sourceText}</p> : <p>{loading?'正在读取原文…':'这一页没有可检索的文字（可能是扫描图片或表格）。'}</p>}</article>}
         </div><div className="cd-source-footer"><a href={`/api/reports/${encodeURIComponent(selected.id)}/pdf`} target="_blank" rel="noreferrer">打开原始 PDF <Icon name="external" size={12} /></a><button onClick={()=>{draftAsk(`请解释${pageDescription(sourcePage)}的核心信息。`);}} disabled={asking}>追问本页</button></div>
       </aside>
       </div>
