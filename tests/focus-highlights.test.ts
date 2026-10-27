@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFocusHighlights, scanUnitAnomalies } from '../lib/focus-highlights';
+import {
+  buildFocusHighlights,
+  scanUnitAnomalies,
+  scanAdminPenalty,
+  scanMajorShareholder,
+  scanDividendChange,
+  scanDonationOutflow,
+  listWatchDimensions,
+} from '../lib/focus-highlights';
 import type { MetricName, Report } from '../lib/detail-model';
 
 function metric(name: MetricName, value: number, page = 6) {
@@ -147,3 +155,77 @@ test('重点关注：结论不含禁用词', () => {
     assert.ok(!BANNED.test(card.conclusion), card.conclusion);
   }
 });
+
+
+test('重点关注：目录含同事建议四维与非经常性损益', () => {
+  const ids = listWatchDimensions().map((d) => d.id);
+  for (const id of [
+    'non_recurring',
+    'admin_penalty',
+    'major_shareholder',
+    'dividend_change',
+    'donation_outflow',
+  ]) {
+    assert.ok(ids.includes(id), id);
+  }
+  const titles = listWatchDimensions().map((d) => d.title);
+  assert.ok(titles.every((t) => [...t].length <= 10), titles.join(','));
+});
+
+test('重点关注：行政处罚独立命中', () => {
+  const selected = build('2026FY', [metric('net_profit', 1e9)]);
+  const pages = [
+    {
+      page: 66,
+      content: '公司于报告期内收到行政处罚决定书，被处以罚款 50 万元。',
+    },
+  ];
+  const cards = buildFocusHighlights(selected, { pages });
+  assert.equal(cards[0]?.id, 'admin_penalty');
+  assert.equal(cards[0]?.status, 'signal');
+  assert.equal(cards[0]?.cites[0]?.page, 66);
+});
+
+test('scanAdminPenalty：无处罚词不命中', () => {
+  const card = scanAdminPenalty([{ page: 1, content: '公司稳步推进主营业务。' }]);
+  assert.equal(card.status, 'none');
+});
+
+test('重点关注：大股东变动命中', () => {
+  const pages = [
+    {
+      page: 72,
+      content: '报告期内，公司控股股东通过协议转让方式减持部分股份，持股比例有所变动。',
+    },
+  ];
+  const card = scanMajorShareholder(pages);
+  assert.equal(card.status, 'signal');
+  assert.match(card.conclusion, /控股股东/);
+  assert.equal(card.cites[0]?.page, 72);
+});
+
+test('重点关注：分红异动不分红命中', () => {
+  const pages = [
+    {
+      page: 18,
+      content: '经董事会审议，公司本年度不进行利润分配，不派发股利。',
+    },
+  ];
+  const card = scanDividendChange(pages);
+  assert.equal(card.status, 'signal');
+  assert.match(card.conclusion, /不进行|不派发/);
+});
+
+test('重点关注：大额捐款命中', () => {
+  const pages = [
+    {
+      page: 55,
+      content: '公司本期对外捐赠支出共计 1,200万元，主要用于公益项目。',
+    },
+  ];
+  const card = scanDonationOutflow(pages);
+  assert.equal(card.status, 'signal');
+  assert.match(card.conclusion, /对外捐赠/);
+  assert.match(card.conclusion, /1,200万元|1200万元/);
+});
+

@@ -1,6 +1,6 @@
 /**
  * 重点关注：最多 2 张动态卡。
- * 约 10 个 watch-skill 维度巡检；有信号按严重度取 Top2；
+ * 多维 watch-skill 巡检（含处罚/股东/分红/捐款等文本维）；有信号按严重度取 Top2；
  * 全空则落两个默认维，文案为「暂无风险」类冷静表述。
  */
 import dimensionsSeed from '@/data/watch-skills/dimensions.json';
@@ -449,6 +449,143 @@ export function scanUnitAnomalies(
   return card(id, 'signal', conclusion, cites, base + 20);
 }
 
+
+function quoteAround(text: string, idx: number, before = 12, after = 56): string {
+  return text.slice(Math.max(0, idx - before), Math.min(text.length, idx + after)).trim();
+}
+
+/** 行政处罚 / 监管措施：独立命中，不依赖淡化措辞。 */
+export function scanAdminPenalty(pages: FocusPage[] | undefined): FocusHighlightCard {
+  const id = 'admin_penalty';
+  const base = dimMeta(id)?.severityBase ?? 82;
+  if (!pages?.length) {
+    return card(id, 'insufficient', '原文页未就绪，暂无法判断', []);
+  }
+  const hitRe =
+    /行政处罚|被处以罚款|处以罚款|警示函|责令改正|立案调查|监管措施|监管关注函|收到.*(?:决定书|告知书)|证监会.*处罚|交易所.*处分/;
+  for (const p of pages) {
+    const text = (p.content || '').replace(/\s+/g, ' ');
+    const m = text.match(hitRe);
+    if (!m || m.index === undefined) continue;
+    const label = m[0];
+    return card(
+      id,
+      'signal',
+      `原文披露「${label}」相关事项。`,
+      [{ page: p.page, quote: quoteAround(text, m.index) }],
+      base,
+    );
+  }
+  return card(id, 'none', '未发现需要关注的情况', []);
+}
+
+/** 控股股东 / 实际控制人 / 第一大股东变动。 */
+export function scanMajorShareholder(pages: FocusPage[] | undefined): FocusHighlightCard {
+  const id = 'major_shareholder';
+  const base = dimMeta(id)?.severityBase ?? 72;
+  if (!pages?.length) {
+    return card(id, 'insufficient', '原文页未就绪，暂无法判断', []);
+  }
+  const actorRe = /控股股东|实际控制人|第一大股东|持股(?:比例)?第一/;
+  const changeRe =
+    /变更|变动|转让|减持|增持|被动减持|协议转让|控制权|不再(?:是|担任)|变为|成为|丧失/;
+  for (const p of pages) {
+    const text = (p.content || '').replace(/\s+/g, ' ');
+    if (!actorRe.test(text) || !changeRe.test(text)) continue;
+    // Prefer a window that contains both actor + change cues.
+    let bestIdx = -1;
+    let bestLabel = '';
+    const actorHit = text.match(actorRe);
+    if (actorHit && actorHit.index !== undefined) {
+      const win = text.slice(Math.max(0, actorHit.index - 20), actorHit.index + 80);
+      if (changeRe.test(win)) {
+        bestIdx = actorHit.index;
+        bestLabel = actorHit[0];
+      }
+    }
+    if (bestIdx < 0) continue;
+    const changeHit = text.slice(bestIdx, bestIdx + 80).match(changeRe)?.[0] ?? '变动';
+    return card(
+      id,
+      'signal',
+      `原文出现「${bestLabel}」相关「${changeHit}」披露。`,
+      [{ page: p.page, quote: quoteAround(text, bestIdx) }],
+      base,
+    );
+  }
+  return card(id, 'none', '未发现需要关注的情况', []);
+}
+
+/** 分红异动：不分红 / 取消派息 / 派息变化表述。 */
+export function scanDividendChange(pages: FocusPage[] | undefined): FocusHighlightCard {
+  const id = 'dividend_change';
+  const base = dimMeta(id)?.severityBase ?? 62;
+  if (!pages?.length) {
+    return card(id, 'insufficient', '原文页未就绪，暂无法判断', []);
+  }
+  const strongRe =
+    /不派发(?:现金)?股利|不进行(?:现金)?利润分配|不分配利润|取消(?:现金)?分红|暂不分配|拟不分配/;
+  const softChangeRe =
+    /(?:现金)?分红(?:比例|率)|每股(?:派|分红)|派发现金红利|利润分配方案/;
+  const changeCueRe = /下降|降低|减少|不上调|不再|调整为|由.+调整|低于|未达/;
+  for (const p of pages) {
+    const text = (p.content || '').replace(/\s+/g, ' ');
+    const strong = text.match(strongRe);
+    if (strong && strong.index !== undefined) {
+      return card(
+        id,
+        'signal',
+        `原文披露「${strong[0]}」。`,
+        [{ page: p.page, quote: quoteAround(text, strong.index) }],
+        base + 8,
+      );
+    }
+    if (!softChangeRe.test(text) || !changeCueRe.test(text)) continue;
+    const soft = text.match(softChangeRe);
+    if (!soft || soft.index === undefined) continue;
+    const win = text.slice(Math.max(0, soft.index - 24), soft.index + 72);
+    if (!changeCueRe.test(win)) continue;
+    const cue = win.match(changeCueRe)?.[0] ?? '变化';
+    return card(
+      id,
+      'signal',
+      `原文出现「${soft[0]}」且含「${cue}」等变化表述。`,
+      [{ page: p.page, quote: quoteAround(text, soft.index) }],
+      base,
+    );
+  }
+  return card(id, 'none', '未发现需要关注的情况', []);
+}
+
+/** 大额捐款 / 对外捐赠。 */
+export function scanDonationOutflow(pages: FocusPage[] | undefined): FocusHighlightCard {
+  const id = 'donation_outflow';
+  const base = dimMeta(id)?.severityBase ?? 58;
+  if (!pages?.length) {
+    return card(id, 'insufficient', '原文页未就绪，暂无法判断', []);
+  }
+  const labelRe = /对外捐赠|公益捐赠|慈善捐赠|捐赠支出|捐赠款|公益性捐赠|捐款/;
+  const amountRe = /(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(万元|亿元|元)/;
+  for (const p of pages) {
+    const text = (p.content || '').replace(/\s+/g, ' ');
+    const label = text.match(labelRe);
+    if (!label || label.index === undefined) continue;
+    const win = text.slice(Math.max(0, label.index - 40), label.index + 80);
+    const amt = win.match(amountRe);
+    const amtPart = amt ? `，金额表述为「${amt[0]}」` : '';
+    // Require amount nearby to avoid CSR boilerplate without numbers.
+    if (!amt) continue;
+    return card(
+      id,
+      'signal',
+      `原文披露「${label[0]}」${amtPart}。`.replace('，。', '。'),
+      [{ page: p.page, quote: quoteAround(text, label.index, 16, 64) }],
+      base + (amt[2] === '亿元' ? 6 : 0),
+    );
+  }
+  return card(id, 'none', '未发现需要关注的情况', []);
+}
+
 function evalSoftPedal(pages: FocusPage[] | undefined): FocusHighlightCard {
   const id = 'soft_pedal_cues';
   const base = dimMeta(id)?.severityBase ?? 55;
@@ -506,6 +643,10 @@ export function buildFocusHighlights(
     evalShortDebt(report),
     evalMarginCollapse(report, previous),
     evalOneOffBoost(report),
+    scanAdminPenalty(pages),
+    scanMajorShareholder(pages),
+    scanDividendChange(pages),
+    scanDonationOutflow(pages),
     evalSoftPedal(pages),
   ];
 
