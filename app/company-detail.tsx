@@ -36,7 +36,7 @@ import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFli
 import { parseVoiceNavIntent, parseVoicePageContinue, pickVoiceHomeLine } from '@/lib/voice/nav-intent';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { parseVoiceTocIntent } from '@/lib/voice/toc-intent';
-import { parseVoiceZoomIntent, nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT } from '@/lib/voice/zoom-intent';
+import { parseVoiceZoomIntent, nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT, VOICE_PDF_ZOOM_MIN, VOICE_PDF_ZOOM_MAX } from '@/lib/voice/zoom-intent';
 import { isVoiceCiteIntent, VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
 import { parseVoiceLayoutIntent } from '@/lib/voice/layout-intent';
 import { parseVoiceStyleIntent, voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
@@ -2423,12 +2423,22 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         <div className="cd-source-toolbar">
           <label><select aria-label="原文模式" value={sourceMode} onChange={e=>{const m=e.target.value as 'pdf'|'text';setSourceMode(m);if(m==='pdf')pageEnter.current='start';}}><option value="pdf">原始PDF</option><option value="text">原文文本</option></select></label>
           <label><select aria-label="跳转原文页码" value={sourcePage} onChange={e=>{readingPosition.current=null;pageEnter.current='start';scrollPageSync.current=false;setSourcePage(Number(e.target.value));setPdfJumpNonce((n)=>n+1);setHighlight('');setSearchHighlight(null);}}>{[...new Set([1,sourcePage,...(pageLabels.length?pageLabels:outline.pages).map(p=>p.page)])].sort((a,b)=>a-b).map(p=><option key={p} value={p}>{pageLabel(p)}</option>)}</select></label>
-          <span className="cd-pdf-pick-hint" tabIndex={0}>
-            划词智析
-            <span className="cd-pdf-pick-tip" role="tooltip">
-              在 PDF 中划选一段文字，点「加入AI分析」，即可针对原文做智能解读。
+          <div className="cd-source-toolbar-right">
+            {sourceMode==='pdf' && (
+              <div className="cd-pdf-zoom" role="group" aria-label="PDF 缩放">
+                <button type="button" className="cd-pdf-zoom-btn" aria-label="缩小" title="缩小" disabled={pdfZoom<=VOICE_PDF_ZOOM_MIN} onClick={()=>setPdfZoom(z=>nextPdfZoom(z,{kind:'out'}))}>−</button>
+                <button type="button" className="cd-pdf-zoom-pct" aria-label={`当前缩放 ${Math.round(pdfZoom*100)}%，点击适合宽度`} title="适合宽度" onClick={()=>setPdfZoom(VOICE_PDF_ZOOM_DEFAULT)}>{Math.round(pdfZoom*100)}%</button>
+                <button type="button" className="cd-pdf-zoom-btn" aria-label="放大" title="放大" disabled={pdfZoom>=VOICE_PDF_ZOOM_MAX} onClick={()=>setPdfZoom(z=>nextPdfZoom(z,{kind:'in'}))}>+</button>
+                <button type="button" className="cd-pdf-zoom-fit" aria-label="适合宽度" title="适合宽度" onClick={()=>setPdfZoom(VOICE_PDF_ZOOM_DEFAULT)}>适合宽度</button>
+              </div>
+            )}
+            <span className="cd-pdf-pick-hint" tabIndex={0}>
+              划词智析
+              <span className="cd-pdf-pick-tip" role="tooltip">
+                在 PDF 中划选一段文字，点「加入AI分析」，即可针对原文做智能解读。
+              </span>
             </span>
-          </span>
+          </div>
         </div>
         {!printedKnown && pageLabels.length>0 && <p className="cd-page-notice">这份 PDF 没能识别出正文页码，下面统一按 PDF 实际页数显示。</p>}
         <div className="cd-source-scroll" ref={sourceRef} aria-live="polite">
