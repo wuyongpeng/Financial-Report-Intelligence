@@ -24,6 +24,7 @@ function PageCanvas({
   highlightPage,
   searchQuote,
   searchPage,
+  zoom = 1,
   onHighlightY,
   onReady,
 }: {
@@ -33,6 +34,8 @@ function PageCanvas({
   highlightPage: number;
   searchQuote: string;
   searchPage: number;
+  /** Multiplier on base pdf.js SCALE so zoom-in stays sharp. */
+  zoom?: number;
   onHighlightY: (page: number, y: number | null) => void;
   onReady: (page: number, patch: Partial<PageSlot>) => void;
 }) {
@@ -53,7 +56,8 @@ function PageCanvas({
         setError('');
         const source = await pdf.getPage(slot.page);
         if (!active) return;
-        const viewport = source.getViewport({ scale: SCALE });
+        const zoomSafe = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+        const viewport = source.getViewport({ scale: SCALE * zoomSafe });
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         const ctx = canvas.getContext('2d');
@@ -117,9 +121,9 @@ function PageCanvas({
       }
     })();
     return () => { active = false; };
-    // Re-render when this page's cite highlight changes — not when the toolbar page follows scroll.
+    // Re-render when cite/search highlight or zoom changes — not when toolbar page follows scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdf, slot.page, highlightQuote, highlightQuote ? highlightPage : 0, searchQuote, searchQuote ? searchPage : 0]);
+  }, [pdf, slot.page, zoom, highlightQuote, highlightQuote ? highlightPage : 0, searchQuote, searchQuote ? searchPage : 0]);
 
   const w = slot.width > 0 ? slot.width : 1;
   const h = slot.height > 0 ? slot.height : 1;
@@ -165,7 +169,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
   /** In-page search highlight — independent from cite `quote`; never written into cite state by this viewer. */
   searchQuote?: string;
   searchPage?: number;
-  /** CSS zoom for voice / toolbar scale (1 = fit width as rendered). */
+  /** Display scale vs fit-width (1 = fit). Applied as stack width % + pdf.js render scale. */
   zoom?: number;
   onResolvePage?: (resolved: number) => void;
   onTextPick?: (text: string, page: number) => void;
@@ -490,13 +494,14 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
     return <div className="cd-pdf-page" role="status"><p>{error}</p></div>;
   }
 
+  // Stack width % (not CSS zoom): canvas is width:100%, so CSS zoom only scaled the page label.
   const zoomSafe = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   return (
     <div
       className="cd-pdf-stack"
       ref={stackRef}
       aria-busy={busy}
-      style={zoomSafe === 1 ? undefined : { zoom: zoomSafe }}
+      style={{ width: `${zoomSafe * 100}%`, marginInline: 'auto' }}
       data-pdf-zoom={zoomSafe}
     >
       {shifted !== null && (
@@ -521,6 +526,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
                 highlightPage={quote ? (shifted ?? lockedCitePage.current) : 0}
                 searchQuote={searchQuote}
                 searchPage={searchQuote ? searchPage : 0}
+                zoom={zoomSafe}
                 onHighlightY={onHighlightY}
                 onReady={onReady}
               />
