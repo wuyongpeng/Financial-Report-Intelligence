@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 
 type AuditEvent = {
   id: number;
@@ -53,8 +53,7 @@ export function AuditAdminClient() {
   const [admin, setAdmin] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loggingIn, setLoggingIn] = useState(false);
-  const promptedRef = useRef(false);
-
+  const [password, setPassword] = useState('');
   const [eventType, setEventType] = useState('');
   const [companyCode, setCompanyCode] = useState('');
   const [q, setQ] = useState('');
@@ -96,24 +95,14 @@ export function AuditAdminClient() {
     }
   }, []);
 
-  const promptLogin = useCallback(async () => {
-    const password = window.prompt('请输入管理员密码');
-    if (password === null) {
-      setLoginError('已取消登录');
-      return;
-    }
+  const submitLogin = useCallback(async () => {
     if (!password.trim()) {
       setLoginError('请输入管理员密码');
       return;
     }
-    await loginWithPassword(password);
-  }, [loginWithPassword]);
-
-  useEffect(() => {
-    if (!ready || admin || promptedRef.current) return;
-    promptedRef.current = true;
-    void promptLogin();
-  }, [ready, admin, promptLogin]);
+    const ok = await loginWithPassword(password);
+    if (ok) setPassword('');
+  }, [loginWithPassword, password]);
 
   const load = useCallback(async (opts?: { append?: boolean; beforeId?: number | null }) => {
     setLoading(true);
@@ -128,7 +117,7 @@ export function AuditAdminClient() {
       const res = await fetch(`/api/admin/audit?${params}`, { cache: 'no-store', credentials: 'same-origin' });
       if (res.status === 401) {
         setAdmin(false);
-        promptedRef.current = false;
+        setPassword('');
         setError('管理员登录已失效，请重新登录');
         return;
       }
@@ -153,7 +142,7 @@ export function AuditAdminClient() {
     await fetch('/api/admin/login', { method: 'DELETE', credentials: 'same-origin' });
     setAdmin(false);
     setEvents([]);
-    promptedRef.current = false;
+    setPassword('');
   }
 
   if (!ready) {
@@ -166,9 +155,27 @@ export function AuditAdminClient() {
         <h1 style={h1}>访问审计</h1>
         <p style={muted}>需要管理员密码后才能查看访问、提问与反馈记录。</p>
         {loginError ? <p style={err}>{loginError}</p> : null}
-        <button type="button" style={btn} disabled={loggingIn} onClick={() => void promptLogin()}>
-          {loggingIn ? '登录中…' : '输入密码'}
-        </button>
+        <form
+          style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}
+          onSubmit={(e) => { e.preventDefault(); void submitLogin(); }}
+        >
+          <label style={{ ...muted, margin: 0 }} htmlFor="admin-audit-password">管理员密码</label>
+          <input
+            id="admin-audit-password"
+            type="password"
+            name="password"
+            autoComplete="current-password"
+            autoFocus
+            style={input}
+            value={password}
+            disabled={loggingIn}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="请输入密码"
+          />
+          <button type="submit" style={btn} disabled={loggingIn}>
+            {loggingIn ? '登录中…' : '登录'}
+          </button>
+        </form>
       </main>
     );
   }
