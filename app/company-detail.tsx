@@ -33,7 +33,7 @@ import {
 } from '@/lib/industry-skills-ui';
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
-import { parseVoiceNavIntent, pickVoiceHomeLine } from '@/lib/voice/nav-intent';
+import { parseVoiceNavIntent, parseVoicePageContinue, pickVoiceHomeLine } from '@/lib/voice/nav-intent';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
 import { VOICE_IDLE_EMPTY_TURNS, VOICE_IDLE_EXIT_TOAST } from '@/lib/voice/timing';
@@ -307,6 +307,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [voiceJumpHint, setVoiceJumpHint] = useState<Citation | null>(null);
   const [voiceAutoJump, setVoiceAutoJump] = useState(true);
   const voiceHandoffHomeRef = useRef(false);
+  /** Last successful voice next/prev — seeds short-lived 「继续 / 再翻」 (12s). */
+  const lastVoicePageNavRef = useRef<{ kind: 'next' | 'prev'; at: number } | null>(null);
   const handleVoiceUtteranceRef = useRef<(raw: string) => Promise<void> | void>(async () => undefined);
   const bargeInFromVoiceRef = useRef<() => void>(() => undefined);
   const [regenMenu, setRegenMenu] = useState<number | null>(null);
@@ -1276,11 +1278,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     let target = cur;
     if (intent.kind === 'next') {
       target = pages.find(p => p > cur) ?? (cur + 1);
+      lastVoicePageNavRef.current = { kind: 'next', at: Date.now() };
     } else if (intent.kind === 'prev') {
       const before = pages.filter(p => p < cur);
       target = before.length ? before[before.length - 1]! : Math.max(1, cur - 1);
+      lastVoicePageNavRef.current = { kind: 'prev', at: Date.now() };
     } else if (intent.kind === 'goto') {
       target = intent.page;
+      // goto does not seed 「继续」 — only next/prev do.
     } else {
       // home is handled at the call site; do not treat as page jump
       return;
@@ -1316,7 +1321,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       return;
     }
     voiceEmptyTurnsRef.current = 0;
-    const nav = parseVoiceNavIntent(text);
+    let nav = parseVoiceNavIntent(text);
+    if (!nav) {
+      // Short-lived 「继续 / 再翻」 after next/prev (12s). No recent last → leave to chat.
+      nav = parseVoicePageContinue(text, lastVoicePageNavRef.current);
+    }
     if (nav && nav.kind !== 'home') {
       applyVoiceNav(nav);
       voicePartialRef.current = ''; setVoicePartial('');

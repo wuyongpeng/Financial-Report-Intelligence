@@ -5,6 +5,11 @@ export type VoiceNavIntent =
   | { kind: 'home' }
   | null;
 
+export type VoicePageNavDirection = 'next' | 'prev';
+
+/** How long after a next/prev 「继续 / 再翻」 still repeats that direction. */
+export const VOICE_PAGE_CONTINUE_WINDOW_MS = 12_000;
+
 const HOME_CONFIRM_LINES = [
   '好，回首页',
   '好，去首页找下一家',
@@ -71,12 +76,45 @@ export function isVoiceHomeIntent(text: string): boolean {
   return false;
 }
 
+/** Next-page phrases — short / exact so财报 questions are not stolen. */
+function isNextPageIntent(t: string): boolean {
+  if (
+    /^(下一页|下页|往后翻|向后翻|翻下一页|往下翻一页|向下翻一页|往下翻|向下翻|翻下去|翻后面|再下一页|往后翻一页|向后翻一页|再往下翻|往下翻页|向下翻页|翻到下一页)$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  // Soft filler: 「请帮我往下翻」「再下一页吧」— length-capped.
+  if (t.length <= 12 && /^(请)?(帮我)?(再)?(往下|向下|往后|向后)翻(一页|下页|下去|后面|页)?(吧)?$/.test(t)) {
+    return true;
+  }
+  if (t.length <= 10 && /^(请)?(帮我)?(再)?下一页(吧)?$/.test(t)) return true;
+  return false;
+}
+
+/** Prev-page phrases — mirror of next, length-capped soft forms. */
+function isPrevPageIntent(t: string): boolean {
+  if (
+    /^(上一页|上页|往前翻|向前翻|翻上一页|往上翻一页|向上翻一页|往上翻|向上翻|翻上去|翻前面|再上一页|往前翻一页|向前翻一页|再往上翻|往上翻页|向上翻页|翻到上一页)$/.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  if (t.length <= 12 && /^(请)?(帮我)?(再)?(往上|向上|往前|向前)翻(一页|上页|上去|前面|页)?(吧)?$/.test(t)) {
+    return true;
+  }
+  if (t.length <= 10 && /^(请)?(帮我)?(再)?上一页(吧)?$/.test(t)) return true;
+  return false;
+}
+
 /** Local PDF navigation + home/switch from ASR text — no LLM. */
 export function parseVoiceNavIntent(text: string): VoiceNavIntent {
-  const t = text.replace(/\s+/g, '').replace(/[。！？.!?,，、]/g, '');
+  const t = normalize(text);
   if (!t) return null;
-  if (/^(下一页|下页|往后翻|向后翻|翻下一页)$/.test(t)) return { kind: 'next' };
-  if (/^(上一页|上页|往前翻|向前翻|翻上一页)$/.test(t)) return { kind: 'prev' };
+  if (isNextPageIntent(t)) return { kind: 'next' };
+  if (isPrevPageIntent(t)) return { kind: 'prev' };
   const m = t.match(/^(?:请?)?(?:跳转到?|跳到|翻到|打开|去)?第?(\d{1,4})页$/);
   if (m) {
     const page = Number(m[1]);
@@ -84,6 +122,40 @@ export function parseVoiceNavIntent(text: string): VoiceNavIntent {
   }
   if (isVoiceHomeIntent(text)) return { kind: 'home' };
   return null;
+}
+
+/**
+ * Short-lived 「继续 / 再翻」 after a successful next/prev.
+ * Directional forms (再往下 / 再往上) map directly; bare 继续 needs a recent last.
+ * Window: {@link VOICE_PAGE_CONTINUE_WINDOW_MS} (12s). goto does not seed last.
+ */
+export function parseVoicePageContinue(
+  text: string,
+  last: { kind: VoicePageNavDirection; at: number } | null,
+  now = Date.now(),
+): { kind: 'next' } | { kind: 'prev' } | null {
+  const t = normalize(text);
+  if (!t) return null;
+
+  // Explicit direction — no last required (still navigation-only short phrases).
+  if (
+    /^(再往下|再往下翻|再往下翻一页|继续往下|继续往下翻|继续往下翻一页|接着往下|接着往下翻)$/.test(t)
+  ) {
+    return { kind: 'next' };
+  }
+  if (
+    /^(再往上|再往上翻|再往上翻一页|继续往上|继续往上翻|继续往上翻一页|接着往上|接着往上翻)$/.test(t)
+  ) {
+    return { kind: 'prev' };
+  }
+
+  // Bare continue / 再翻 — only within the window after a next/prev.
+  if (!/^(继续|再翻|再翻一页|继续翻|接着翻|继续翻页|再翻页|继续翻一页|接着翻一页)$/.test(t)) {
+    return null;
+  }
+  if (!last) return null;
+  if (now - last.at > VOICE_PAGE_CONTINUE_WINDOW_MS) return null;
+  return { kind: last.kind };
 }
 
 /** Short confirm before leaving detail for home. */

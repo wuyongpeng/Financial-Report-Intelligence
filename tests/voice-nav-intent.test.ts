@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseVoiceNavIntent,
+  parseVoicePageContinue,
   isVoiceHomeIntent,
   pickVoiceHomeLine,
   HOME_CONFIRM_LINES,
+  VOICE_PAGE_CONTINUE_WINDOW_MS,
 } from '../lib/voice/nav-intent';
 import { isVoiceFarewell } from '../lib/voice/farewell-intent';
 import { speakableText } from '../lib/voice/speakable';
@@ -15,6 +17,76 @@ test('parseVoiceNavIntent next/prev/goto', () => {
   assert.deepEqual(parseVoiceNavIntent('跳到第48页'), { kind: 'goto', page: 48 });
   assert.deepEqual(parseVoiceNavIntent('第12页'), { kind: 'goto', page: 12 });
   assert.equal(parseVoiceNavIntent('今年毛利率多少'), null);
+});
+
+test('parseVoiceNavIntent broader next/prev natural phrases', () => {
+  const nextYes = [
+    '往下翻一页',
+    '向下翻一页',
+    '往下翻',
+    '向下翻',
+    '翻下去',
+    '翻后面',
+    '再下一页',
+    '往后翻一页',
+    '请帮我往下翻',
+    '再往下翻',
+  ];
+  for (const s of nextYes) {
+    assert.deepEqual(parseVoiceNavIntent(s), { kind: 'next' }, s);
+  }
+  const prevYes = [
+    '往上翻一页',
+    '向上翻一页',
+    '往上翻',
+    '向上翻',
+    '翻上去',
+    '翻前面',
+    '再上一页',
+    '往前翻一页',
+    '请帮我往上翻',
+    '再往上翻',
+  ];
+  for (const s of prevYes) {
+    assert.deepEqual(parseVoiceNavIntent(s), { kind: 'prev' }, s);
+  }
+  // Must not steal content /财报 questions.
+  const no = [
+    '往下翻看营收是多少',
+    '往上看利润表怎么说',
+    '继续分析毛利率',
+    '接着说一下风险',
+    '营业收入同比多少',
+  ];
+  for (const s of no) {
+    assert.equal(parseVoiceNavIntent(s), null, s);
+  }
+});
+
+test('parseVoicePageContinue repeats last next/prev within 12s window', () => {
+  const now = 1_000_000;
+  const lastNext = { kind: 'next' as const, at: now - 3_000 };
+  const lastPrev = { kind: 'prev' as const, at: now - 3_000 };
+  const stale = { kind: 'next' as const, at: now - VOICE_PAGE_CONTINUE_WINDOW_MS - 1 };
+
+  assert.equal(VOICE_PAGE_CONTINUE_WINDOW_MS, 12_000);
+
+  for (const s of ['继续', '再翻', '再翻一页', '继续翻', '接着翻', '继续翻页']) {
+    assert.deepEqual(parseVoicePageContinue(s, lastNext, now), { kind: 'next' }, s);
+    assert.deepEqual(parseVoicePageContinue(s, lastPrev, now), { kind: 'prev' }, s);
+  }
+
+  // Directional continue — maps without relying on last, but still works with last.
+  assert.deepEqual(parseVoicePageContinue('再往下', null, now), { kind: 'next' });
+  assert.deepEqual(parseVoicePageContinue('再往上', null, now), { kind: 'prev' });
+  assert.deepEqual(parseVoicePageContinue('继续往下翻', lastPrev, now), { kind: 'next' });
+  assert.deepEqual(parseVoicePageContinue('接着往上', lastNext, now), { kind: 'prev' });
+
+  // Bare 继续 with no / stale last → not nav (leave to chat / soft boundary).
+  assert.equal(parseVoicePageContinue('继续', null, now), null);
+  assert.equal(parseVoicePageContinue('再翻', stale, now), null);
+  assert.equal(parseVoicePageContinue('继续分析营收', lastNext, now), null);
+  assert.equal(parseVoiceNavIntent('继续'), null); // bare continue is not a primary nav phrase
 });
 
 test('parseVoiceNavIntent home / switch-company broad phrases', () => {
