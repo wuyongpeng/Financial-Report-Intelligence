@@ -97,6 +97,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const [floatHeadExtra, setFloatHeadExtraState] = useState<ReactNode | null>(null);
   const listenTurnRef = useRef<() => Promise<void>>(async () => undefined);
   const handleUtteranceRef = useRef<(raw: string) => Promise<void>>(async () => undefined);
+  /** One auto-reconnect after mid-session ASR drop; reset on successful listen / explicit end. */
+  const asrReconnectRef = useRef(0);
 
   const clearVoiceFinalTimer = useCallback(() => {
     if (voiceFinalTimerRef.current != null) {
@@ -128,6 +130,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const end = useCallback((message?: string) => {
     activeRef.current = false;
     voiceEmptyTurnsRef.current = 0;
+    asrReconnectRef.current = 0;
     voiceGenRef.current += 1;
     releaseVoiceIo();
     voicePartialRef.current = '';
@@ -250,6 +253,14 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
 
     const fail = (message: string) => {
       if (gen !== voiceGenRef.current) return;
+      if (activeRef.current && asrReconnectRef.current < 1) {
+        asrReconnectRef.current += 1;
+        setToast(`${message}（正在重连…）`);
+        window.setTimeout(() => {
+          if (activeRef.current) void listenTurnRef.current();
+        }, 500);
+        return;
+      }
       end(message);
     };
 
@@ -296,6 +307,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         return;
       }
       pcmCaptureRef.current = capture;
+      asrReconnectRef.current = 0;
       voiceNoSpeechTimerRef.current = window.setTimeout(() => {
         voiceNoSpeechTimerRef.current = null;
         if (gen !== voiceGenRef.current) return;
@@ -358,6 +370,17 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     const t = window.setTimeout(() => setToast(null), 3200);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  // Heal stuck "active but not listening" (e.g. page forgot resumeListen after TTS).
+  useEffect(() => {
+    if (!active || listening || speaking || busy) return;
+    const t = window.setTimeout(() => {
+      if (!activeRef.current) return;
+      if (asrSessionRef.current || pcmCaptureRef.current) return;
+      void listenTurnRef.current();
+    }, 1600);
+    return () => window.clearTimeout(t);
+  }, [active, listening, speaking, busy]);
 
   // Provider itself must NOT end voice on unmount of children — only full app tear-down.
   useEffect(() => () => {

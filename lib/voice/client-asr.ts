@@ -44,6 +44,7 @@ export function openAsrSession(onEvent: (ev: AsrEvent) => void): AsrSession {
   ws.binaryType = 'arraybuffer';
   let ready = false;
   let reported = false;
+  let closedByClient = false;
   const reportError = (message: string) => {
     if (reported) return;
     reported = true;
@@ -72,10 +73,15 @@ export function openAsrSession(onEvent: (ev: AsrEvent) => void): AsrSession {
     );
 
   ws.onclose = (ev) => {
-    if (ready || reported) return;
-    reportError(
-      `语音通道关闭（code ${ev.code}）。若「信源」里 ASR 上游正常，多半是入口网关未 Upgrade WebSocket`,
-    );
+    if (reported || closedByClient) return;
+    if (!ready) {
+      reportError(
+        `语音通道关闭（code ${ev.code}）。若「信源」里 ASR 上游正常，多半是入口网关未 Upgrade WebSocket`,
+      );
+      return;
+    }
+    // Dropped after ready (upstream / network) — surface so float is not silently dead.
+    reportError(`语音识别中断（code ${ev.code}），请重新点语音`);
   };
 
   return {
@@ -86,6 +92,7 @@ export function openAsrSession(onEvent: (ev: AsrEvent) => void): AsrSession {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: 'stop' }));
     },
     close() {
+      closedByClient = true;
       try { ws.close(); } catch { /* ignore */ }
     },
   };

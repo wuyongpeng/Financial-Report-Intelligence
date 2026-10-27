@@ -1943,9 +1943,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
               if (!asrSessionRef.current && !pcmCaptureRef.current) setVoiceMode(false);
               return;
             }
-            // Barge-in already took over (utterance in flight / listening): do not restart.
-            if (voiceUtteranceHandledRef.current) return;
-            // Natural end of TTS (or barge ASR still armed with no speech): clean listen turn.
+            // Barge-in aborts TTS (abort ref mismatch above). Do NOT gate on
+            // voiceUtteranceHandledRef — that flag stays true for the whole ask turn
+            // and used to permanently block resumeListen after every answer.
+            voiceUtteranceHandledRef.current = false;
             resumeVoiceConversation();
           });
       } else if (voiceConvRef.current) {
@@ -1979,6 +1980,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       setChatCollapsed(false);
       setMobilePane('chat');
       setQuestion(questionText);
+      // Home→detail with live voice: speak the deep-link answer, then resumeListen.
+      if (voice.active) {
+        voiceConvRef.current = true;
+        voiceSpeakRef.current = true;
+        voice.stopMic();
+      }
       void askRef.current(questionText);
     }, 0);
     return () => window.clearTimeout(timer);
