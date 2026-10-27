@@ -733,8 +733,8 @@ html.dark .cd-fb,.dark .cd-fb{
 .cd-quiet-toast{
   position:fixed;top:16px;right:16px;z-index:75;
   padding:8px 12px;border-radius:8px;
-  background:#fff;color:#5b6b80;
-  border:1px solid #e4ebf4;
+  background:#edf3ff;color:#415e8c;
+  border:1px solid #dce6f8;
   box-shadow:0 8px 24px #1e293b12;
   font-size:12px;line-height:1.4;
   pointer-events:none;max-width:min(72vw,280px);
