@@ -12,6 +12,12 @@ export type PaneCollapseGate = {
   canCollapseChat: boolean;
 };
 
+export type PaneRatios = {
+  source: number;
+  middle: number;
+  chat: number;
+};
+
 export function paneCollapseGate(collapsed: PaneCollapseState): PaneCollapseGate {
   const count =
     Number(collapsed.source) + Number(collapsed.middle) + Number(collapsed.chat);
@@ -23,4 +29,21 @@ export function paneCollapseGate(collapsed: PaneCollapseState): PaneCollapseGate
     canCollapseMiddle: collapsed.middle || count < 2,
     canCollapseChat: collapsed.chat || count < 2,
   };
+}
+
+/**
+ * When the middle (overview) pane collapses to a rail, give its flex share to the
+ * source pane so the right chat column keeps the same relative width.
+ */
+export function effectivePaneFlex(
+  ratios: PaneRatios,
+  opts: { middleCollapsed: boolean },
+): { source: number; chat: number } {
+  if (opts.middleCollapsed) {
+    return {
+      source: ratios.source + ratios.middle,
+      chat: ratios.chat,
+    };
+  }
+  return { source: ratios.source, chat: ratios.chat };
 }

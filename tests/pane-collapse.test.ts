@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { paneCollapseGate } from '../lib/pane-collapse';
+import { effectivePaneFlex, paneCollapseGate } from '../lib/pane-collapse';
 
 test('none collapsed: all can collapse', () => {
   const g = paneCollapseGate({ source: false, middle: false, chat: false });
@@ -40,4 +40,16 @@ test('source+chat collapsed locks middle', () => {
   assert.equal(g.canCollapseSource, true);
   assert.equal(g.canCollapseMiddle, false);
   assert.equal(g.canCollapseChat, true);
+});
+
+test('middle collapsed: chat flex unchanged, source absorbs middle', () => {
+  const flex = effectivePaneFlex({ source: 25, middle: 48, chat: 25 }, { middleCollapsed: true });
+  assert.equal(flex.chat, 25);
+  assert.equal(flex.source, 73);
+});
+
+test('middle open: flex equals stored ratios', () => {
+  const flex = effectivePaneFlex({ source: 25, middle: 48, chat: 25 }, { middleCollapsed: false });
+  assert.equal(flex.source, 25);
+  assert.equal(flex.chat, 25);
 });

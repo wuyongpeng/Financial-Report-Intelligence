@@ -14,6 +14,20 @@ export type AttributionModuleDef = {
   priority?: number;
 };
 
+/** Hard cap for depth-attribution dimension titles (Chinese characters / code points). */
+export const ATTRIBUTION_TITLE_MAX_CHARS = 10;
+
+/** Trim to ≤ max code points; keeps complete short labels, never mid-UTF16 surrogate. */
+export function clampAttributionTitle(
+  title: string,
+  max = ATTRIBUTION_TITLE_MAX_CHARS,
+): string {
+  const chars = Array.from((title || '').trim());
+  if (chars.length <= max) return chars.join('');
+  return chars.slice(0, max).join('');
+}
+
+
 type SkillLite = {
   industry: string;
   userFacing?: IndustrySkillUserFacing;
@@ -129,6 +143,7 @@ export function expandAttributionModulePool(
   const base = primary?.length ? primary : FALLBACK_ATTRIBUTION_MODULES;
   const withPri = base.map((m, i) => ({
     ...m,
+    title: clampAttributionTitle(m.title),
     priority: m.priority ?? i + 1,
   }));
   const seenIds = new Set(withPri.map((m) => m.id));

@@ -30,7 +30,7 @@ const SYSTEM_PROMPT_CORE = `你是「财报智析 Eva」的速判模块。只根
 2. verdict.summary 只写一句整体定性，建议不超过 30 个中文字，不要堆砌营业收入/净利润/EPS/ROE 的具体数字（这些由页面指标卡展示），不要做没有依据的推测。
 3. changes 按重要性筛选 1～3 条；证据不足就少写，不要凑数。完全没有可靠变化时返回空数组。
 4. changes[].type、changes[].direction 必须使用 Schema 中的中文枚举。direction 只允许：利好、利空、中性、风险。
-5. changes[].title 简短，建议 10 个中文字以内，不要写成完整句子。
+5. changes[].title 简短，必须 ≤10 个中文字，语义完整，不要截断半句，不要写成完整句子。
 6. changes[].description 1～2 句，尽量包含原文或结构化数据中已有的数字与同比/环比；不得编造数字或事实。
 7. 禁止推断财报未明确支持的因果关系。只有原文明确写了原因，才能使用“由于/主要原因/导致/驱动/受……影响”；否则用“同期出现/与……相关/增长/下降/值得关注”。
 8. changes[].sourceRef 与 modules[].sourceRef 必须填写本轮已提供的证据编号（如 E1）。没有可靠证据的条目不要输出。
@@ -55,7 +55,7 @@ function modulesSystemRule(moduleDefs: AttributionModuleDef[]): string {
     return `9. modules 是「深度归因」的落库结论，必须按本行业维度组织，而不是复述指标卡。
    归因角度池约 ${moduleDefs.length} 个（前 ${focus.length} 个高优先，其余次优先兜底）。
    modules[].id 只能是：${ids}。
-   modules[].title 必须与 id 对应，只能是：${titles}。
+   modules[].title 必须与 id 对应，只能是：${titles}（每项已 ≤10 字，禁止改写或截断半句）。
    **优先为高优先维度写有数字的结论**；某高优先维原文确实未披露时，不要硬凑空话，改为从次优先维度中挑选能归因的角度来写。
    最终输出 **3～5 条**有实质内容的 modules（须含数字），禁止整块留空；禁止使用 business、attribution、anomalies、history、peers（除非它们出现在枚举中）。
    每条 conclusion 结构：**先一句定性结论，再跟关键数字**（约 40～80 字）。

@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "maxDisplay": 2,
+  "dimensions": [
+    {
+      "id": "unit_anomaly",
+      "title": "披露单位异常",
+      "default": false,
+      "severityBase": 100,
+      "digPit": "费用/薪酬等行项目把「元」误写成「万元」时，数量级会离谱，正文却很少自证。",
+      "prompt": "扫描费用、薪酬、外包等行项目旁的金额与单位。若按字面单位换算后远超营收或达到万亿级，标记为披露单位/数量级异常，并引用页码与原文数字，勿改写数字。"
+    },
+    {
+      "id": "non_recurring",
+      "title": "非经常性损益",
+      "default": false,
+      "severityBase": 80,
+      "digPit": "归母净利好看时，扣非与非经常性损益占比常被淡化。",
+      "prompt": "对比非经常性损益与归母净利润、扣非净利润。占比偏高或扣非为负而归母为正时写出事实对比与页码。"
+    },
+    {
+      "id": "cash_vs_profit",
+      "title": "利润与现金流",
+      "default": false,
+      "severityBase": 85,
+      "digPit": "利润表强、经营现金流弱时，叙述常强调利润而少提净现比。",
+      "prompt": "对比净利润与经营现金流净额及净现比。利润为正而现金流为负，或净现比明显偏低时陈述数字。"
+    },
+    {
+      "id": "cash_and_debt",
+      "title": "存贷双高",
+      "default": false,
+      "severityBase": 70,
+      "digPit": "账面现金充裕与有息负债并行时，披露常分开叙述、弱化联动。",
+      "prompt": "当货币资金与有息负债相对总资产同时偏高时，陈述现金、有息负债及受限资金（若有）。"
+    },
+    {
+      "id": "goodwill_load",
+      "title": "商誉占比",
+      "default": false,
+      "severityBase": 65,
+      "digPit": "商誉规模大时，减值测试表述易笼统，少谈触发条件。",
+      "prompt": "若商誉相对归母权益偏高，陈述商誉金额与占比；无减值明细则不臆测减值。"
+    },
+    {
+      "id": "restricted_cash",
+      "title": "资金受限",
+      "default": false,
+      "severityBase": 60,
+      "digPit": "货币资金总额亮眼时，受限资金占比常放在附注深处。",
+      "prompt": "若受限货币资金占货币资金比例偏高，陈述受限金额与占比。"
+    },
+    {
+      "id": "short_debt_pressure",
+      "title": "短债压力",
+      "default": false,
+      "severityBase": 68,
+      "digPit": "有息负债结构偏短期时，流动性压力常被总负债口径稀释。",
+      "prompt": "当短期借款与一年内到期非流动负债合计占有息负债偏高，且相对货币资金偏紧时，陈述结构数字。"
+    },
+    {
+      "id": "margin_collapse",
+      "title": "增收不增利",
+      "default": false,
+      "severityBase": 75,
+      "digPit": "营收增长叙事下，利润率下滑或利润负增长常被一笔带过。",
+      "prompt": "有上期可比时：营收同比上升而归母净利同比下降（或毛利率明显下滑）则陈述两边数字。"
+    },
+    {
+      "id": "one_off_boost",
+      "title": "一次性抬升",
+      "default": false,
+      "severityBase": 78,
+      "digPit": "投资收益、政府补助等一次性项目抬升利润时，正文常强调「净利润增长」。",
+      "prompt": "归母净利为正且扣非净利为负，或非经常性损益占归母净利过高时，陈述扣非与非经常性损益事实。"
+    },
+    {
+      "id": "soft_pedal_cues",
+      "title": "表述淡化",
+      "default": false,
+      "severityBase": 55,
+      "digPit": "用「有所波动」「阶段性」等措辞淡化诉讼、处罚、审计关注等事项。",
+      "prompt": "在原文中检索处罚、诉讼、非标意见、整改、关注函等线索；若同时出现淡化措辞，摘录短句与页码，不展开主观评价。"
+    },
+    {
+      "id": "earnings_quality_scan",
+      "title": "盈利质量",
+      "default": true,
+      "severityBase": 0,
+      "digPit": "默认巡检维：无强信号时给出冷静占位。",
+      "prompt": "作为默认卡片：若其余维度均无信号，展示「暂无风险」类表述，不要写「无异常」。"
+    },
+    {
+      "id": "balance_sheet_scan",
+      "title": "资产负债",
+      "default": true,
+      "severityBase": 0,
+      "digPit": "默认巡检维：无强信号时给出冷静占位。",
+      "prompt": "作为默认卡片：若其余维度均无信号，展示「暂无风险」类表述，不要写「无异常」。"
+    }
+  ]
+}

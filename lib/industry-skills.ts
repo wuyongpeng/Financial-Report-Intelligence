@@ -9,6 +9,8 @@ import {
   expandAttributionModulePool,
   industryAttributionModules as industryAttributionModulesFromSeed,
   isEmptyAttributionConclusion,
+  clampAttributionTitle,
+  ATTRIBUTION_TITLE_MAX_CHARS,
   resolveIndustrySkillKey as resolveIndustrySkillKeyFromSeed,
   selectDisplayAttributionModules,
   type AttributionModuleDef,
@@ -22,6 +24,8 @@ export {
   depthAttributionLead,
   expandAttributionModulePool,
   isEmptyAttributionConclusion,
+  clampAttributionTitle,
+  ATTRIBUTION_TITLE_MAX_CHARS,
   selectDisplayAttributionModules,
 };
 

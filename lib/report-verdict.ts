@@ -1,6 +1,7 @@
 import type { Citation } from './detail-model';
 import {
   FALLBACK_ATTRIBUTION_MODULES,
+  clampAttributionTitle,
   isEmptyAttributionConclusion,
   selectDisplayAttributionModules,
   type AttributionModuleDef,
@@ -188,7 +189,7 @@ function parseChange(raw: unknown, evidence: Citation[]): VerdictChange | null {
   return {
     type: type as ChangeType,
     direction: direction as ChangeDirection,
-    title,
+    title: clampAttributionTitle(title),
     description,
     sourceRef,
   };
@@ -229,7 +230,7 @@ function parseModule(raw: unknown, evidence: Citation[], seen: Set<string>): Mod
   if (!sourceRef.length) return null;
   seen.add(id);
   const out: ModuleConclusion = { id, conclusion, sourceRef };
-  if (title) out.title = title;
+  if (title) out.title = clampAttributionTitle(title);
   return out;
 }
 
@@ -420,7 +421,7 @@ export function ensureAttributionModules(
     ) {
       filled.push({
         ...existing,
-        title: existing.title || def.title,
+        title: clampAttributionTitle(existing.title || def.title),
         sourceRef: existing.sourceRef.length
           ? existing.sourceRef
           : bestEffortEvidence(existing.conclusion, opts.evidence),
@@ -431,7 +432,7 @@ export function ensureAttributionModules(
     if (!conclusion) continue;
     filled.push({
       id: def.id,
-      title: def.title,
+      title: clampAttributionTitle(def.title),
       conclusion,
       sourceRef: bestEffortEvidence(conclusion, opts.evidence),
     });
