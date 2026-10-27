@@ -2423,13 +2423,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         <div className="cd-source-toolbar">
           <label><select aria-label="原文模式" value={sourceMode} onChange={e=>{const m=e.target.value as 'pdf'|'text';setSourceMode(m);if(m==='pdf')pageEnter.current='start';}}><option value="pdf">原始PDF</option><option value="text">原文文本</option></select></label>
           <label><select aria-label="跳转原文页码" value={sourcePage} onChange={e=>{readingPosition.current=null;pageEnter.current='start';scrollPageSync.current=false;setSourcePage(Number(e.target.value));setPdfJumpNonce((n)=>n+1);setHighlight('');setSearchHighlight(null);}}>{[...new Set([1,sourcePage,...(pageLabels.length?pageLabels:outline.pages).map(p=>p.page)])].sort((a,b)=>a-b).map(p=><option key={p} value={p}>{pageLabel(p)}</option>)}</select></label>
+          {sourceMode==='pdf' && (
+            <div className="cd-pdf-zoom" role="group" aria-label="PDF 缩放">
+              <button type="button" className="cd-pdf-zoom-btn" aria-label="缩小" title="缩小" disabled={pdfZoom<=VOICE_PDF_ZOOM_MIN} onClick={()=>setPdfZoom(z=>nextPdfZoom(z,{kind:'out'}))}>−</button>
+              <button type="button" className="cd-pdf-zoom-btn" aria-label="放大" title="放大" disabled={pdfZoom>=VOICE_PDF_ZOOM_MAX} onClick={()=>setPdfZoom(z=>nextPdfZoom(z,{kind:'in'}))}>+</button>
+            </div>
+          )}
           <div className="cd-source-toolbar-right">
-            {sourceMode==='pdf' && (
-              <div className="cd-pdf-zoom" role="group" aria-label="PDF 缩放">
-                <button type="button" className="cd-pdf-zoom-btn" aria-label="缩小" title="缩小" disabled={pdfZoom<=VOICE_PDF_ZOOM_MIN} onClick={()=>setPdfZoom(z=>nextPdfZoom(z,{kind:'out'}))}>−</button>
-                <button type="button" className="cd-pdf-zoom-btn" aria-label="放大" title="放大" disabled={pdfZoom>=VOICE_PDF_ZOOM_MAX} onClick={()=>setPdfZoom(z=>nextPdfZoom(z,{kind:'in'}))}>+</button>
-              </div>
-            )}
             <span className="cd-pdf-pick-hint" tabIndex={0}>
               划词智析
               <span className="cd-pdf-pick-tip" role="tooltip">
