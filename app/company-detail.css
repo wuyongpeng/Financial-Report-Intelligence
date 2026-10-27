@@ -218,6 +218,7 @@
 .cd-verdict-down .cd-verdict-dot{background:#dc2626}
 .cd-verdict-down .cd-brief-title{color:#9b2c2c}
 
+/* 重点关注 UI 已下线（产品决策）；样式保留便于日后恢复 */
 /* 重点关注：最多两卡；蓝灰色系与概览一致 */
 .cd-focus-highlights{margin:10px 0 14px;border:1px solid var(--cd-line);border-radius:10px;background:#fff;padding:12px 14px 10px}
 .cd-focus-hl-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 8px}

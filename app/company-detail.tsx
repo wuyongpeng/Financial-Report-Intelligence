@@ -4,7 +4,6 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent
 import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
 import { verdictTone, type ReportVerdict } from '@/lib/report-verdict';
-import { buildFocusHighlights } from '@/lib/focus-highlights';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, mergeLiveSelectionFocus, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
@@ -780,7 +779,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const selfGrowth = growthRanks.find(p => p.code === selected.code)?.value;
   const growthStanding = standing(growthRanks, selfGrowth);
   const findings = keyFindings(reports, selected);
-  const focusHighlights = buildFocusHighlights(selected, { previous, pages: outline.pages });
   const verdictGenerating = verdictStatus === 'loading';
   const flaggedMoves = changes.filter(d => Math.abs(d.amount!) >= 30);
   const skillDepthModules = industryAttributionModules(selected.industry);
@@ -2467,51 +2465,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
               </section>;
             })}
             </div>}
-          </section>
-
-          <section className="cd-focus-highlights" aria-label="重点关注" id="cd-focus-highlights">
-            <div className="cd-focus-hl-head">
-              <h3>重点关注</h3>
-            </div>
-            <ul className="cd-focus-hl-list">
-              {focusHighlights.map((card) => {
-                const quote = [card.title, card.conclusion].filter(Boolean).join(' · ');
-                const firstPage = card.cites[0]?.page;
-                return (
-                  <li
-                    key={card.id}
-                    className={`cd-focus-hl-card cd-focus-card status-${card.status}${pickedCard(`focus-${card.id}`)}`}
-                    data-focus-card
-                    data-focus-id={`focus-${card.id}`}
-                    data-focus-kind="finding"
-                    data-focus-title={card.title}
-                    data-focus-quote={quote}
-                    {...(firstPage ? { 'data-focus-page': String(firstPage) } : {})}
-                  >
-                    <div className="cd-focus-hl-title-row">
-                      <b>{card.title}</b>
-                      <span className={`cd-focus-hl-dot status-${card.status}`} aria-hidden="true" />
-                    </div>
-                    <p className="cd-focus-hl-conclusion">{card.conclusion}</p>
-                    {card.cites.length > 0 ? (
-                      <div className="cd-focus-hl-cites">
-                        {card.cites.map((c, i) => (
-                          <button
-                            type="button"
-                            key={`${card.id}-${c.metric ?? i}-${c.page}`}
-                            className="cd-cite"
-                            title={`定位原文，${pageDescription(c.page)}`}
-                            onClick={() => cite({ page: c.page, quote: c.quote }, false, c.metric ?? null)}
-                          >
-                            [{pageChip(c.page)}]
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
           </section>
 
           <p className="cd-data-note">数据来自已解析财报 · 数字旁角标可定位原文 · 未复核指标请结合 PDF 核验</p>

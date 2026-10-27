@@ -229,3 +229,46 @@ test('重点关注：大额捐款命中', () => {
   assert.match(card.conclusion, /1,200万元|1200万元/);
 });
 
+
+test('重点关注：扣非后净利误标为非经常性损益时不造 100% 卡（平安式）', () => {
+  // UI bug: 非经常性损益 134.91 亿元，占归母净利润 100.0% — both fields = 13,491 百万元.
+  const selected = build('2026Q3', [
+    metric('net_profit', 13_491_000_000),
+    metric('non_recurring_pnl', 13_491_000_000),
+  ]);
+  const cards = buildFocusHighlights(selected);
+  const card = cards.find((c) => c.id === 'non_recurring');
+  assert.ok(!card || card.status !== 'signal');
+  assert.ok(cards.every((c) => !/100\.0%/.test(c.conclusion)), JSON.stringify(cards));
+});
+
+test('重点关注：扣非后净利+归母可推导非经常性损益占比', () => {
+  const selected = build('2026FY', [
+    metric('net_profit', 1e9),
+    metric('profit_ex_non_recurring', 7e8),
+  ]);
+  const cards = buildFocusHighlights(selected);
+  const card = cards.find((c) => c.id === 'non_recurring' || c.id === 'one_off_boost');
+  assert.ok(card);
+  assert.equal(card!.status, 'signal');
+});
+
+test('scanMajorShareholder：√不适用 变更情况不命中（星宇式不适用）', () => {
+  const card = scanMajorShareholder([
+    {
+      page: 12,
+      content: '四、控股股东或实际控制人变更情况□适用 √不适用',
+    },
+  ]);
+  assert.equal(card.status, 'none');
+});
+
+test('scanAdminPenalty：行政处罚章节 √不适用 不命中', () => {
+  const card = scanAdminPenalty([
+    {
+      page: 40,
+      content: '十一、行政处罚情况 □适用 √不适用',
+    },
+  ]);
+  assert.equal(card.status, 'none');
+});

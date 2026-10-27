@@ -59,11 +59,14 @@ const LABELS: MetricDefinition[] = [
     '扣除非经常性损益后归属于母公司股东的净利润',
     '扣除非经常性损益后归属于上市公司股东的净利润',
     '扣除非经常性损益后归属于本公司股东的净利润',
+    '扣除非经常性损益后归属于本行股东的净利润',
     '扣除非经常性损益后的净利润',
     '归属于上市公司股东的扣除非经常性损益的净利润',
     '归属于母公司股东的扣除非经常性损益的净利润',
+    '归属于本行股东的扣除非经常性损益的净利润',
     '扣非后归属于上市公司股东的净利润',
     '扣非后归属于母公司股东的净利润',
+    '扣非后归属于本行股东的净利润',
   ], unit: '元', minAbs: 0, maxAbs: 1e15 },
   { metric: 'cash_and_equivalents', labels: ['货币资金'], unit: '元', minAbs: 0, maxAbs: 1e16 },
   { metric: 'restricted_cash', labels: ['受限货币资金', '使用受限的货币资金', '受限制的货币资金'], unit: '元', minAbs: 0, maxAbs: 1e16 },
@@ -175,6 +178,8 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
   const index = pageText.indexOf(label);
   if (index < 0) return null;
   let nearby = pageText.slice(index + label.length, index + label.length + 220).replace(/[,，]/g, '').replace(/（/g, '(').replace(/）/g, ')');
+  // Skip period stubs (e.g. 2026 年 7-9 月) so the first number is not a calendar year.
+  nearby = nearby.replace(/^(?:\s*(?:20\d{2}|19\d{2})\s*年(?:\s*\d{1,2}\s*[-–—至到]\s*\d{1,2}\s*月)?)+/, ' ');
   const labelUnit = currencyMetrics.has(definition.metric) ? labelCurrencyUnit(nearby) : '';
   // Ratio/per-share rows often look like `基本每股收益（元/股）(1) 0.58`. Strip
   // small numeric footnotes anywhere before the real value. Parenthesized
@@ -264,16 +269,25 @@ function allLabelPositions(text: string, label: string) {
 }
 
 /**
- * Short label「非经常性损益」is a substring of「扣除非经常性损益后…净利润」.
- * Reject those embedded hits so 扣非后净利润 never becomes non_recurring_pnl.
+ * Reject alias collisions:
+ * - Short「非经常性损益」inside「扣除非经常性损益后…净利润」
+ * -「归属于…股东的净利润」inside「扣除非经常性损益后归属于…净利润」(banks: 本行)
  */
 function isCleanLabelHit(page: string, position: number, label: string, metric: MetricDefinition['metric']) {
-  if (metric !== 'non_recurring_pnl') return true;
-  const before = page.slice(Math.max(0, position - 2), position);
-  if (before === '扣除') return false;
-  const after = page[position + label.length] ?? '';
-  // 「…非经常性损益后归属于…」— the amount belongs to profit_ex_non_recurring.
-  if (after === '后') return false;
+  if (metric === 'non_recurring_pnl') {
+    const before = page.slice(Math.max(0, position - 2), position);
+    if (before === '扣除') return false;
+    const after = page[position + label.length] ?? '';
+    // 「…非经常性损益后归属于…」— the amount belongs to profit_ex_non_recurring.
+    if (after === '后') return false;
+    return true;
+  }
+  if (metric === 'net_profit') {
+    const before = page.slice(Math.max(0, position - 28), position);
+    if (/扣除非经常性损益后$/.test(before)) return false;
+    if (/扣非后$/.test(before)) return false;
+    return true;
+  }
   return true;
 }
 

@@ -136,13 +136,32 @@ function card(
 function evalNonRecurring(report: Report): FocusHighlightCard {
   const id = 'non_recurring';
   const cites = citesOf(report, ['non_recurring_pnl', 'profit_ex_non_recurring', 'net_profit']);
-  const nr = value(report, 'non_recurring_pnl');
+  let nr = value(report, 'non_recurring_pnl');
   const parent = value(report, 'net_profit');
   const ex = value(report, 'profit_ex_non_recurring');
   const base = dimMeta(id)?.severityBase ?? 80;
 
+  // 扣非后净利被误标成非经常性损益时，nr≈parent → 100% 假卡；优先用 parent−ex 纠正。
+  if (
+    nr !== undefined &&
+    parent !== undefined &&
+    parent > 0 &&
+    Math.abs(nr - parent) / parent < 0.02
+  ) {
+    if (ex !== undefined) {
+      nr = parent - ex;
+    } else {
+      return card(id, 'none', '未发现需要关注的情况', cites);
+    }
+  }
+
   if (parent === undefined || nr === undefined) {
-    return card(id, 'insufficient', '相关数据不足，暂无法判断', cites);
+    // 有归母与扣非时可推导非经常性损益；否则不臆造占比卡。
+    if (parent !== undefined && ex !== undefined) {
+      nr = parent - ex;
+    } else {
+      return card(id, 'insufficient', '相关数据不足，暂无法判断', cites);
+    }
   }
 
   const thr = FOCUS_THRESHOLDS.nonRecurringToParentProfit;
@@ -454,6 +473,16 @@ function quoteAround(text: string, idx: number, before = 12, after = 56): string
   return text.slice(Math.max(0, idx - before), Math.min(text.length, idx + after)).trim();
 }
 
+/** A-share checkbox rows: 「□适用 √不适用」means the section does not apply. */
+function isApplicabilityNegative(win: string): boolean {
+  const t = win.replace(/\s+/g, '');
+  if (/√不适用|☑不适用|●不适用/.test(t)) return true;
+  if (/未发生(?:变更|变动)|无(?:变更|变动|此类事项)/.test(win)) return true;
+  // 「适用」checked without 不适用 → positive; bare 不适用 without checkmark still counts.
+  if (/不适用/.test(t) && !/√适用|☑适用/.test(t)) return true;
+  return false;
+}
+
 /** 行政处罚 / 监管措施：独立命中，不依赖淡化措辞。 */
 export function scanAdminPenalty(pages: FocusPage[] | undefined): FocusHighlightCard {
   const id = 'admin_penalty';
@@ -467,6 +496,9 @@ export function scanAdminPenalty(pages: FocusPage[] | undefined): FocusHighlight
     const text = (p.content || '').replace(/\s+/g, ' ');
     const m = text.match(hitRe);
     if (!m || m.index === undefined) continue;
+    const win = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 64));
+    // 「行政处罚情况 □适用 √不适用」is a section header, not a penalty event.
+    if (isApplicabilityNegative(win)) continue;
     const label = m[0];
     return card(
       id,
@@ -487,29 +519,27 @@ export function scanMajorShareholder(pages: FocusPage[] | undefined): FocusHighl
     return card(id, 'insufficient', '原文页未就绪，暂无法判断', []);
   }
   const actorRe = /控股股东|实际控制人|第一大股东|持股(?:比例)?第一/;
-  const changeRe =
-    /变更|变动|转让|减持|增持|被动减持|协议转让|控制权|不再(?:是|担任)|变为|成为|丧失/;
+  // Bare「变更/变动」often only appears in「变更情况 □适用 √不适用」headings — require stronger cues.
+  const strongChangeRe =
+    /转让|减持|增持|被动减持|协议转让|控制权|不再(?:是|担任)|变为|成为|丧失|发生变更|发生变动/;
   for (const p of pages) {
     const text = (p.content || '').replace(/\s+/g, ' ');
-    if (!actorRe.test(text) || !changeRe.test(text)) continue;
-    // Prefer a window that contains both actor + change cues.
-    let bestIdx = -1;
-    let bestLabel = '';
+    if (!actorRe.test(text) || !strongChangeRe.test(text)) continue;
     const actorHit = text.match(actorRe);
-    if (actorHit && actorHit.index !== undefined) {
-      const win = text.slice(Math.max(0, actorHit.index - 20), actorHit.index + 80);
-      if (changeRe.test(win)) {
-        bestIdx = actorHit.index;
-        bestLabel = actorHit[0];
-      }
+    if (!actorHit || actorHit.index === undefined) continue;
+    const win = text.slice(Math.max(0, actorHit.index - 24), actorHit.index + 96);
+    if (isApplicabilityNegative(win)) continue;
+    if (!strongChangeRe.test(win)) continue;
+    // Still skip pure checklist headings that somehow contain a strong word elsewhere on the page.
+    if (/变更情况|变动情况/.test(win) && isApplicabilityNegative(text.slice(Math.max(0, actorHit.index - 8), actorHit.index + 40))) {
+      continue;
     }
-    if (bestIdx < 0) continue;
-    const changeHit = text.slice(bestIdx, bestIdx + 80).match(changeRe)?.[0] ?? '变动';
+    const changeHit = win.match(strongChangeRe)?.[0] ?? '变动';
     return card(
       id,
       'signal',
-      `原文出现「${bestLabel}」相关「${changeHit}」披露。`,
-      [{ page: p.page, quote: quoteAround(text, bestIdx) }],
+      `原文出现「${actorHit[0]}」相关「${changeHit}」披露。`,
+      [{ page: p.page, quote: quoteAround(text, actorHit.index) }],
       base,
     );
   }
@@ -532,13 +562,16 @@ export function scanDividendChange(pages: FocusPage[] | undefined): FocusHighlig
     const text = (p.content || '').replace(/\s+/g, ' ');
     const strong = text.match(strongRe);
     if (strong && strong.index !== undefined) {
-      return card(
-        id,
-        'signal',
-        `原文披露「${strong[0]}」。`,
-        [{ page: p.page, quote: quoteAround(text, strong.index) }],
-        base + 8,
-      );
+      const win = text.slice(Math.max(0, strong.index - 24), strong.index + 48);
+      if (!isApplicabilityNegative(win)) {
+        return card(
+          id,
+          'signal',
+          `原文披露「${strong[0]}」。`,
+          [{ page: p.page, quote: quoteAround(text, strong.index) }],
+          base + 8,
+        );
+      }
     }
     if (!softChangeRe.test(text) || !changeCueRe.test(text)) continue;
     const soft = text.match(softChangeRe);

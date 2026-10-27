@@ -178,6 +178,29 @@ test('still extracts explicit 非经常性损益合计 beside 扣非后净利润
   assert.equal(metrics.find((item) => item.metric === 'profit_ex_non_recurring')?.value, 1_464_490_000);
 });
 
+test('bank wording: 扣除非经常性损益后归属于本行股东的净利润 is profit_ex, not non_recurring/net_profit alias', () => {
+  // 平安银行式：单位百万元；短标签「非经常性损益」/「归属于本行股东的净利润」都是扣非后行的子串。
+  const metrics = parseCoreMetricPages([
+    '报告摘要 主要会计数据 单位：人民币百万元 归属于本行股东的净利润 13,500 扣除非经常性损益后归属于本行股东的净利润 13,491 同比增 1.1%',
+  ]);
+  assert.equal(metrics.some((item) => item.metric === 'non_recurring_pnl'), false);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 13_500_000_000);
+  const ex = metrics.find((item) => item.metric === 'profit_ex_non_recurring');
+  assert.equal(ex?.value, 13_491_000_000);
+  assert.match(ex?.sourceLabel ?? '', /本行/);
+});
+
+test('does not take calendar year as amount after 扣非后本行净利润 label', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据（人民币百万元）扣除非经常性损益后归属于本行股东的净利润 2026 年 7-9 月 13,491 同比增 1.1%',
+  ]);
+  assert.equal(metrics.some((item) => item.metric === 'non_recurring_pnl'), false);
+  // net_profit must not bind the embedded「归属于本行股东的净利润」to year 2026.
+  assert.equal(metrics.some((item) => item.metric === 'net_profit' && item.value === 2_026_000_000), false);
+  assert.equal(metrics.find((item) => item.metric === 'profit_ex_non_recurring')?.value, 13_491_000_000);
+});
+
+
 test('ZTE 2026H1 summary keeps 千元 scale and disclosed YoY for 归母净利润', () => {
   // Layout-normalized excerpt from 中兴通讯 000063 二〇二六年半年度报告 §1.2.3
   // (单位：千元, three columns 本期 | 上年同期 | 同比增减).
