@@ -1,0 +1,123 @@
+# 黄金题库（验收 / 回归）
+
+整理日期：2026-10-27。  
+用途：答辩 PPT「验证效果 · 测试数据」的诚实说明；以及日常回归问答质量的**题库骨架**。
+
+---
+
+## 1. 目的
+
+- 固定一组「该怎么答、该不该有出处」的验收题，覆盖结构化指标、证据问答、同行、边界拒答。
+- 用于**人工评分 + 结构完整性检查**，不是自动算准确率的评测平台。
+- 对应产品主张：结论可核对、题外话有边界；**不**对应「整体财报准确率 xx%」。
+
+---
+
+## 2. 题库位置与规模
+
+| 项 | 值 |
+|---|---|
+| 文件 | `data/golden-questions.json` |
+| 评测脚本 | `scripts/eval-questions.ts` |
+| npm 命令 | `npm run eval:questions` |
+| 题目数（当前） | **24** |
+| `manualScore` 非空 | **0**（截至 2026-10-27） |
+
+### 按 `kind` 分布
+
+| kind | 数量 | 含义 |
+|---|---:|---|
+| `structured` | 4 | 核心指标数值题（营收/归母净利/EPS/ROE） |
+| `evidence` | 18 | 需结合原文解释/变化/风险等；多数期望出处 |
+| `peer` | 1 | 同行/绿色通道类 |
+| `boundary` | 1 | 题外（如预测股价），验边界策略 |
+
+---
+
+## 3. 字段 schema
+
+每条题目大致字段（以 JSON 为准）：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 稳定标识，如 `metric-revenue` |
+| `question` | 题干（中文） |
+| `kind` | `structured` / `evidence` / `peer` / `boundary` |
+| `expectedMetric` | 可选；结构化题期望的指标键（如 `revenue`） |
+| `expectedTerms` | 可选；期望出现的关键词列表 |
+| `expectCitations` | 是否期望答案带页码/出处 |
+| `expectNumeric` | 是否期望可核对数值 |
+| `rubric` | 人工评分要点（一句话） |
+| `manualScore` | 人工分；当前多为 `null`，填入后才算「已评」 |
+
+示例（节选）：
+
+```json
+{
+  "id": "metric-revenue",
+  "question": "营业收入是多少？",
+  "kind": "structured",
+  "expectedMetric": "revenue",
+  "expectCitations": false,
+  "expectNumeric": true,
+  "rubric": "数值与单位正确，引用页码可打开",
+  "manualScore": null
+}
+```
+
+---
+
+## 4. 脚本做什么 / 不做什么
+
+运行：
+
+```bash
+npm run eval:questions
+```
+
+**当前实际行为**（见 `scripts/eval-questions.ts` 文件头注释）：
+
+- **做**：遍历题库；检查每题是否具备可评分字段（`kind` + `expectedMetric` / `expectedTerms` / `rubric` 之一）；打印 `OK` / `MISSING`；统计 `ok/total`。
+- **做**：若可评分题不足全量，或总量 &lt; 20，以非零退出码失败（CI/本地可当门槛）。
+- **不做**：不调用 LLM、不跑产品问答、不比对答案、不计算准确率。
+- **不做**：不读取、不要求 `manualScore` 已填。
+
+因此：**不能把「24/24 questions have scoring fields」写成准确率**；那只表示题库字段齐。
+
+---
+
+## 5. 如何加题
+
+1. 在 `data/golden-questions.json` 追加一条对象，`id` 唯一。
+2. 选对 `kind`；指标题填 `expectedMetric` + `expectNumeric`；证据题通常 `expectCitations: true` 并写清 `rubric`。
+3. 边界题写清「期望软提示/短答，而非硬编股价」一类 rubric。
+4. 跑 `npm run eval:questions`，确认新题为 `OK`。
+5. 在选定样例公司/期次上人工作答，把 `manualScore` 从 `null` 改成约定分制（建议 0–1 或 0–5，全库统一；改分制时在本文件补一行约定）。
+
+---
+
+## 6. 人工评分约定（建议）
+
+| 步骤 | 说明 |
+|---|---|
+| 固定样本 | 指定公司 + 期次（如答辩用东鹏饮料 + 已智析最新正式报告） |
+| 作答 | 用产品追问栏真实提问；记录答案原文与是否点回成功 |
+| 打分 | 对照 `rubric`：数值对不对、出处能不能点开、边界题是否乱编 |
+| 回写 | 只改该题 `manualScore`；必要时在 PR 描述写样本期次 |
+| 报告 | PPT/文档只写「已人工评 x/24」；未评完则写「结构已备、人工评分进行中」 |
+
+**禁写**：在 `manualScore` 仍全空时声称「黄金题准确率 xx%」。
+
+---
+
+## 7. 与答辩「测试数据」栏的挂钩
+
+| 可写上 PPT 的实话 | 不要写 |
+|---|---|
+| 黄金题库 24 题（结构/证据/同行/边界） | 准确率 95% 等无依据数字 |
+| `eval:questions` 校验字段齐全 | 「自动评测已通过」暗示模型答对 |
+| 人工评分进度（当前 0/24 已填） | 虚构客户验收分 |
+
+现场证明力仍优先靠演示脚本 **S3 点回原文**，题库是书面证据，不是现场念数字。
+
+相关：`docs/unit-tests.md`、`docs/finals-demo-script.md`、`docs/project-review-2026-10-26.md`（其中「人工评分非空 0」与本文一致；单测条数以 `unit-tests.md` 当日复跑为准）。

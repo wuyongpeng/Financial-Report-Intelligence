@@ -99,3 +99,4 @@
 - 本页是**功能盘点**，不是操作手册；操作步骤见 `docs/user-guide.md` 等文档。
 - 「重点关注」类主动排雷卡片已从产品 UI 下线（分析逻辑可保留备用），故未列入上表。
 - 答辩演示编排（用例式、含模块顺序理由）：见 `docs/finals-demo-script.md`。
+- 验证效果材料（单测 / 黄金题库 / 用户调研标准与结果；POC 暂无）：`docs/unit-tests.md`、`docs/golden-questions.md`、`docs/user-research-standard.md`、`docs/user-research-results.md`。
