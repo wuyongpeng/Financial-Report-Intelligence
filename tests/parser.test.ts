@@ -134,6 +134,27 @@ test('captures disclosed prior and YoY from 主要会计数据 three-column rows
   assert.equal(cash?.yoyPct, -109.74);
 });
 
+test('CATL-style row: current then YoY% (no prior amount) must not split 58.58%', () => {
+  // 宁德时代季报摘要：本报告期 | 本报告期比上年同期增减 | 年初至报告期末 | …
+  // Bug: regex backtracked "58.58%" into prior=58.5 (+千元→58500≈0亿) and yoy=8%.
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 项目 本报告期 本报告期比上年同期增减 年初至报告期末 年初至报告期末比上年同期增减 营业收入（千元） 165,220,844 58.58% 442,137,424 56.19% 归属于上市公司股东的净利润（千元） 12,345,678 20.50% 30,000,000 15.00% 基本每股收益（元/股） 1.23 8.00% 3.21 10.00% 加权平均净资产收益率 5.60% 1.20 个百分点 12.30% 0.80 个百分点',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 165_220_844_000);
+  assert.equal(revenue?.yoyPct, 58.58);
+  assert.equal(revenue?.priorValue, undefined);
+
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 12_345_678_000);
+  assert.equal(profit?.yoyPct, 20.5);
+  assert.equal(profit?.priorValue, undefined);
+
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 1.23);
+  assert.equal(eps?.yoyPct, 8);
+});
+
 test('does not scale disclosed YoY percent by page 千元 unit', () => {
   const metrics = parseCoreMetricPages([
     '主要会计数据 单位：人民币千元 营业收入 10,000 8,000 (20.00%)',

@@ -161,7 +161,14 @@ function parseTrailingPriorAndYoy(rest: string) {
   let priorValue: number | undefined;
   let yoyPct: number | undefined;
   let cursor = rest;
-  const priorMatch = cursor.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?!\s*%)/);
+  // CATL quarterly tables: 本报告期 | 同比增减% | 年初至报告期末 | …
+  // Prefer an immediate % column so "58.58%" is not split into prior=58.5 + yoy=8%.
+  const immediateYoy = parseYoyPercentToken(cursor);
+  if (immediateYoy) {
+    return { priorValue: undefined, yoyPct: immediateYoy.value };
+  }
+  // Prior amount: refuse prefixes of a percent token (58.5 from 58.58%).
+  const priorMatch = cursor.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)/);
   if (priorMatch) {
     const parsed = parseSignedNumber(priorMatch[2], priorMatch[1], priorMatch[3]);
     if (parsed !== null) {
