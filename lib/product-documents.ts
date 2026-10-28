@@ -3,18 +3,29 @@ import { resolve } from 'node:path';
 
 export type ProductDocument = { name: string; title: string };
 
+/** Public /docs catalog order. Only these top-level Markdown files are listed. */
+export const PUBLIC_DOCUMENT_ORDER = [
+  '产品介绍.md',
+  '财报分析说明.md',
+  '功能评测.md',
+  '用户调研.md',
+  '技术架构.md',
+] as const;
+
 export function documentHref(name: string) {
   return `/docs?file=${encodeURIComponent(name)}`;
 }
 
-/** Only regular Markdown files directly inside the public documentation directory. */
+/** Only whitelisted Markdown files directly inside the public documentation directory. */
 export async function listProductDocuments(directory = resolve(process.cwd(), 'docs')): Promise<ProductDocument[]> {
   try {
     const entries = await readdir(directory, { withFileTypes: true });
-    return entries
-      .filter(entry => entry.isFile() && entry.name.endsWith('.md'))
-      .map(entry => ({ name: entry.name, title: entry.name.slice(0, -3) }))
-      .sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
+    const available = new Set(
+      entries.filter(entry => entry.isFile() && entry.name.endsWith('.md')).map(entry => entry.name),
+    );
+    return PUBLIC_DOCUMENT_ORDER
+      .filter(name => available.has(name))
+      .map(name => ({ name, title: name.slice(0, -3) }));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;

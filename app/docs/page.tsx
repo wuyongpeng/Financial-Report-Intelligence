@@ -24,11 +24,11 @@ export default async function DocumentsPage({ searchParams }: {
       <header className="eva-docs-header">
         <Link href="/" className="eva-docs-back">← 返回首页</Link>
         <h1>文档中心</h1>
-        <p>产品说明、技术架构与分析标准</p>
+        <p>产品介绍 · 财报分析说明 · 功能评测 · 用户调研 · 技术架构</p>
       </header>
       <div className={`eva-docs-layout${document ? ' is-reading' : ''}`}>
         <nav className="eva-docs-nav" aria-label="文档列表">
-          <div className="eva-docs-nav-title">全部文档 <span>{documents.length} 篇</span></div>
+          <div className="eva-docs-nav-title">对外文档 <span>{documents.length} 篇</span></div>
           {documents.length ? documents.map(item => (
             <Link key={item.name} href={documentHref(item.name)} aria-current={document?.name === item.name ? 'page' : undefined}>
               {item.title}
@@ -47,7 +47,7 @@ export default async function DocumentsPage({ searchParams }: {
           <section className="eva-docs-welcome">
             <span className="eva-docs-symbol" aria-hidden="true">▤</span>
             <h2>从这里了解 Eva</h2>
-            <p>选择一篇文档阅读。分析标准与候选目录会明确区分已实现能力和后续规划。</p>
+            <p>按左侧顺序阅读。分析说明会区分已实现能力与规划项；功能评测不写无依据的准确率。</p>
             <Link href={documentHref('产品介绍.md')}>阅读产品介绍 →</Link>
           </section>
         )}

@@ -6,26 +6,41 @@ import { join } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import MetricLinkage from '../app/metric-linkage';
-import { documentHref, listProductDocuments, productDocumentLink, readProductDocument } from '../lib/product-documents';
+import { documentHref, listProductDocuments, productDocumentLink, readProductDocument, PUBLIC_DOCUMENT_ORDER } from '../lib/product-documents';
 import {
   RELATION_DATA_LABEL,
   RELATION_TAKE_LABEL,
   type MetricRelationshipsResult,
 } from '../lib/metric-relationships';
 
-test('documentation lists Chinese Markdown files and refuses paths outside the catalog', async () => {
+test('documentation lists whitelisted Markdown in fixed order and refuses paths outside the catalog', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'eva-docs-'));
   try {
+    await writeFile(join(directory, '技术架构.md'), '# 技术\n');
     await writeFile(join(directory, '产品介绍.md'), '# 产品介绍\n正文');
+    await writeFile(join(directory, '功能评测.md'), '# 评测\n');
+    await writeFile(join(directory, '旧材料.md'), '# 不应对外\n');
     await writeFile(join(directory, 'ignore.txt'), 'not a document');
+    await mkdir(join(directory, '_archive'));
+    await writeFile(join(directory, '_archive', '隐藏.md'), '# 归档\n');
     await mkdir(join(directory, 'nested.md'));
     const documents = await listProductDocuments(directory);
-    assert.deepEqual(documents, [{ name: '产品介绍.md', title: '产品介绍' }]);
+    assert.deepEqual(documents, [
+      { name: '产品介绍.md', title: '产品介绍' },
+      { name: '功能评测.md', title: '功能评测' },
+      { name: '技术架构.md', title: '技术架构' },
+    ]);
     assert.equal(await readProductDocument('产品介绍.md', directory), '# 产品介绍\n正文');
+    assert.equal(await readProductDocument('旧材料.md', directory), null);
     assert.equal(await readProductDocument('../outside.md', directory), null);
     assert.equal(await readProductDocument('/etc/passwd', directory), null);
     assert.deepEqual(await listProductDocuments(join(directory, 'missing')), []);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('repo docs root exposes exactly the five public documents in order', async () => {
+  const documents = await listProductDocuments();
+  assert.deepEqual(documents.map(item => item.name), [...PUBLIC_DOCUMENT_ORDER]);
 });
 
 test('documentation links route Chinese names and reject unsafe protocols and unknown local files', () => {
