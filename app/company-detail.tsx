@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
+import { buildMetricRelationships } from '@/lib/metric-relationships';
 import { verdictTone, type ReportVerdict } from '@/lib/report-verdict';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
@@ -785,6 +786,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     };
   });
   const changes = deltas.filter(d => d.amount !== undefined).sort((a,b) => Math.abs(b.amount!) - Math.abs(a.amount!));
+  const metricRelationships = buildMetricRelationships(selected, {
+    previous: previous ?? null,
+    preferDisclosedYoy: baselineIsDefault,
+  });
   const revenue = value(selected, 'revenue'), profit = value(selected, 'net_profit');
   const pr = value(previous,'revenue'), pp = value(previous,'net_profit');
   const bridge = revenue !== undefined && profit !== undefined && pr !== undefined && pp !== undefined ? profitBridge(revenue, profit, pr, pp) : null;
@@ -2501,6 +2506,72 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </article>;
           })}</div>
           {baselineOptions.length>0 && <div className="cd-baseline-row"><label>对比基准 <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`${period(defaultPrevious)}（上年同期）`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}</select></label>{!baselineIsDefault && previous && <span className="cd-note">当前以 {period(previous)} 为基准，非上年同期。</span>}</div>}
+          {metricRelationships.length > 0 && (
+            <section className="cd-rel-block" aria-label="数字关系">
+              <b className="cd-rel-heading">数字关系</b>
+              <div className="cd-rel-list">
+                {metricRelationships.map((card) => (
+                  <article key={card.id} className="cd-rel-card" data-rel-id={card.id}>
+                    <div className="cd-rel-card-head">
+                      <h4>{card.title}</h4>
+                      <button
+                        type="button"
+                        className="cd-rel-ask"
+                        disabled={asking}
+                        onClick={() => draftAsk(card.askPrompt)}
+                      >追问这条</button>
+                    </div>
+                    <p className="cd-rel-phenomenon">{card.phenomenon}</p>
+                    <ul className="cd-rel-numbers">
+                      {card.numbers.map((n) => (
+                        <li key={n.metric}>
+                          <span className="cd-rel-num-label">{n.label}</span>
+                          <strong>{n.valueText}</strong>
+                          {n.page != null && (
+                            <button
+                              type="button"
+                              className="cd-cite"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const c = metricCitation(n.metric);
+                                if (c) cite(c, false, n.metric);
+                              }}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                const c = metricCitation(n.metric);
+                                if (c) cite(c, true, n.metric);
+                              }}
+                              title={`单击定位原文，${pageDescription(n.page)}`}
+                            >[{pageChip(n.page)}]</button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                    {card.cites.length > 0 && (
+                      <div className="cd-rel-cites">
+                        {card.cites.map((c) => (
+                          <button
+                            key={`${card.id}-${c.page}-${c.metric ?? ''}`}
+                            type="button"
+                            className="cd-cite"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cite({ page: c.page, quote: c.quote }, false, c.metric ?? null);
+                            }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              cite({ page: c.page, quote: c.quote }, true, c.metric ?? null);
+                            }}
+                            title={`单击定位原文，${pageDescription(c.page)}`}
+                          >[{pageChip(c.page)}]</button>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
           </div>
 
           <section
