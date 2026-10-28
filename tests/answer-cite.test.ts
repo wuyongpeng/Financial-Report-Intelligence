@@ -67,3 +67,12 @@ test('unique answer sources fall back to company and period when reportId is mis
   );
   assert.deepEqual(sources.map(s => s.id), ['E1']);
 });
+
+test('normalizes legacy [PDF n] cite marks to [P n]', () => {
+  const tokens = tokenizeAnswerCites('利润改善[PDF 20]，现金流[PDF20]');
+  const marks = tokens.filter((t) => t.kind === 'mark');
+  assert.equal(marks.length, 2);
+  assert.equal(marks[0]?.kind === 'mark' && marks[0].printed, '20');
+  assert.equal(marks[1]?.kind === 'mark' && marks[1].printed, '20');
+  assert.ok(tokens.some((t) => t.kind === 'mark' && t.raw === '[P20]'));
+});

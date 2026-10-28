@@ -108,8 +108,8 @@ function citesOf(report: Report, metrics: MetricName[]): MetricRelCite[] {
 
 function pageHint(cites: MetricRelCite[]): string {
   if (!cites.length) return '';
-  const pages = cites.map((c) => `第 ${c.page} 页`).join('、');
-  return `（出处：PDF ${pages}）`;
+  const pages = cites.map((c) => `[P${c.page}]`).join('、');
+  return `（出处：${pages}）`;
 }
 
 function assertNoAdvice(text: string): string {

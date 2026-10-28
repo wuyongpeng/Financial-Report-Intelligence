@@ -3,7 +3,11 @@ export type AnswerCiteToken =
   | { kind: 'mark'; raw: string; evidenceId?: string; pageWord?: number; printed?: string };
 
 export function tokenizeAnswerCites(text: string): AnswerCiteToken[] {
-  const normalized = text.replace(/(】)(?=【)/g, '$1 ').replace(/(\])(?=\[P)/g, '$1 ');
+  // Unify legacy [PDF 20] / [PDF20] marks to [P20] before tokenizing.
+  const normalized = text
+    .replace(/\[\s*PDF\s*(\d+)\s*\]/gi, '[P$1]')
+    .replace(/(】)(?=【)/g, '$1 ')
+    .replace(/(\])(?=\[P)/g, '$1 ');
   return normalized.split(/(【(?:E\d+|第\s*\d+\s*页)】|\[P\d+\])/g).flatMap((part): AnswerCiteToken[] => {
     if (!part) return [];
     const marked = part.match(/^【(?:E(\d+)|第\s*(\d+)\s*页)】$/);

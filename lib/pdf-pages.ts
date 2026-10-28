@@ -51,7 +51,7 @@ export function buildPageLabels(pages: { page: number; content: string }[]): Pdf
         ? String(printed)
         : offset !== undefined && page <= offset
           ? (page === 1 ? '封面' : '未编号页')
-          : `PDF ${page}`,
+          : `P${page}`,
     };
   });
 }

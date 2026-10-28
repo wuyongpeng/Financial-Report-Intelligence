@@ -735,16 +735,18 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   function pageLabel(page: number) {
     const item = pageLabels.find(p=>p.page===page);
     if (item?.printed != null) return `P${item.printed}`;
-    return printedKnown && item ? item.label : `PDF ${page}`;
+    // Cover / unnumbered pages keep Chinese labels; everything else is Pxx (never "PDF n").
+    if (printedKnown && item && (item.label === '封面' || item.label === '未编号页')) return item.label;
+    return `P${item?.printed ?? page}`;
   }
-  /** Quiet chip label for overview cites — always [Pxx], never "PDF n". */
+  /** Quiet chip label for all user-visible cite badges — always [Pxx], never "PDF n". */
   function pageChip(page: number) {
     const item = pageLabels.find(p => p.page === page);
     return `P${item?.printed ?? page}`;
   }
   function pageDescription(page: number) {
     const item = pageLabels.find(p=>p.page===page);
-    return item?.printed != null ? `正文第 ${item.printed} 页（PDF 第 ${page} 页）` : `${item?.label ?? `PDF ${page}`}（PDF 第 ${page} 页）`;
+    return item?.printed != null ? `正文第 ${item.printed} 页（PDF 第 ${page} 页）` : `${pageLabel(page)}（PDF 第 ${page} 页）`;
   }
 
   const history = comparableHistory(reports, selected);
@@ -1056,7 +1058,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         onClick={() => jumpCitation(c)}
         onDoubleClick={() => jumpCitation(c, true)}
       >
-        [{pageLabel(c.page)}]
+        [{pageChip(c.page)}]
         <span className="cd-cite-tip" role="tooltip">{hover}</span>
       </button>
     );

@@ -81,3 +81,15 @@ test('keeps same-page 目录 neighbors (Maotai H1 style)', () => {
   assert.match(s8!.title, /第八节\s*财务报告/);
   assert.ok(outline.every((item, i, all) => i === 0 || item.page >= all[i - 1].page));
 });
+
+test('buildPageLabels uses Pxx when printed numbering is unknown', () => {
+  const labels = buildPageLabels([
+    { page: 1, content: '封面 某某股份有限公司年度报告' },
+    { page: 2, content: '重要提示 本公司董事会保证' },
+    { page: 3, content: '无页码标记的正文段落' },
+  ]);
+  assert.equal(labels.find((l) => l.page === 2)?.printed, null);
+  assert.equal(labels.find((l) => l.page === 2)?.label, 'P2');
+  assert.ok(labels.every((l) => !String(l.label).startsWith('PDF ')));
+});
+
