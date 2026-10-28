@@ -33,7 +33,7 @@ const SYSTEM_PROMPT_CORE = `你是「财报智析 Eva」的速判模块。只根
 5. changes[].title 简短，必须 ≤10 个中文字，语义完整，不要截断半句，不要写成完整句子。
 6. changes[].description 1～2 句，尽量包含原文或结构化数据中已有的数字与同比/环比；不得编造数字或事实。
 7. 禁止推断财报未明确支持的因果关系。只有原文明确写了原因，才能使用“由于/主要原因/导致/驱动/受……影响”；否则用“同期出现/与……相关/增长/下降/值得关注”。
-8. changes[].sourceRef 与 modules[].sourceRef 必须填写本轮已提供的证据编号（如 E1）。没有可靠证据的条目不要输出。
+8. changes[].sourceRef 与 modules[].sourceRef 必须填写本轮已提供的证据编号（如 E1）。没有可靠证据的条目不要输出。conclusion / description 正文禁止写【E数字】或 [E数字]（那是内部编号，不是给用户看的）；若需标页，只用 [P页码] 紧贴相关数字或分句末，禁止在段末堆砌一串角标。
 10. 不要输出投资建议。`;
 
 function isFallbackModuleDefs(moduleDefs: AttributionModuleDef[]): boolean {

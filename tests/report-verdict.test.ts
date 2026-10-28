@@ -172,7 +172,7 @@ test('stored verdict JSON round-trips without calling the model', () => {
   const again = acceptVerdictPayload(JSON.parse(JSON.stringify(stored)));
   assert.equal(again?.verdict.label, '增收不增利');
   assert.equal(again?.changes[0].sourceRef[0].page, 7);
-  assert.equal(again?.modules[0].conclusion, '海外收入同比增长32%。');
+  assert.match(again?.modules[0].conclusion ?? '', /海外收入同比增长32%(\[P12\])?。/);
 });
 
 test('accepts industry-skill module ids when title is present', () => {
@@ -291,3 +291,27 @@ test('ensureAttributionModules falls back to secondary when primary lack disclos
     assert.match(row.conclusion, /\d/);
   }
 });
+
+test('module conclusions strip 【E】 and inline unique [P] marks from evidence', () => {
+  const evidence = [
+    { id: 'E2', reportId: 'r1', companyName: '示例', period: '2025H1', page: 6, quote: '净利润同比增加16.99亿元至147.56亿元', code: '600900' },
+    { id: 'E5', reportId: 'r1', companyName: '示例', period: '2025H1', page: 6, quote: '同比增长13.02%', code: '600900' },
+    { id: 'E49', reportId: 'r1', companyName: '示例', period: '2025H1', page: 9, quote: '财务费用减少6.62亿元', code: '600900' },
+  ];
+  const parsed = parseReportVerdict({
+    verdict: { label: '稳健增长', summary: '盈利保持增长。' },
+    changes: [],
+    modules: [{
+      id: 'attribution',
+      conclusion: '净利润同比增加16.99亿元至147.56亿元，主因财务费用减少6.62亿元。【E2】【E5】【E49】',
+      sourceRef: ['E2', 'E5', 'E49'],
+    }],
+  }, evidence);
+  assert.ok(parsed);
+  const mod = parsed!.modules[0];
+  assert.equal(mod.conclusion.includes('【E'), false);
+  assert.equal(mod.sourceRef.map((c) => c.page).join(','), '6,9');
+  assert.match(mod.conclusion, /\[P6\]/);
+  assert.match(mod.conclusion, /\[P9\]/);
+});
+

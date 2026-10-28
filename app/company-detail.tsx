@@ -9,7 +9,7 @@ import { verdictTone, type ReportVerdict } from '@/lib/report-verdict';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, mergeLiveSelectionFocus, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
-import { citeFilingLabel, citeHoverText, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources } from '@/lib/answer-cite';
+import { citeFilingLabel, citeHoverText, embedAttributionPageCites, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources, uniqueCitationsByPage } from '@/lib/answer-cite';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
 import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
@@ -828,7 +828,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   );
   function aiModule(id: string) {
     const ai = verdict?.modules.find(m => m.id === id);
-    return ai?.conclusion ? { text: ai.conclusion, sourceRef: ai.sourceRef } : { text: '', sourceRef: [] as Citation[] };
+    if (!ai?.conclusion) return { text: '', sourceRef: [] as Citation[] };
+    // Old payloads may still embed 【En】 or pile sourceRef chips; rewrite for inline [Pxx].
+    const text = embedAttributionPageCites(ai.conclusion, ai.sourceRef);
+    return { text, sourceRef: uniqueCitationsByPage(ai.sourceRef) };
   }
   function computedHeadline(id: string) {
     if (industryDepthMode) return { text: '', sourceRef: [] as Citation[] };
@@ -1080,7 +1083,22 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setJumpAsk(null);
     setJumpBlocked(false);
   }
-  function renderCiteChunk(message: Message) {
+  function renderModuleCites(text: string, cites: Citation[]) {
+    let prevPage: number | null = null;
+    return tokenizeAnswerCites(text).map((token, i) => {
+      if (token.kind === 'text') {
+        if (!token.text) return null;
+        prevPage = null;
+        return <Fragment key={i}>{token.text}</Fragment>;
+      }
+      const c = matchAnswerCitation(token, cites, pageLabel);
+      if (!c) return null;
+      if (prevPage === c.page) return null;
+      prevPage = c.page;
+      return citationLink(c, i);
+    });
+  }
+    function renderCiteChunk(message: Message) {
     let prevCiteId: string | null = null;
     return (chunk: string) => tokenizeAnswerCites(chunk).map((token, i) => {
       if (token.kind === 'text') {
@@ -2704,8 +2722,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                   <div className="cd-module-static">
                     <span className="cd-module-number">0{index+1}</span>
                     <div>
-                      <h3>{label}{headline.text ? <span className="cd-module-lead">{headline.text}</span> : null}</h3>
-                      {headline.sourceRef.length > 0 && <div className="cd-module-cites">{headline.sourceRef.map((c, i) => citationLink(c, `${id}-${i}`))}</div>}
+                      <h3>{label}{headline.text ? <span className="cd-module-lead">{renderModuleCites(headline.text, headline.sourceRef)}</span> : null}</h3>
                       {!headline.text && <p className="cd-module-empty">本期该维度披露有限</p>}
                     </div>
                   </div>
@@ -2731,11 +2748,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                       <span className="cd-module-number">0{index+1}</span>
                       <div>
                         <h3>{label}</h3>
-                        {headline.text ? <p>{headline.text}</p> : null}
+                        {headline.text ? <p className="cd-module-conclusion">{renderModuleCites(headline.text, headline.sourceRef)}</p> : null}
                       </div>
                     </div>
                     {open && <div className="cd-module-content" id={`cd-content-${id}`}>
-                      {headline.sourceRef.length > 0 && <div className="cd-module-cites">{headline.sourceRef.map((c, i) => citationLink(c, `${id}-${i}`))}</div>}
                       {!hasBody && !headline.text && <p className="cd-module-empty">本期该维度披露有限</p>}
                       {!industryDepthMode && id==='history' && history.length >= 2 && <div className="cd-table-scroll"><table><thead><tr><th>报告期</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{history.map(r=><tr key={r.id}><th><button onClick={()=>selectReport(r)}>{period(r)}</button></th>{metricNames.map(m=><td key={m}>{format(value(r,m),m)}</td>)}</tr>)}</tbody></table></div>}
                       {!industryDepthMode && id==='peers' && peerCodes.length > 0 && <><p className="cd-note">仅比较 {period(selected)} 同类型已入库报告，不是完整行业排名。</p><div className="cd-table-scroll"><table><thead><tr><th>公司</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{peerCodes.map(code=><tr key={code} className={code===selected.code?'cd-self':''}><th>{peers.find(p=>p.code===code)?.company_name}{code===selected.code?' · 本公司':''}</th>{metricNames.map(m=><td key={m}>{format(peers.find(p=>p.code===code&&p.metric===m)?.value,m)}</td>)}</tr>)}</tbody></table></div></>}

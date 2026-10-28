@@ -1,4 +1,5 @@
 import type { Citation } from './detail-model';
+import { embedAttributionPageCites, stripInternalEvidenceMarks, uniqueCitationsByPage } from './answer-cite';
 import {
   FALLBACK_ATTRIBUTION_MODULES,
   clampAttributionTitle,
@@ -173,7 +174,7 @@ function resolveSourceRef(raw: unknown, evidence: Citation[]) {
     seen.add(id);
     out.push(hit);
   }
-  return out;
+  return uniqueCitationsByPage(out);
 }
 
 function parseChange(raw: unknown, evidence: Citation[]): VerdictChange | null {
@@ -182,7 +183,7 @@ function parseChange(raw: unknown, evidence: Citation[]): VerdictChange | null {
   const type = asText(row.type);
   const direction = asText(row.direction);
   const title = asText(row.title);
-  const description = asText(row.description);
+  const description = stripInternalEvidenceMarks(asText(row.description));
   if (!TYPE_SET.has(type) || !DIRECTION_SET.has(direction) || !title || !description) return null;
   const sourceRef = resolveSourceRef(row.sourceRef, evidence);
   if (!sourceRef.length) return null;
@@ -219,15 +220,19 @@ function parseModule(raw: unknown, evidence: Citation[], seen: Set<string>): Mod
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const row = raw as Record<string, unknown>;
   const id = asText(row.id);
-  const conclusion = asText(row.conclusion);
+  const rawConclusion = asText(row.conclusion);
   const title = asText(row.title);
   const fallback = isFallbackModuleId(id);
   const industry = Boolean(title) && isIndustryModuleId(id);
-  if ((!fallback && !industry) || seen.has(id) || !conclusion || !hasConcreteNumber(conclusion)) return null;
+  if ((!fallback && !industry) || seen.has(id) || !rawConclusion || !hasConcreteNumber(rawConclusion)) return null;
   let sourceRef = resolveSourceRef(row.sourceRef, evidence);
   // Prefer fill over empty UI: keep numeric conclusions even when the model omitted citations.
-  if (!sourceRef.length) sourceRef = bestEffortEvidence(conclusion, evidence);
+  if (!sourceRef.length) sourceRef = bestEffortEvidence(rawConclusion, evidence);
   if (!sourceRef.length) return null;
+  // Map 【En】 → inline [Ppage] beside numbers/clauses; strip leftover internal ids; dedupe pages.
+  const conclusion = embedAttributionPageCites(rawConclusion, sourceRef, evidence);
+  if (!conclusion || !hasConcreteNumber(conclusion)) return null;
+  sourceRef = uniqueCitationsByPage(sourceRef);
   seen.add(id);
   const out: ModuleConclusion = { id, conclusion, sourceRef };
   if (title) out.title = clampAttributionTitle(title);
@@ -377,10 +382,10 @@ function pickContextSnippet(structuredContext: string, keywords: string[]): stri
     const hit = lines.find((line) => line.includes(key));
     if (hit) {
       // Drop trailing evidence tags like 【E1】 for cleaner prose.
-      return hit.replace(/【E\d+】/g, '').replace(/（来自本份财报同比增减列）/g, '').trim().slice(0, 120);
+      return stripInternalEvidenceMarks(hit.replace(/（来自本份财报同比增减列）/g, '')).slice(0, 120);
     }
   }
-  return lines[0]?.replace(/【E\d+】/g, '').trim().slice(0, 120) ?? '';
+  return stripInternalEvidenceMarks(lines[0] ?? '').slice(0, 120);
 }
 
 function synthesizeModuleConclusion(
@@ -419,12 +424,16 @@ export function ensureAttributionModules(
       && hasConcreteNumber(existing.conclusion)
       && !isEmptyAttributionConclusion(existing.conclusion)
     ) {
+      const conclusion = embedAttributionPageCites(existing.conclusion, existing.sourceRef, opts.evidence);
       filled.push({
         ...existing,
+        conclusion,
         title: clampAttributionTitle(existing.title || def.title),
-        sourceRef: existing.sourceRef.length
-          ? existing.sourceRef
-          : bestEffortEvidence(existing.conclusion, opts.evidence),
+        sourceRef: uniqueCitationsByPage(
+          existing.sourceRef.length
+            ? existing.sourceRef
+            : bestEffortEvidence(conclusion, opts.evidence),
+        ),
       });
       continue;
     }

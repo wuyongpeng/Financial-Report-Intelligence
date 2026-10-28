@@ -308,6 +308,30 @@
 .cd-module-static>div{min-width:0;flex:1}
 .cd-module-static h3{font-size:14px;margin:0;font-weight:500;line-height:1.55}
 .cd-module-lead{font-size:12px;font-weight:400;color:#5b6b81;line-height:1.55;margin-left:8px}
+/* Depth-attribution inline cites: one step smaller, superscript beside numbers/clause ends. */
+.cd-module-lead .cd-cite,
+.cd-module-conclusion .cd-cite,
+.cd-module-static .cd-cite,
+.cd-module-toggle .cd-cite{
+  font-size:9px!important;
+  font-weight:500;
+  vertical-align:super;
+  line-height:1;
+  padding:0 2px;
+  margin:0 0 0 1px;
+  border-radius:2px;
+  background:#eef2f9;
+  color:#7387a6;
+  border:0;
+}
+.cd-module-lead .cd-cite:hover,
+.cd-module-conclusion .cd-cite:hover,
+.cd-module-static .cd-cite:hover,
+.cd-module-toggle .cd-cite:hover{
+  background:#eff4ff;
+  color:#376dd7;
+}
+
 .cd-module-static .cd-module-cites{margin:6px 0 0}
 .cd-module-static .cd-module-empty{margin:6px 0 0}
 @media(max-width:900px){.cd-brief-title{font-size:16px}.cd-verdict-note{white-space:normal;text-align:right}}
