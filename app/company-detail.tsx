@@ -409,6 +409,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         : null;
       const latest = matched ?? all[0];
       if (latest) selectReport(latest);
+      if (preferredPeriod && !matched && latest && !abort.signal.aborted) {
+        setQuietToast({ text: `未找到 ${preferredPeriod}，已显示最新已入库报告`, at: Date.now() });
+      }
       if (!abort.signal.aborted) setPeriodBootstrapDone(true);
     }).catch(() => {
       if (!abort.signal.aborted) {

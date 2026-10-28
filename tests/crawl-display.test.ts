@@ -6,6 +6,7 @@ import {
   describeYoy,
   estimateDownloadQueueWait,
   flattenCrawlFilings,
+  filingSourceLabel,
   formatQueueLastError,
   formatYoyBadge,
   openingCompanyLabel,
@@ -71,6 +72,12 @@ test('flattenCrawlFilings keeps expected rows so they can be crawled', () => {
   assert.equal(rows[1].announcementId, null);
 });
 
+
+test('filingSourceLabel marks expected gaps as 待抓取, not 尚未抓取', () => {
+  assert.equal(filingSourceLabel({ state: 'expected', sourceApi: null }), '待抓取');
+  assert.equal(filingSourceLabel({ state: 'parsed', sourceApi: 'SSE' }), '上交所');
+  assert.equal(filingSourceLabel({ state: 'discovered', sourceApi: null }), '尚未抓取');
+});
 test('period prefix 2026H1 / 2026 filters the compact list', () => {
   assert.equal(periodPrefixMatches('2026H1', '2026H1'), true);
   assert.equal(periodPrefixMatches('2026H1', '2026'), true);

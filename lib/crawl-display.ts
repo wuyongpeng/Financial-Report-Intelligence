@@ -205,6 +205,18 @@ export function sourceBadgeDetail(source: CrawlSourceKind | null) {
   return '监控池内，等待温和抓取';
 }
 
+/** Ops 列表「来源」列：期次缺口用「待抓取」，勿与未覆盖公司的「尚未抓取」混用。 */
+export function filingSourceLabel(row: { state?: PeriodCollectState | null; sourceApi?: string | null }) {
+  if (row.state === 'expected' && !row.sourceApi) return '待抓取';
+  const api = row.sourceApi;
+  if (!api) return '尚未抓取';
+  if (api === 'CNINFO') return '巨潮资讯';
+  if (api === 'SSE') return '上交所';
+  if (api === 'SZSE') return '深交所';
+  if (api === 'BSE') return '北交所';
+  return api;
+}
+
 /** PDF 已落到本地（用户口中的「已接入」） */
 export function hasDownloadedPdf(item: {
   downloadedAt?: string | null;
