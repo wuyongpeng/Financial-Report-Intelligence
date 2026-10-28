@@ -2626,7 +2626,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
               <span className={`cd-pill ${pill}`} title={hover}>{delta}</span>
             </article>;
           })}</div>
-          {baselineOptions.length>0 && <div className="cd-baseline-row"><label>对比基准 <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`${period(defaultPrevious)}（上年同期）`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}</select></label>{!baselineIsDefault && previous && <span className="cd-note">当前以 {period(previous)} 为基准，非上年同期。</span>}</div>}
+          {baselineOptions.length>0 && <div className="cd-baseline-row"><select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`较 ${period(defaultPrevious)} · 上年同期`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{`较 ${period(r)}`}</option>)}</select>{!baselineIsDefault && previous && <span className="cd-baseline-quiet-note">非上年同期</span>}</div>}
           </div>
           <MetricLinkage
             key={`${selected.id}:${previous?.id ?? "default"}`}
