@@ -20,6 +20,7 @@ import {
   VOICE_IDLE_EXIT_TOAST,
 } from '@/lib/voice/timing';
 import { VoiceFloat } from '@/components/voice-float';
+import { correctAsrHomophones, type AsrCorrectContext } from '@/lib/voice/asr-correct';
 
 export type VoiceUtteranceResult =
   | { action: 'resume' }
@@ -44,6 +45,8 @@ type VoiceSessionApi = {
   end: (toast?: string) => void;
   /** Register page-specific utterance handling; cleared on unmount of that page. */
   setUtteranceHandler: (handler: VoiceUtteranceHandler | null) => void;
+  /** Lexicon context for ASR homophone rewrite (company/industry/hotwords). */
+  setAsrCorrectContext: (ctx: AsrCorrectContext | null) => void;
   /** Page-owned barge-in (abort TTS/ask then resume). Cleared on page unmount. */
   setBargeInHandler: (handler: (() => void) | null) => void;
   /** Optional float head chrome (e.g. detail auto-jump checkbox). */
@@ -98,6 +101,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const voiceEmptyTurnsRef = useRef(0);
   const voiceGenRef = useRef(0);
   const handlerRef = useRef<VoiceUtteranceHandler | null>(null);
+  const asrCorrectCtxRef = useRef<AsrCorrectContext | null>(null);
   const bargeInHandlerRef = useRef<(() => void) | null>(null);
   /** Detail local barge-in ASR collecting — block heal from opening a second mic. */
   const suppressAutoListenRef = useRef(false);
@@ -165,7 +169,11 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     if (voiceUtteranceHandledRef.current) return;
     voiceUtteranceHandledRef.current = true;
     clearVoiceTurnTimers();
-    const text = raw.replace(/\s+/g, ' ').trim();
+    let text = raw.replace(/\s+/g, ' ').trim();
+    if (text) {
+      const corrected = correctAsrHomophones(text, asrCorrectCtxRef.current ?? {});
+      if (corrected !== text) text = corrected;
+    }
     voicePartialRef.current = text;
     setPartialState(text);
 
@@ -355,6 +363,10 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     handlerRef.current = handler;
   }, []);
 
+  const setAsrCorrectContext = useCallback((ctx: AsrCorrectContext | null) => {
+    asrCorrectCtxRef.current = ctx;
+  }, []);
+
   const setBargeInHandler = useCallback((handler: (() => void) | null) => {
     bargeInHandlerRef.current = handler;
   }, []);
@@ -413,6 +425,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     start,
     end,
     setUtteranceHandler,
+    setAsrCorrectContext,
     setBargeInHandler,
     setFloatHeadExtra,
     setSpeaking: setSpeakingState,
@@ -425,7 +438,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     clearToast: () => setToast(null),
   }), [
     active, listening, speaking, busy, partial, toast,
-    start, end, setUtteranceHandler, setBargeInHandler, setFloatHeadExtra,
+    start, end, setUtteranceHandler, setAsrCorrectContext, setBargeInHandler, setFloatHeadExtra,
     setPartial, setSuppressAutoListen, stopMic, resumeListen, finalizeListen,
   ]);
 

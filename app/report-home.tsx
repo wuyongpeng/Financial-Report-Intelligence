@@ -40,6 +40,7 @@ import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed 
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
+import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
 import { isVoiceCapabilityIntent, voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
@@ -301,6 +302,24 @@ export default function ReportHome() {
     }, 4800);
     return () => window.clearInterval(timer);
   }, [search, placeholders]);
+
+
+  // Home ASR lexicon: visible roster names + industries (客观清单，不做推荐).
+  useEffect(() => {
+    const extraTerms: string[] = [];
+    for (const item of coverage) {
+      if (item.name) extraTerms.push(item.name);
+      if (item.industry) extraTerms.push(item.industry);
+      if (item.industryGroup) extraTerms.push(String(item.industryGroup));
+    }
+    voice.setAsrCorrectContext({
+      extraTerms,
+    });
+    return () => {
+      voice.setAsrCorrectContext(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coverage]);
 
   // Global voice session: register home utterance handler; do not own ASR/float.
   useEffect(() => {

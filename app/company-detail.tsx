@@ -38,6 +38,7 @@ import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFli
 import { pickVoiceHomeLine, resolveGotoPage } from '@/lib/voice/nav-intent';
 import { parseLocalCommand, type LocalCommand, type LocalCommandSource, type PageNavCommand } from '@/lib/voice/local-command';
 import { pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
+import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT, VOICE_PDF_ZOOM_MIN, VOICE_PDF_ZOOM_MAX } from '@/lib/voice/zoom-intent';
 import { VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
 import { voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
@@ -1208,6 +1209,19 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceAutoJump]);
 
+  // ASR homophone lexicon from current report company / industry.
+  useEffect(() => {
+    voice.setAsrCorrectContext({
+      companyName: selected.company_name,
+      companyCode: selected.code,
+      industry: selected.industry,
+    });
+    return () => {
+      voice.setAsrCorrectContext(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected.company_name, selected.code, selected.industry]);
+
   // Register detail utterance handler with the GLOBAL voice session.
   useEffect(() => {
     const handler = async (text: string): Promise<VoiceUtteranceResult> => {
@@ -1762,7 +1776,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (voiceUtteranceHandledRef.current) return;
     voiceUtteranceHandledRef.current = true;
     clearVoiceTurnTimers();
-    const text = raw.replace(/\s+/g, ' ').trim();
+    let text = raw.replace(/\s+/g, ' ').trim();
+    text = correctAsrHomophones(text, {
+      companyName: selected.company_name,
+      companyCode: selected.code,
+      industry: selected.industry,
+    });
     voicePartialRef.current = text; setVoicePartial(text);
     if (!text) {
       if (!voiceConvRef.current) {
