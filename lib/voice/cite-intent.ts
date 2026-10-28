@@ -11,7 +11,12 @@ export function isVoiceCiteIntent(text: string): boolean {
   ) {
     return true;
   }
-  if (t.length <= 12 && /(出处|证据页)/.test(t) && /(哪|去|看|跳|打开|带我)/.test(t)) {
+  // Soft form: whole utterance is just a verb + 出处/证据页 (+ optional 刚才/上一条 …).
+  if (
+    /^(?:带我)?(?:去|看|看看|跳到|跳转到|打开)?(?:一下)?(?:刚才|上一条|上条|这条|那条)?(?:那条|那个|这个)?(?:的)?(?:出处|证据页)(?:在哪里?|在哪一页|在哪页|页)?$/.test(
+      t,
+    )
+  ) {
     return true;
   }
   return false;

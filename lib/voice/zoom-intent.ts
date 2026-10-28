@@ -18,12 +18,12 @@ export function parseVoiceZoomIntent(text: string): VoiceZoomIntent {
   const t = normalizeVoiceText(text);
   if (!t) return null;
   if (
-    /^(放大一点|放大些|放大点|放大|再放大|再大一点|大一点|放大一下|请放大|帮我放大)$/.test(t)
+    /^(放大一点|放大些|放大点|放大|再放大|再大一点|大一点|放大一下|放大一些|再放大一点|再放大一些|请放大|帮我放大)$/.test(t)
   ) {
     return { kind: 'in' };
   }
   if (
-    /^(缩小一点|缩小些|缩小点|缩小|再缩小|再小一点|小一点|缩小一下|请缩小|帮我缩小)$/.test(t)
+    /^(缩小一点|缩小些|缩小点|缩小|再缩小|再小一点|小一点|缩小一下|缩小一些|再缩小一点|再缩小一些|请缩小|帮我缩小)$/.test(t)
   ) {
     return { kind: 'out' };
   }

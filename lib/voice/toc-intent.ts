@@ -1,4 +1,5 @@
 import { normalizeVoiceText } from './text-normalize';
+import { isSectionTitleQuery } from './section-query';
 
 export type VoiceTocIntent =
   | { kind: 'open-toc' }
@@ -28,16 +29,9 @@ export function parseVoiceTocIntent(text: string): VoiceTocIntent {
   if (!jump) return null;
   let q = jump[1] ?? '';
   q = q.replace(/^(一下|一下下)/, '');
-  if (!q || q.length > 24) return null;
+  if (!q) return null;
 
-  // Must look like a section / known chapter cue — not a finance question.
-  const sectionLike =
-    /^第[一二三四五六七八九十百零〇两\d]+[章节]/.test(q) ||
-    /(管理层讨论|经营情况讨论|经营分析|MD&?A|风险因素|重大风险|财务报表附注|财务报表|合并报表|公司治理|报告摘要|主要会计数据|目录)/i.test(
-      q,
-    );
-  if (!sectionLike) return null;
-  // Reject question-shaped utterances.
-  if (/(多少|怎么|为何|为什么|是否|有没有|同比|环比|是多少)/.test(q)) return null;
+  // Must be (almost exactly) a section title — never a sentence that merely mentions one.
+  if (!isSectionTitleQuery(q)) return null;
   return { kind: 'jump-section', query: q };
 }

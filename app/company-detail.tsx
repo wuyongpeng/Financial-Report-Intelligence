@@ -33,16 +33,13 @@ import {
 } from '@/lib/industry-skills-ui';
 import { isCanonicalPeriod } from '@/lib/ingest-period';
 import { reportIsParsed, reportNeedsDownload, reportNeedsParse, reportParseInFlight } from '@/lib/detail-auto';
-import { parseVoiceNavIntent, parseVoicePageContinue, pickVoiceHomeLine } from '@/lib/voice/nav-intent';
-import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
-import { parseVoiceTocIntent } from '@/lib/voice/toc-intent';
-import { parseVoiceZoomIntent, nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT, VOICE_PDF_ZOOM_MIN, VOICE_PDF_ZOOM_MAX } from '@/lib/voice/zoom-intent';
-import { isVoiceCiteIntent, VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
-import { parseVoiceLayoutIntent } from '@/lib/voice/layout-intent';
-import { parseVoiceStyleIntent, voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
-import { parseVoiceTtsControlIntent } from '@/lib/voice/tts-control-intent';
-import { isVoiceCapabilityIntent, voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
-import { parseVoiceReadIntent } from '@/lib/voice/read-intent';
+import { pickVoiceHomeLine, resolveGotoPage } from '@/lib/voice/nav-intent';
+import { parseLocalCommand, type LocalCommand, type LocalCommandSource, type PageNavCommand } from '@/lib/voice/local-command';
+import { pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
+import { nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT, VOICE_PDF_ZOOM_MIN, VOICE_PDF_ZOOM_MAX } from '@/lib/voice/zoom-intent';
+import { VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
+import { voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
+import { voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
 import { findTocPage, matchSection, buildSectionReadChunks } from '@/lib/voice/section-match';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
 import { VOICE_IDLE_EMPTY_TURNS, VOICE_IDLE_EXIT_TOAST } from '@/lib/voice/timing';
@@ -70,6 +67,8 @@ type Message = {
   feedbackDone?: boolean;
   /** attachNote: user-selected clips only; soft-merged current page never shows here. */
   ask?: { question: string; focus?: FocusItem[]; attachNote?: string };
+  /** Local command echo (翻页 / 缩放 / 回首页 …): no AI answer, no vote / regenerate. */
+  local?: boolean;
 };
 type Clip = { id: string; kind: FocusKind; quote: string; page?: number; title?: string };
 const emptyOutline: Outline = { indexedPages: 0, pages: [], outline: [] };
@@ -325,6 +324,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   /** Continuous section-read job (page chunks + generation token). */
   const sectionReadRef = useRef<{ gen: number; chunks: { page: number; text: string }[]; index: number } | null>(null);
   const [pdfZoom, setPdfZoom] = useState(VOICE_PDF_ZOOM_DEFAULT);
+  const pdfZoomRef = useRef(pdfZoom);
+  pdfZoomRef.current = pdfZoom;
   const handleVoiceUtteranceRef = useRef<(raw: string) => Promise<void> | void>(async () => undefined);
   const bargeInFromVoiceRef = useRef<() => void>(() => undefined);
   const [regenMenu, setRegenMenu] = useState<number | null>(null);
@@ -1391,35 +1392,293 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     await runSectionReadStep(gen);
   }
 
-  function applyVoiceNav(intent: NonNullable<ReturnType<typeof parseVoiceNavIntent>>) {
-    const pages = (outlineRef.current.pageLabels?.length
-      ? outlineRef.current.pageLabels.map(p => p.page)
+  /** Flip the PDF for next / prev / last / goto. Returns the confirmation line (never throws). */
+  function applyPageNav(intent: PageNavCommand): string {
+    const labels = outlineRef.current.pageLabels ?? [];
+    const pages = (labels.length
+      ? labels.map(p => p.page)
       : outlineRef.current.pages.map(p => p.page)).filter((p, i, arr) => arr.indexOf(p) === i).sort((a, b) => a - b);
     const cur = sourcePageRef.current;
     let target = cur;
+    let line = '';
     if (intent.kind === 'next') {
-      target = pages.find(p => p > cur) ?? (cur + 1);
+      const nextPage = pages.find(p => p > cur);
+      if (nextPage == null && pages.length) {
+        lastVoicePageNavRef.current = { kind: 'next', at: Date.now() };
+        return '已经是最后一页了';
+      }
+      target = nextPage ?? (cur + 1);
       lastVoicePageNavRef.current = { kind: 'next', at: Date.now() };
     } else if (intent.kind === 'prev') {
       const before = pages.filter(p => p < cur);
+      if (!before.length && cur <= 1) {
+        lastVoicePageNavRef.current = { kind: 'prev', at: Date.now() };
+        return '已经是第一页了';
+      }
       target = before.length ? before[before.length - 1]! : Math.max(1, cur - 1);
       lastVoicePageNavRef.current = { kind: 'prev', at: Date.now() };
-    } else if (intent.kind === 'goto') {
-      target = intent.page;
-      // goto does not seed 「继续」 — only next/prev do.
+    } else if (intent.kind === 'last') {
+      if (!pages.length) return '还没有加载页面，稍后再试';
+      target = pages[pages.length - 1]!;
     } else {
-      // home is handled at the call site; do not treat as page jump
-      return;
+      // goto does not seed 「继续」 — only next/prev do.
+      const res = resolveGotoPage(intent.page, { pdfPages: pages, printed: labels });
+      if (res.page == null) return res.message;
+      target = res.page;
+      line = res.message;
     }
     readingPosition.current = null;
     pageEnter.current = 'start';
     scrollPageSync.current = false;
+    sourcePageRef.current = target;
+    setSourceMode('pdf');
+    setSourceCollapsed(false);
+    setMobilePane('sources');
     setSourcePage(target);
     setPdfJumpNonce(n => n + 1);
     setHighlight('');
     setSearchHighlight(null);
     setVoiceJumpHint(null);
-    setQuietToast({ text: `已跳到第 ${target} 页`, at: Date.now() });
+    return line || `已跳到${pageLabel(target).startsWith('P') ? ` ${pageLabel(target)}` : `第 ${target} 页`}`;
+  }
+
+  /**
+   * ONE dispatcher for the local command pack. Typed chat input and ASR transcripts
+   * both land here (same parse in lib/voice/local-command, same handlers, same refs:
+   * 12s 「继续」 window, zoom, style, …). Differences are only presentation:
+   *  - typed: user line + short local reply in chat; never calls AI, never opens the
+   *    voice float; speaks only when a voice session is already running.
+   *  - voice: toast / spoken confirm, then resume listening (original behaviour).
+   */
+  function runLocalCommand(cmd: LocalCommand, text: string, source: LocalCommandSource) {
+    const typed = source === 'typed';
+    const inSession = voiceConvRef.current || voice.active;
+    const canSpeak = !typed || inSession;
+    if (!typed) { voicePartialRef.current = ''; setVoicePartial(''); }
+    const toast = (t: string) => setQuietToast({ text: t, at: Date.now() });
+    /** Echo into chat. Never while an answer streams / history restores (would corrupt the last message). */
+    const chatEcho = (line: string) => {
+      if (busyRef.current || !memoryReady.current) { toast(line); return; }
+      setMessages(m => [...m, { role: 'user', text, ask: { question: text }, local: true }, { role: 'assistant', text: line, local: true }]);
+    };
+    if (typed) setQuestion('');
+    const out = (line: string, o: { toast?: boolean; speak?: boolean; resume?: boolean; chat?: boolean } = {}) => {
+      if (o.toast && !typed) toast(line);
+      if (typed || o.chat) chatEcho(line);
+      if (o.speak && canSpeak) speakVoiceConfirm(line);
+      else if (o.resume && !typed) resumeVoiceConversation();
+    };
+
+    switch (cmd.kind) {
+      case 'capability': {
+        cancelSectionRead();
+        out(voiceCapabilitySpeech(), { chat: true, speak: true });
+        return;
+      }
+      case 'tts-pause': {
+        const ok = pauseVoiceTts();
+        const line = ok ? '已暂停朗读' : '现在没有在朗读';
+        out(line, { toast: true });
+        // Keep mic open — do not end session. If nothing was speaking, just resume listen.
+        if (ok) setVoiceSpeaking(false);
+        if (voiceConvRef.current) resumeVoiceConversation();
+        return;
+      }
+      case 'tts-resume':
+      case 'tts-resume-bare': {
+        if (cmd.kind === 'tts-resume-bare') cancelSectionRead();
+        // Prefer TTS resume; do not steal from page-nav (接着念 ≠ 继续).
+        const can = isVoiceTtsPaused() || hasVoiceTtsPlayback();
+        const ok = can && resumeVoiceTts();
+        if (ok) {
+          setVoiceSpeaking(true);
+          if (voiceConvRef.current) voice.stopMic();
+          out('继续朗读', { toast: true });
+        } else {
+          out('没有可继续的朗读', { toast: true });
+          if (voiceConvRef.current) resumeVoiceConversation();
+        }
+        return;
+      }
+      case 'style': {
+        cancelSectionRead();
+        voiceAnswerStyleRef.current = cmd.style;
+        const line = voiceStyleConfirmLine(cmd.style);
+        // Spoken answers only — typed answers keep their normal length.
+        if (typed && !inSession) { out(`${line}（对语音问答生效）`); return; }
+        out(line, { toast: true, speak: true });
+        return;
+      }
+      case 'layout': {
+        let line: string;
+        if (cmd.layout === 'collapse-mid') {
+          const gate = paneCollapseGate({ source: sourceCollapsed, middle: middleCollapsed, chat: chatCollapsed });
+          if (!middleCollapsed && gate.canCollapseMiddle) {
+            middleShareRef.current = colRatios.middle;
+            setMiddleCollapsed(true);
+            setMobilePane(chatCollapsed ? 'sources' : 'chat');
+            line = '已收起概览';
+          } else if (middleCollapsed) {
+            line = '概览已收起';
+          } else {
+            line = '至少保留一栏展开';
+          }
+        } else {
+          setMiddleCollapsed(false);
+          setMobilePane('dashboard');
+          line = '已展开概览';
+        }
+        out(line, { toast: true, resume: true });
+        return;
+      }
+      case 'zoom': {
+        const prev = pdfZoomRef.current;
+        const next = nextPdfZoom(prev, cmd.zoom);
+        pdfZoomRef.current = next;
+        setPdfZoom(next);
+        const pct = Math.round(next * 100);
+        const atLimit = next === prev && (cmd.zoom.kind === 'in' || cmd.zoom.kind === 'out');
+        const line = atLimit ? (cmd.zoom.kind === 'in' ? `已经是最大了 · ${pct}%` : `已经是最小了 · ${pct}%`)
+          : cmd.zoom.kind === 'in' ? `已放大到 ${pct}%`
+          : cmd.zoom.kind === 'out' ? `已缩小到 ${pct}%`
+          : cmd.zoom.kind === 'fit' ? '已适合宽度'
+          : '已恢复实际大小';
+        out(line, { toast: true, resume: true });
+        return;
+      }
+      case 'cite': {
+        const citeTarget = lastVoiceCiteRef.current ?? voiceJumpHint;
+        if (citeTarget?.page) {
+          revealVoiceCitation(citeTarget);
+          out(`出处在第 ${citeTarget.page} 页`, { toast: true, resume: true });
+        } else {
+          out(VOICE_CITE_MISSING_LINE, { speak: true });
+        }
+        return;
+      }
+      case 'read-page-head': {
+        cancelSectionRead();
+        const page = sourcePageRef.current;
+        const content = outlineRef.current.pages.find(p => p.page === page)?.content?.replace(/\s+/g, ' ').trim() ?? '';
+        if (!content) { out('这一页没有可朗读的文字', { speak: true }); return; }
+        const head = content.slice(0, 180);
+        out(typed && !inSession ? `这一页开头：${head}` : head, { speak: true });
+        return;
+      }
+      case 'read-section': {
+        const hit = matchSection(cmd.query, outlineRef.current.outline, outlineRef.current.pages);
+        if (!hit) { out('没找到这一节，没法朗读', { speak: true }); return; }
+        if (!canSpeak) {
+          // Typed, no voice session: no TTS — take the reader to the section instead.
+          jumpToPageHighlight(hit.page, hit.highlight, `已跳到${hit.title}`.slice(0, 24));
+          out(`已跳到${hit.title}（第 ${hit.page} 页）。要听朗读请用语音说「朗读${cmd.query}」`);
+          return;
+        }
+        if (typed) chatEcho(`开始朗读：${hit.title}`);
+        const chunks = buildSectionReadChunks(outlineRef.current.pages, hit);
+        startSectionRead(chunks, hit.highlight || hit.title);
+        return;
+      }
+      case 'toc-open': {
+        const tocPage = findTocPage(outlineRef.current.pages);
+        const first = outlineRef.current.outline[0];
+        try {
+          const details = document.querySelector('.cd-outline');
+          if (details instanceof HTMLDetailsElement) details.open = true;
+        } catch { /* ignore */ }
+        let line: string;
+        if (tocPage != null) {
+          line = `已打开目录 · 第 ${tocPage} 页`;
+          jumpToPageHighlight(tocPage, '目录', line);
+        } else if (first) {
+          line = `已打开提纲 · 第 ${first.page} 页`;
+          jumpToPageHighlight(first.page, first.highlight || first.title, line);
+        } else {
+          line = '这份报告还没有目录';
+          toast(line);
+        }
+        out(line, { resume: true });
+        return;
+      }
+      case 'toc-jump': {
+        cancelSectionRead();
+        const hit = matchSection(cmd.query, outlineRef.current.outline, outlineRef.current.pages);
+        if (!hit) { out('没找到这一节', { speak: true }); return; }
+        const line = `已跳到${hit.title}`.slice(0, 24);
+        jumpToPageHighlight(hit.page, hit.highlight, line);
+        out(line, { resume: true });
+        return;
+      }
+      case 'page-nav': {
+        cancelSectionRead();
+        const line = applyPageNav(cmd.nav);
+        toast(line);
+        out(line, { resume: true });
+        return;
+      }
+      case 'home': {
+        cancelSectionRead();
+        const line = pickVoiceHomeLine();
+        if (typed) { setClips([]); clearPendingSelection(); setPick(null); }
+        setChatCollapsed(false);
+        chatEcho(line);
+        if (!canSpeak) { onBack(); return; }
+        // Keep GLOBAL voice session; only leave the detail route.
+        requestRef.current?.abort();
+        const priorTts = voiceTtsAbortRef.current;
+        voiceTtsAbortRef.current = null;
+        priorTts?.abort();
+        voice.stopMic();
+        stopVoiceSession(); // local barge-in ASR only
+        const abort = new AbortController();
+        voiceTtsAbortRef.current = abort;
+        voiceSpeakRef.current = false;
+        setVoiceSpeaking(true);
+        voiceHandoffHomeRef.current = true;
+        // Keep voiceConvRef true so continuity is intentional across home.
+        void speakAnswer(line, abort.signal)
+          .catch(() => undefined)
+          .finally(() => {
+            if (voiceTtsAbortRef.current === abort) {
+              voiceTtsAbortRef.current = null;
+              setVoiceSpeaking(false);
+            }
+            onBack(); // provider float + session survive; home resumes listen
+          });
+        return;
+      }
+      case 'farewell': {
+        cancelSectionRead();
+        const line = pickVoiceFarewellLine();
+        if (typed) { setClips([]); clearPendingSelection(); setPick(null); }
+        setChatCollapsed(false);
+        chatEcho(line);
+        // Typed farewell outside a voice session is just a polite local reply — never opens the float.
+        if (!canSpeak || !voiceConvRef.current) return;
+        // Abort any in-flight ask / prior TTS so farewell is the last thing spoken.
+        requestRef.current?.abort();
+        const priorTts = voiceTtsAbortRef.current;
+        voiceTtsAbortRef.current = null;
+        priorTts?.abort();
+        stopVoiceSession(); // mute mic — do not let TTS echo become another turn
+        const abort = new AbortController();
+        voiceTtsAbortRef.current = abort;
+        voiceSpeakRef.current = false;
+        setVoiceSpeaking(true);
+        setVoiceMode(true);
+        void speakAnswer(line, abort.signal)
+          .catch(() => undefined)
+          .finally(() => {
+            if (voiceTtsAbortRef.current === abort) {
+              voiceTtsAbortRef.current = null;
+              setVoiceSpeaking(false);
+            }
+            // User-intent exit: no idle toast.
+            endVoiceConversation();
+          });
+        return;
+      }
+    }
   }
 
   async function handleVoiceUtterance(raw: string) {
@@ -1443,255 +1702,18 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     voiceEmptyTurnsRef.current = 0;
 
-    // —— Local command pack (before page-nav / ask) ——
-    if (isVoiceCapabilityIntent(text)) {
-      cancelSectionRead();
-      voicePartialRef.current = ''; setVoicePartial('');
-      const line = voiceCapabilitySpeech();
-      setMessages(m => [...m, { role: 'user', text, ask: { question: text } }, { role: 'assistant', text: line }]);
-      speakVoiceConfirm(line);
-      return;
-    }
-
-    const ttsCtrl = parseVoiceTtsControlIntent(text);
-    if (ttsCtrl?.kind === 'pause') {
-      voicePartialRef.current = ''; setVoicePartial('');
-      const ok = pauseVoiceTts();
-      setQuietToast({ text: ok ? '已暂停朗读' : '现在没有在朗读', at: Date.now() });
-      // Keep mic open — do not end session. If nothing was speaking, just resume listen.
-      if (!ok && voiceConvRef.current) resumeVoiceConversation();
-      else if (ok) {
-        setVoiceSpeaking(false);
-        if (voiceConvRef.current) resumeVoiceConversation();
-      }
-      return;
-    }
-    if (ttsCtrl?.kind === 'resume') {
-      voicePartialRef.current = ''; setVoicePartial('');
-      // Prefer TTS resume; do not steal from page-nav (接着念 ≠ 继续).
-      if (isVoiceTtsPaused() || hasVoiceTtsPlayback()) {
-        const ok = resumeVoiceTts();
-        if (ok) {
-          setVoiceSpeaking(true);
-          if (voiceConvRef.current) voice.stopMic();
-          setQuietToast({ text: '继续朗读', at: Date.now() });
-        } else {
-          setQuietToast({ text: '没有可继续的朗读', at: Date.now() });
-          if (voiceConvRef.current) resumeVoiceConversation();
-        }
-      } else {
-        setQuietToast({ text: '没有可继续的朗读', at: Date.now() });
-        if (voiceConvRef.current) resumeVoiceConversation();
-      }
-      return;
-    }
-
-    const styleIntent = parseVoiceStyleIntent(text);
-    if (styleIntent) {
-      cancelSectionRead();
-      voiceAnswerStyleRef.current = styleIntent.kind;
-      voicePartialRef.current = ''; setVoicePartial('');
-      const line = voiceStyleConfirmLine(styleIntent.kind);
-      setQuietToast({ text: line, at: Date.now() });
-      speakVoiceConfirm(line);
-      return;
-    }
-
-    const layoutIntent = parseVoiceLayoutIntent(text);
-    if (layoutIntent) {
-      voicePartialRef.current = ''; setVoicePartial('');
-      if (layoutIntent.kind === 'collapse-mid') {
-        const gate = paneCollapseGate({ source: sourceCollapsed, middle: middleCollapsed, chat: chatCollapsed });
-        if (!middleCollapsed && gate.canCollapseMiddle) {
-          middleShareRef.current = colRatios.middle;
-          setMiddleCollapsed(true);
-          setMobilePane(chatCollapsed ? 'sources' : 'chat');
-          setQuietToast({ text: '已收起概览', at: Date.now() });
-        } else if (middleCollapsed) {
-          setQuietToast({ text: '概览已收起', at: Date.now() });
-        } else {
-          setQuietToast({ text: '至少保留一栏展开', at: Date.now() });
-        }
-      } else {
-        setMiddleCollapsed(false);
-        setMobilePane('dashboard');
-        setQuietToast({ text: '已展开概览', at: Date.now() });
-      }
-      resumeVoiceConversation();
-      return;
-    }
-
-    const zoomIntent = parseVoiceZoomIntent(text);
-    if (zoomIntent) {
-      voicePartialRef.current = ''; setVoicePartial('');
-      setPdfZoom(z => {
-        const next = nextPdfZoom(z, zoomIntent);
-        const pct = Math.round(next * 100);
-        const tip = zoomIntent.kind === 'in' ? `已放大到 ${pct}%`
-          : zoomIntent.kind === 'out' ? `已缩小到 ${pct}%`
-          : zoomIntent.kind === 'fit' ? '已适合宽度'
-          : '已恢复实际大小';
-        setQuietToast({ text: tip, at: Date.now() });
-        return next;
-      });
-      resumeVoiceConversation();
-      return;
-    }
-
-    if (isVoiceCiteIntent(text)) {
-      voicePartialRef.current = ''; setVoicePartial('');
-      const citeTarget = lastVoiceCiteRef.current ?? voiceJumpHint;
-      if (citeTarget?.page) {
-        revealVoiceCitation(citeTarget);
-        setQuietToast({ text: `出处在第 ${citeTarget.page} 页`, at: Date.now() });
-        resumeVoiceConversation();
-      } else {
-        speakVoiceConfirm(VOICE_CITE_MISSING_LINE);
-      }
-      return;
-    }
-
-    const readIntent = parseVoiceReadIntent(text);
-    if (readIntent?.kind === 'page-head') {
-      cancelSectionRead();
-      voicePartialRef.current = ''; setVoicePartial('');
-      const page = sourcePageRef.current;
-      const content = outlineRef.current.pages.find(p => p.page === page)?.content?.replace(/\s+/g, ' ').trim() ?? '';
-      if (!content) {
-        speakVoiceConfirm('这一页没有可朗读的文字');
-        return;
-      }
-      const head = content.slice(0, 180);
-      speakVoiceConfirm(head);
-      return;
-    }
-    if (readIntent?.kind === 'section') {
-      voicePartialRef.current = ''; setVoicePartial('');
-      const hit = matchSection(readIntent.query, outlineRef.current.outline, outlineRef.current.pages);
-      if (!hit) {
-        speakVoiceConfirm('没找到这一节，没法朗读');
-        return;
-      }
-      const chunks = buildSectionReadChunks(outlineRef.current.pages, hit);
-      startSectionRead(chunks, hit.highlight || hit.title);
-      return;
-    }
-
-    const tocIntent = parseVoiceTocIntent(text);
-    if (tocIntent?.kind === 'open-toc') {
-      voicePartialRef.current = ''; setVoicePartial('');
-      const tocPage = findTocPage(outlineRef.current.pages);
-      const first = outlineRef.current.outline[0];
-      try {
-        const details = document.querySelector('.cd-outline');
-        if (details instanceof HTMLDetailsElement) details.open = true;
-      } catch { /* ignore */ }
-      if (tocPage != null) {
-        jumpToPageHighlight(tocPage, '目录', `已打开目录 · 第 ${tocPage} 页`);
-      } else if (first) {
-        jumpToPageHighlight(first.page, first.highlight || first.title, `已打开提纲 · 第 ${first.page} 页`);
-      } else {
-        setQuietToast({ text: '这份报告还没有目录', at: Date.now() });
-      }
-      resumeVoiceConversation();
-      return;
-    }
-    if (tocIntent?.kind === 'jump-section') {
-      cancelSectionRead();
-      voicePartialRef.current = ''; setVoicePartial('');
-      const hit = matchSection(tocIntent.query, outlineRef.current.outline, outlineRef.current.pages);
-      if (!hit) {
-        speakVoiceConfirm('没找到这一节');
-        return;
-      }
-      jumpToPageHighlight(hit.page, hit.highlight, `已跳到${hit.title}`.slice(0, 24));
-      resumeVoiceConversation();
+    // —— Shared local command pack (same dispatcher as typed input) ——
+    const cmd = parseLocalCommand(text, {
+      lastPageNav: lastVoicePageNavRef.current,
+      ttsPaused: isVoiceTtsPaused(),
+    });
+    if (cmd) {
+      runLocalCommand(cmd, text, 'voice');
       return;
     }
 
     // New non-command utterance cancels continuous section read.
     cancelSectionRead();
-
-    let nav = parseVoiceNavIntent(text);
-    if (!nav) {
-      // Bare 「继续」 after next/prev (12s). Explicit 「接着念」 already handled above.
-      nav = parseVoicePageContinue(text, lastVoicePageNavRef.current);
-    }
-    // Soft: bare 继续 with no page-nav, but TTS paused → resume TTS.
-    if (!nav && /^继续$/.test(text.replace(/\s+/g, '').replace(/[。！？.!?,，]/g, ''))) {
-      if (isVoiceTtsPaused()) {
-        voicePartialRef.current = ''; setVoicePartial('');
-        resumeVoiceTts();
-        setVoiceSpeaking(true);
-        if (voiceConvRef.current) voice.stopMic();
-        setQuietToast({ text: '继续朗读', at: Date.now() });
-        return;
-      }
-    }
-    if (nav && nav.kind !== 'home') {
-      applyVoiceNav(nav);
-      voicePartialRef.current = ''; setVoicePartial('');
-      resumeVoiceConversation();
-      return;
-    }
-    // Switch company / go home — keep GLOBAL voice session; only leave detail route.
-    if (nav?.kind === 'home') {
-      voicePartialRef.current = ''; setVoicePartial('');
-      setChatCollapsed(false);
-      requestRef.current?.abort();
-      const priorTts = voiceTtsAbortRef.current;
-      voiceTtsAbortRef.current = null;
-      priorTts?.abort();
-      voice.stopMic();
-      stopVoiceSession(); // local barge-in ASR only
-      const line = pickVoiceHomeLine();
-      setMessages(m => [...m, { role: 'user', text, ask: { question: text } }, { role: 'assistant', text: line }]);
-      const abort = new AbortController();
-      voiceTtsAbortRef.current = abort;
-      voiceSpeakRef.current = false;
-      setVoiceSpeaking(true);
-      voiceHandoffHomeRef.current = true;
-      // Keep voiceConvRef true so continuity is intentional across home.
-      void speakAnswer(line, abort.signal)
-        .catch(() => undefined)
-        .finally(() => {
-          if (voiceTtsAbortRef.current === abort) {
-            voiceTtsAbortRef.current = null;
-            setVoiceSpeaking(false);
-          }
-          onBack(); // provider float + session survive; home resumes listen
-        });
-      return;
-    }
-    // User wants to end the voice session — warm goodbye TTS, then close UI (not finance ask).
-    if (isVoiceFarewell(text)) {
-      voicePartialRef.current = ''; setVoicePartial('');
-      setChatCollapsed(false);
-      // Abort any in-flight ask / prior TTS so farewell is the last thing spoken.
-      requestRef.current?.abort();
-      const priorTts = voiceTtsAbortRef.current;
-      voiceTtsAbortRef.current = null;
-      priorTts?.abort();
-      stopVoiceSession(); // mute mic — do not let TTS echo become another turn
-      const line = pickVoiceFarewellLine();
-      setMessages(m => [...m, { role: 'user', text, ask: { question: text } }, { role: 'assistant', text: line }]);
-      const abort = new AbortController();
-      voiceTtsAbortRef.current = abort;
-      voiceSpeakRef.current = false;
-      setVoiceSpeaking(true);
-      setVoiceMode(true);
-      void speakAnswer(line, abort.signal)
-        .catch(() => undefined)
-        .finally(() => {
-          if (voiceTtsAbortRef.current === abort) {
-            voiceTtsAbortRef.current = null;
-            setVoiceSpeaking(false);
-          }
-          // User-intent exit: no idle toast.
-          endVoiceConversation();
-        });
-      return;
-    }
     if (busyRef.current || !memoryReady.current) {
       // Previous answer still streaming / memory restoring: keep the conversation, listen again.
       setQuietToast({ text: '上一条还在处理，请稍后再说', at: Date.now() });
@@ -2002,73 +2024,23 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   async function ask(text: string, extra?: { replaceAt?: number; focus?: FocusItem[]; rewrite?: 'detailed' | 'brief' | 'retry'; spoken?: boolean }) {
     const replacing = extra?.replaceAt;
     const typed = text.trim();
-    if (replacing != null) {
-      if (busyRef.current || !memoryReady.current) return;
-    } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
-    // Go home / switch company from typed chat too — leave detail for search.
-    if (replacing == null && typed) {
-      const typedNav = parseVoiceNavIntent(typed);
-      if (typedNav?.kind === 'home') {
-        const line = pickVoiceHomeLine();
-        setQuestion(''); setClips([]); clearPendingSelection(); setPick(null);
-        setChatCollapsed(false);
-        setMessages(m => [...m, { role: 'user', text: typed, ask: { question: typed } }, { role: 'assistant', text: line }]);
-        if (voiceConvRef.current || voice.active) {
-          requestRef.current?.abort();
-          const priorTts = voiceTtsAbortRef.current;
-          voiceTtsAbortRef.current = null;
-          priorTts?.abort();
-          voice.stopMic();
-          stopVoiceSession();
-          const abort = new AbortController();
-          voiceTtsAbortRef.current = abort;
-          voiceSpeakRef.current = false;
-          setVoiceSpeaking(true);
-          voiceHandoffHomeRef.current = true;
-          void speakAnswer(line, abort.signal)
-            .catch(() => undefined)
-            .finally(() => {
-              if (voiceTtsAbortRef.current === abort) {
-                voiceTtsAbortRef.current = null;
-                setVoiceSpeaking(false);
-              }
-              onBack();
-            });
-        } else {
-          onBack();
-        }
+    // Typed input goes through the SAME local command dispatcher as voice (翻页 / 缩放 / 目录 /
+    // 回首页 / 退下 …): no AI call, no TTS and no float unless a voice session is already running.
+    // Runs before the busy guard so 翻页 / 缩放 still work mid-answer; leaving the page does not.
+    if (replacing == null && typed && !extra?.spoken) {
+      const cmd = parseLocalCommand(typed, {
+        lastPageNav: lastVoicePageNavRef.current,
+        ttsPaused: isVoiceTtsPaused(),
+      });
+      const leaves = cmd?.kind === 'home' || cmd?.kind === 'farewell';
+      if (cmd && !(leaves && (busyRef.current || !memoryReady.current))) {
+        runLocalCommand(cmd, typed, 'typed');
         return;
       }
     }
-    // Dismiss / farewell: local short goodbye — never finance out-of-scope path.
-    if (replacing == null && typed && isVoiceFarewell(typed)) {
-      const line = pickVoiceFarewellLine();
-      setQuestion(''); setClips([]); clearPendingSelection(); setPick(null);
-      setChatCollapsed(false);
-      setMessages(m => [...m, { role: 'user', text: typed, ask: { question: typed } }, { role: 'assistant', text: line }]);
-      if (voiceConvRef.current) {
-        requestRef.current?.abort();
-        const priorTts = voiceTtsAbortRef.current;
-        voiceTtsAbortRef.current = null;
-        priorTts?.abort();
-        stopVoiceSession();
-        const abort = new AbortController();
-        voiceTtsAbortRef.current = abort;
-        voiceSpeakRef.current = false;
-        setVoiceSpeaking(true);
-        setVoiceMode(true);
-        void speakAnswer(line, abort.signal)
-          .catch(() => undefined)
-          .finally(() => {
-            if (voiceTtsAbortRef.current === abort) {
-              voiceTtsAbortRef.current = null;
-              setVoiceSpeaking(false);
-            }
-            endVoiceConversation();
-          });
-      }
-      return;
-    }
+    if (replacing != null) {
+      if (busyRef.current || !memoryReady.current) return;
+    } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
     // User-selected clips / explicit caller focus only — never treat soft-merged page as "attached".
     const userFocus: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
       kind: c.kind,
@@ -2143,7 +2115,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const controller = new AbortController(); requestRef.current = controller; busyRef.current = true;
     const id = selected.id;
     const prior = replacing != null ? messages.slice(0, replacing - 1) : messages;
-    const asked = prior.filter(m => m.role === 'user').map(m => m.ask?.question ?? m.text);
+    const asked = prior.filter(m => m.role === 'user' && !m.local).map(m => m.ask?.question ?? m.text);
     const slot = replacing != null ? replacing : messages.length + 1;
     setAsking(true); setThinking(false);
     if (replacing == null) {
@@ -2228,7 +2200,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const fromMarks = uniqueAnswerSources(answer, lastEvidence, pageLabel);
       const local = lastEvidence.find(e => e.page && (e.quote ?? '').trim() && (!e.reportId || e.reportId === id));
       const target = (fromMarks[0] && (!fromMarks[0].reportId || fromMarks[0].reportId === id) ? fromMarks[0] : null) ?? local;
-      if (target?.page) jumpCitation(target);
+      if (target?.page) { lastVoiceCiteRef.current = target; jumpCitation(target); }
     }
     /* voice-after-ask: jump via the same path as clicking an answer [Pxx] chip */
     if (voiceSpeakRef.current) {
@@ -2730,7 +2702,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                       <p>{m.text}</p>
                       {m.ask?.attachNote ? <small className="cd-msg-attach">{m.ask.attachNote}</small> : null}
                     </div>}
-              {m.role==='assistant' && m.text.trim() && !streaming && <div className="cd-answer-tools">
+              {m.role==='assistant' && m.text.trim() && !streaming && !m.local && <div className="cd-answer-tools">
                 <div className="cd-actions">
                 <button type="button" className={m.feedback==='up'?'on':''} aria-label="满意" title="满意" aria-pressed={m.feedback==='up'} aria-expanded={m.feedback==='up' && !m.feedbackDone} onClick={()=>setAnswerVote(i,'up')}>
                   <ActIcon><path d="M7 10v12" /><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /></ActIcon>

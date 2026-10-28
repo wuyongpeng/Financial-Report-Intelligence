@@ -1,4 +1,5 @@
 import { normalizeVoiceText } from './text-normalize';
+import { isSectionTitleQuery } from './section-query';
 
 export type VoiceReadIntent =
   | { kind: 'section'; query: string }
@@ -25,14 +26,8 @@ export function parseVoiceReadIntent(text: string): VoiceReadIntent {
   if (!m) return null;
   let q = (m[1] ?? '').replace(/^(一下|一下下)/, '');
   q = q.replace(/(开始读|开始朗读|给我听|听听)$/g, '');
-  if (!q || q.length > 28) return null;
+  if (!q) return null;
 
-  const sectionLike =
-    /^第[一二三四五六七八九十百零〇两\d]+[章节]/.test(q) ||
-    /(管理层讨论|经营情况讨论|经营分析|MD&?A|风险因素|重大风险|财务报表附注|财务报表|合并报表|公司治理|报告摘要|主要会计数据)/i.test(
-      q,
-    );
-  if (!sectionLike) return null;
-  if (/(多少|怎么|为何|为什么|是否|同比|环比)/.test(q)) return null;
+  if (!isSectionTitleQuery(q)) return null;
   return { kind: 'section', query: q };
 }

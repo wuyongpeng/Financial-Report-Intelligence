@@ -1,7 +1,11 @@
+import { normalizeVoiceText, normalizeVoiceTextRaw } from './text-normalize';
+import { CN_NUM_CHARS, parseChineseNumber } from './cn-number';
+
 export type VoiceNavIntent =
   | { kind: 'next' }
   | { kind: 'prev' }
   | { kind: 'goto'; page: number }
+  | { kind: 'last' }
   | { kind: 'home' }
   | null;
 
@@ -16,13 +20,10 @@ const HOME_CONFIRM_LINES = [
   '嗯，回首页',
 ] as const;
 
-/** Normalize ASR / typed text for matching. */
-function normalize(text: string): string {
-  return text
-    .replace(/\s+/g, '')
-    .replace(/[。！？.!?,，、；;：:""''「」『』（）()【】\[\]…—～~]/g, '')
-    .trim();
-}
+const normalize = normalizeVoiceTextRaw;
+
+/** Any of these means the utterance is a real question — never a navigation command. */
+const QUESTION_CUE = /(多少|怎么|如何|为什么|为何|是否|有没有|什么|啥|哪|吗|呢|的|对比|比较|相比|同比|环比|营收|利润|收入|毛利|现金流)/;
 
 /**
  * Go-home / switch-company intents — leave the current report detail for the
@@ -47,7 +48,7 @@ export function isVoiceHomeIntent(text: string): boolean {
   ) {
     return true;
   }
-  if (/(回|回到|去|打开|返回|跳到).{0,4}(首页|主页)/.test(t) && t.length <= 16) return true;
+  if (!QUESTION_CUE.test(t) && /^(回|回到|去|打开|返回|跳到).{0,4}(首页|主页)$/.test(t)) return true;
 
   // —— Switch company / another report ——
   if (
@@ -59,8 +60,9 @@ export function isVoiceHomeIntent(text: string): boolean {
   }
   // Soft variants with light filler / length cap.
   if (
-    t.length <= 18 &&
-    /(换一家|换个公司|换一家公司|换个股票|换个标的|问别的|问另一家|看看别的|别的公司|其他公司|打开搜索|重新搜索)/.test(t)
+    t.length <= 14 &&
+    !QUESTION_CUE.test(t) &&
+    /^(?:我?想|我要|能不能|可以)?(?:换一家|换个公司|换一家公司|换个股票|换个标的|问别的|问另一家|看看别的|看看其他|搜别的|搜其他)(?:公司|股票|标的|看看|问问)?$/.test(t)
   ) {
     return true;
   }
@@ -68,7 +70,7 @@ export function isVoiceHomeIntent(text: string): boolean {
   // —— Leave this company / detail (not farewell) ——
   if (
     /^(退出这个公司|离开这个公司|离开详情|退出详情|不想看这个了|不看这个了|先不看这个了|换掉这个|不要这个了)$/.test(t) ||
-    (t.length <= 14 && /(退出|离开).{0,4}(这个)?(公司|详情|财报)/.test(t))
+    (t.length <= 14 && !QUESTION_CUE.test(t) && /^(退出|离开).{0,4}(这个)?(公司|详情|财报)$/.test(t))
   ) {
     return true;
   }
@@ -109,19 +111,75 @@ function isPrevPageIntent(t: string): boolean {
   return false;
 }
 
-/** Local PDF navigation + home/switch from ASR text — no LLM. */
+const NUM = `(?:\\d{1,4}|[${CN_NUM_CHARS}]{1,8})`;
+const GOTO_VERB = '(?:跳转到|跳转至|跳到|翻到|转到|定位到|回到|返回到|返回|打开|去到|去|到|看|回)?';
+const GOTO_RES = [
+  new RegExp(`^${GOTO_VERB}第(${NUM})页$`),
+  new RegExp(`^${GOTO_VERB}(${NUM})页$`),
+  new RegExp(`^${GOTO_VERB}(?:p|page)(\\d{1,4})$`, 'i'),
+];
+const LAST_PAGE_RE = /^(?:跳转到|跳到|翻到|转到|回到|打开|去到|去|到|看)?(?:最后一页|末页|尾页|最后页|最末页)$/;
+
+/** Page number from a goto phrase (may be 0 or huge — range check is the caller's job). */
+export function parseGotoPage(t: string): number | null {
+  for (const re of GOTO_RES) {
+    const m = t.match(re);
+    if (!m) continue;
+    const n = parseChineseNumber(m[1]!);
+    if (n != null && Number.isInteger(n) && n >= 0 && n <= 9999) return n;
+  }
+  return null;
+}
+
+/** Local PDF navigation + home/switch from ASR / typed text — no LLM. */
 export function parseVoiceNavIntent(text: string): VoiceNavIntent {
-  const t = normalize(text);
+  const t = normalizeVoiceText(text);
   if (!t) return null;
   if (isNextPageIntent(t)) return { kind: 'next' };
   if (isPrevPageIntent(t)) return { kind: 'prev' };
-  const m = t.match(/^(?:请?)?(?:跳转到?|跳到|翻到|打开|去)?第?(\d{1,4})页$/);
-  if (m) {
-    const page = Number(m[1]);
-    if (Number.isInteger(page) && page >= 1 && page <= 10_000) return { kind: 'goto', page };
-  }
+  if (LAST_PAGE_RE.test(t)) return { kind: 'last' };
+  const page = parseGotoPage(t);
+  if (page != null) return { kind: 'goto', page };
   if (isVoiceHomeIntent(text)) return { kind: 'home' };
   return null;
+}
+
+/** How a spoken / typed page number resolves against the loaded document. */
+export type GotoResolution = {
+  /** PDF page to open, or null when nothing should move. */
+  page: number | null;
+  /** Short user-facing line (toast / chat confirmation). */
+  message: string;
+  clamped: boolean;
+};
+
+/**
+ * Resolve 「第 N 页」. When the report has printed page numbers, N means the printed
+ * page the reader sees (P8); otherwise (or if no printed match) the PDF page index.
+ * Out of range → clamp to the last page with a friendly note; 0 → stay put.
+ */
+export function resolveGotoPage(
+  n: number,
+  doc: { pdfPages: number[]; printed?: { page: number; printed: number | null }[] },
+): GotoResolution {
+  const pdfPages = [...new Set(doc.pdfPages)].sort((a, b) => a - b);
+  if (n < 1) return { page: null, message: '页码从第 1 页开始', clamped: false };
+  if (!pdfPages.length) return { page: n, message: `已跳到第 ${n} 页`, clamped: false };
+  const printed = (doc.printed ?? []).filter((p): p is { page: number; printed: number } => p.printed != null);
+  const hit = printed.find((p) => p.printed === n);
+  if (hit) return { page: hit.page, message: `已跳到第 ${n} 页`, clamped: false };
+  const maxPdf = pdfPages[pdfPages.length - 1]!;
+  if (pdfPages.includes(n)) {
+    return { page: n, message: printed.length ? `已跳到 PDF 第 ${n} 页` : `已跳到第 ${n} 页`, clamped: false };
+  }
+  if (n > maxPdf) {
+    const maxPrinted = printed.length ? Math.max(...printed.map((p) => p.printed)) : null;
+    const total = maxPrinted ?? maxPdf;
+    return { page: maxPdf, message: `这份报告只有 ${total} 页，已跳到最后一页`, clamped: true };
+  }
+  // In range but page not indexed (gap) — nearest indexed page.
+  const near = pdfPages.reduce((best, p) => (Math.abs(p - n) < Math.abs(best - n) ? p : best), pdfPages[0]!);
+  return { page: near, message: `第 ${n} 页没有内容，已跳到第 ${near} 页`, clamped: true };
 }
 
 /**
@@ -134,7 +192,7 @@ export function parseVoicePageContinue(
   last: { kind: VoicePageNavDirection; at: number } | null,
   now = Date.now(),
 ): { kind: 'next' } | { kind: 'prev' } | null {
-  const t = normalize(text);
+  const t = normalizeVoiceText(text);
   if (!t) return null;
 
   // Explicit direction — no last required (still navigation-only short phrases).
