@@ -9,17 +9,19 @@ import {
   canBatchParseFiling,
   canFillVerdict,
   flattenCrawlFilings,
+  filingMatchesSourceFilter,
   filingSourceLabel,
   filingToPeriodStatus,
   formatQueueLastError,
   METRIC_LABELS,
   periodPrefixMatches,
   periodStateLabel,
+  SOURCE_API_FILTER_OPTIONS,
   uniquePeriodTokens,
   type CrawlCompanyCoverage,
   type CrawlFilingRow,
   type CrawlPeriodStatus,
-  type CrawlSourceKind,
+  type CrawlSourceApiFilter,
   type CrawlStats,
 } from '@/lib/crawl-display';
 import { parseHomeQuery, queryMatchesCompany } from '@/lib/home-search';
@@ -29,7 +31,7 @@ import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { Icon } from '../ui-icons';
 import './crawl-overview.css';
 
-type SourceFilter = 'all' | CrawlSourceKind;
+type SourceFilter = CrawlSourceApiFilter;
 type SortState = 'default' | 'asc' | 'desc';
 type TimeCol = 'discovered' | 'downloaded' | 'parsed' | 'verdict';
 type QueueItem = {
@@ -864,7 +866,7 @@ export default function CrawlOverview() {
     const parsed = parseHomeQuery(keyword);
     const needle = parsed.companyQuery || keyword;
     let list = allFilings.filter((item) => {
-      if (source !== 'all' && item.source !== source) return false;
+      if (!filingMatchesSourceFilter(item, source)) return false;
       if (onlyFailed && item.state !== 'failed') return false;
       if (onlyUnparsed && (item.state === 'parsed' || item.state === 'parsed_partial')) return false;
       if (onlyMissingAi && item.verdictStatus === 'ready') return false;
@@ -2285,8 +2287,9 @@ export default function CrawlOverview() {
           </label>
           <select value={source} onChange={(e) => setSource(e.target.value as SourceFilter)} aria-label="来源筛选">
             <option value="all">全部来源</option>
-            <option value="exchange">交易所直连</option>
-            <option value="cninfo">巨潮资讯</option>
+            {SOURCE_API_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
           <select
             value={periodOptions.includes(periodPrefix.trim().toUpperCase()) ? periodPrefix.trim().toUpperCase() : periodPrefix}

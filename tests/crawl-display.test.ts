@@ -6,12 +6,15 @@ import {
   describeYoy,
   estimateDownloadQueueWait,
   flattenCrawlFilings,
+  filingMatchesSourceFilter,
   filingSourceLabel,
   formatQueueLastError,
   formatYoyBadge,
   openingCompanyLabel,
   periodPrefixMatches,
   resolveYoy,
+  sourceKindFromAnnouncement,
+  SOURCE_API_FILTER_OPTIONS,
   uniquePeriodTokens,
   verdictStatusLabel,
   yoyChange,
@@ -77,6 +80,34 @@ test('filingSourceLabel marks expected gaps as 待抓取, not 尚未抓取', () 
   assert.equal(filingSourceLabel({ state: 'expected', sourceApi: null }), '待抓取');
   assert.equal(filingSourceLabel({ state: 'parsed', sourceApi: 'SSE' }), '上交所');
   assert.equal(filingSourceLabel({ state: 'discovered', sourceApi: null }), '尚未抓取');
+});
+
+test('SOURCE_API_FILTER_OPTIONS lists concrete exchanges then cninfo', () => {
+  assert.deepEqual(
+    SOURCE_API_FILTER_OPTIONS.map((o) => o.value),
+    ['SSE', 'SZSE', 'BSE', 'CNINFO'],
+  );
+  assert.deepEqual(
+    SOURCE_API_FILTER_OPTIONS.map((o) => o.label),
+    ['上交所', '深交所', '北交所', '巨潮资讯'],
+  );
+});
+
+test('filingMatchesSourceFilter matches period sourceApi, not company coarse kind', () => {
+  assert.equal(filingMatchesSourceFilter({ sourceApi: 'SSE' }, 'all'), true);
+  assert.equal(filingMatchesSourceFilter({ sourceApi: 'SSE' }, 'SSE'), true);
+  assert.equal(filingMatchesSourceFilter({ sourceApi: 'sse' }, 'SSE'), true);
+  assert.equal(filingMatchesSourceFilter({ sourceApi: 'SZSE' }, 'SSE'), false);
+  assert.equal(filingMatchesSourceFilter({ sourceApi: 'BSE' }, 'BSE'), true);
+  assert.equal(filingMatchesSourceFilter({ sourceApi: 'CNINFO' }, 'CNINFO'), true);
+  assert.equal(filingMatchesSourceFilter({ sourceApi: null }, 'SSE'), false);
+  assert.equal(filingMatchesSourceFilter({ sourceApi: 'SSE' }, 'CNINFO'), false);
+});
+
+test('sourceKindFromAnnouncement maps BSE to exchange', () => {
+  assert.equal(sourceKindFromAnnouncement('BSE'), 'exchange');
+  assert.equal(sourceKindFromAnnouncement('SSE'), 'exchange');
+  assert.equal(sourceKindFromAnnouncement('CNINFO'), 'cninfo');
 });
 test('period prefix 2026H1 / 2026 filters the compact list', () => {
   assert.equal(periodPrefixMatches('2026H1', '2026H1'), true);

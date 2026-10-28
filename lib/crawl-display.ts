@@ -142,8 +142,34 @@ export function mapIndustryGroup(industry: string, sector?: string | null): Indu
 export function sourceKindFromAnnouncement(source: string | null | undefined): CrawlSourceKind | null {
   if (!source) return null;
   if (source === 'CNINFO') return 'cninfo';
-  if (source === 'SSE' || source === 'SZSE') return 'exchange';
+  if (source === 'SSE' || source === 'SZSE' || source === 'BSE') return 'exchange';
   return null;
+}
+
+/** 列表快捷过滤用的上游 API（与 announcements.source / period.sourceApi 对齐） */
+export type CrawlSourceApi = 'SSE' | 'SZSE' | 'BSE' | 'CNINFO';
+export type CrawlSourceApiFilter = 'all' | CrawlSourceApi;
+
+export const SOURCE_API_FILTER_OPTIONS: ReadonlyArray<{ value: CrawlSourceApi; label: string }> = [
+  { value: 'SSE', label: '上交所' },
+  { value: 'SZSE', label: '深交所' },
+  { value: 'BSE', label: '北交所' },
+  { value: 'CNINFO', label: '巨潮资讯' },
+] as const;
+
+export function normalizeSourceApi(api: string | null | undefined): CrawlSourceApi | null {
+  const v = String(api ?? '').trim().toUpperCase();
+  if (v === 'SSE' || v === 'SZSE' || v === 'BSE' || v === 'CNINFO') return v;
+  return null;
+}
+
+/** /sources 快捷过滤：按扁平行的 sourceApi 命中，不用公司级粗类 exchange/cninfo */
+export function filingMatchesSourceFilter(
+  row: { sourceApi?: string | null },
+  filter: CrawlSourceApiFilter,
+): boolean {
+  if (filter === 'all') return true;
+  return normalizeSourceApi(row.sourceApi) === filter;
 }
 
 
@@ -287,7 +313,7 @@ export function flattenCrawlFilings(companies: CrawlCompanyCoverage[]): CrawlFil
         name: company.name,
         industry: company.industry,
         industryGroup: company.industryGroup,
-        source: company.source,
+        source: sourceKindFromAnnouncement(period.sourceApi) ?? company.source,
         period: period.period,
         title: period.title ?? null,
         state: period.state,
