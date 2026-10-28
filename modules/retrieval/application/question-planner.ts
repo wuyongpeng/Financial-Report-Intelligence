@@ -125,7 +125,8 @@ export function isMetaModelQuestion(question: string) {
 
 /**
  * Clear non-report chitchat / general-knowledge asks.
- * Keep this denylist narrow; the no-finance-signal gate covers the long tail.
+ * Keep this denylist narrow — only these get the soft scope footer.
+ * Asks that merely miss the finance lexicon stay in normal RAG (no forced footer).
  */
 export function isClearOffTopicQuestion(question: string) {
   const q = question.trim();
@@ -175,9 +176,13 @@ export function classifyQuestionScope(input: {
     return { outOfScope: false };
   }
   // Anaphoric clarifiers already merged above via finance signal on retrievalQuestion.
-  // Weather / chitchat / unknown short asks: soft boundary — answer briefly, append note.
-  // Do NOT hard-refuse; El Niño / weather may relate to weather-sensitive earnings.
-  return { outOfScope: false, softScopeHint: true };
+  // Soft footer ONLY for clear off-topic (weather / chitchat denylist).
+  // Missing finance lexicon alone is NOT enough — normal RAG, no forced footer.
+  // Do NOT hard-refuse clear off-topic either; answer briefly then append the note.
+  if (isClearOffTopicQuestion(original) || isClearOffTopicQuestion(input.retrievalQuestion)) {
+    return { outOfScope: false, softScopeHint: true };
+  }
+  return { outOfScope: false };
 }
 
 export function planQuestion(input: {

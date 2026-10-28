@@ -154,3 +154,26 @@ test('weather is soft-scope — not hard refuse-only', () => {
   assert.equal(plan.softScopeHint, true);
   assert.equal(isClearOffTopicQuestion('北京明天啥天气'), true);
 });
+
+test('missing finance lexicon alone does not force soft-scope footer', () => {
+  // Not clear off-topic, no metric/page/finance hit — still normal RAG, no footer.
+  const unknown = classifyQuestionScope({
+    originalQuestion: '尼诺对本公司有何影响',
+    retrievalQuestion: '尼诺对本公司有何影响',
+    metricNames: [],
+    explicitPage: null,
+  });
+  assert.equal(unknown.outOfScope, false);
+  assert.equal(Boolean(unknown.softScopeHint), false);
+  assert.equal(isClearOffTopicQuestion('尼诺对本公司有何影响'), false);
+
+  const plan = planQuestion({
+    question: '高铁怎么买票',
+    history: [],
+    watched: [],
+    currentCode: '000333',
+  });
+  assert.equal(plan.outOfScope, false);
+  assert.equal(Boolean(plan.softScopeHint), false);
+  assert.equal(isClearOffTopicQuestion('高铁怎么买票'), false);
+});
