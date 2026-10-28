@@ -44,15 +44,13 @@ import { voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-
 import { voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
 import { findTocPage, matchSection, buildSectionReadChunks } from '@/lib/voice/section-match';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
-import { VOICE_IDLE_EMPTY_TURNS, VOICE_IDLE_EXIT_TOAST } from '@/lib/voice/timing';
+import { VOICE_ENDPOINT_MS, VOICE_IDLE_EMPTY_TURNS, VOICE_IDLE_EXIT_TOAST, isMeaningfulBargePartial } from '@/lib/voice/timing';
 import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { effectivePaneFlex, paneCollapseGate } from '@/lib/pane-collapse';
-import { type AsrSession } from '@/lib/voice/client-asr';
-import { type PcmCapture } from '@/lib/voice/client-pcm';
+import { openAsrSession, type AsrSession } from '@/lib/voice/client-asr';
+import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer, pauseVoiceTts, resumeVoiceTts, isVoiceTtsPaused, hasVoiceTtsPlayback } from '@/lib/voice/client-tts';
 import './company-detail.css';
-
-/** Barge-in: first ASR partial at least this many chars interrupts TTS / ask. */
 
 type Outline = { pageLabels?: PdfPageLabel[]; indexedPages: number; pages: { page: number; content: string }[]; outline: { id: string; title: string; page: number; highlight: string }[] };
 type Peer = { code: string; company_name: string; metric: string; value: number; unit: string };
@@ -1241,6 +1239,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   function endVoiceMode() {
     voiceGenRef.current += 1; // invalidate in-flight ASR callbacks / timers
     releaseVoiceIo();
+    voice.setSuppressAutoListen(false);
     voiceSpeakRef.current = false;
     voicePartialRef.current = '';
     setVoicePartial('');
@@ -1280,6 +1279,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (opts?.finalize) asrSessionRef.current?.stop();
     else asrSessionRef.current?.close();
     asrSessionRef.current = null;
+    voice.setSuppressAutoListen(false);
     setVoiceListening(false);
   }
 
@@ -1302,6 +1302,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voiceTtsAbortRef.current = null;
     prior?.abort();
     setVoiceSpeaking(false);
+    stopVoiceSession();
   }
 
   /** Short confirm TTS that keeps the continuous voice session listening afterward. */
@@ -1314,13 +1315,17 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voiceTtsAbortRef.current = abort;
     voiceSpeakRef.current = false;
     setVoiceSpeaking(true);
-    if (voiceConvRef.current) voice.stopMic();
+    if (voiceConvRef.current) {
+      voice.stopMic();
+      void armBargeInAsr('speaking');
+    }
     void speakAnswer(line, abort.signal)
       .catch(() => undefined)
       .finally(() => {
         if (voiceTtsAbortRef.current !== abort) return;
         voiceTtsAbortRef.current = null;
         setVoiceSpeaking(false);
+        stopVoiceSession(); // drop armed barge ASR before provider listen
         if (resume && voiceConvRef.current) resumeVoiceConversation();
       });
   }
@@ -1372,13 +1377,17 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voiceTtsAbortRef.current = abort;
     voiceSpeakRef.current = false;
     setVoiceSpeaking(true);
-    if (voiceConvRef.current) voice.stopMic();
+    if (voiceConvRef.current) {
+      voice.stopMic();
+      void armBargeInAsr('speaking');
+    }
     try {
       await speakAnswer(chunk.text, abort.signal);
     } catch { /* ignore */ }
     if (voiceTtsAbortRef.current !== abort) return;
     voiceTtsAbortRef.current = null;
     setVoiceSpeaking(false);
+    stopVoiceSession(); // natural chunk end: clear barge before next chunk / listen
     const latest = sectionReadRef.current;
     if (!latest || latest.gen !== gen) {
       if (voiceConvRef.current) resumeVoiceConversation();
@@ -1483,6 +1492,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         out(line, { toast: true });
         // Keep mic open — do not end session. If nothing was speaking, just resume listen.
         if (ok) setVoiceSpeaking(false);
+        stopVoiceSession(); // clear local barge ASR before provider listen
         if (voiceConvRef.current) resumeVoiceConversation();
         return;
       }
@@ -1494,7 +1504,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         const ok = can && resumeVoiceTts();
         if (ok) {
           setVoiceSpeaking(true);
-          if (voiceConvRef.current) voice.stopMic();
+          if (voiceConvRef.current) {
+            voice.stopMic();
+            void armBargeInAsr('speaking');
+          }
           out('继续朗读', { toast: true });
         } else {
           out('没有可继续的朗读', { toast: true });
@@ -1730,7 +1743,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setChatCollapsed(false);
     // Shared ask path: current-page focus + pre-highlight, same as typed send.
     void ask(text, { spoken: true });
-    if (voiceConvRef.current) voice.stopMic();
+    if (voiceConvRef.current) {
+      voice.stopMic();
+      void armBargeInAsr('asking');
+    }
   }
 
   handleVoiceUtteranceRef.current = handleVoiceUtterance;
@@ -1762,11 +1778,114 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const tts = voiceTtsAbortRef.current;
     voiceTtsAbortRef.current = null;
     tts?.abort();
+    stopVoiceSession(); // drop local barge ASR if any
     voice.setSpeaking(false);
     voice.resumeListen();
   }
 
   bargeInFromVoiceRef.current = bargeInFromVoice;
+
+  /**
+   * While TTS is playing (and optionally while ask is streaming), keep a local ASR open.
+   * Global provider mic stays stopped (speaking/busy); first meaningful partial aborts TTS/ask
+   * and becomes the next utterance. Restores barge-in lost in the app-global session refactor.
+   */
+  async function armBargeInAsr(_mode: 'speaking' | 'asking') {
+    if (!voiceConvRef.current) return;
+    clearVoiceFinalTimer();
+    clearVoiceTurnTimers();
+    pcmCaptureRef.current?.stop();
+    pcmCaptureRef.current = null;
+    asrSessionRef.current?.close();
+    asrSessionRef.current = null;
+    voice.setSuppressAutoListen(true);
+
+    const gen = ++voiceGenRef.current;
+    voiceUtteranceHandledRef.current = false;
+    voicePartialRef.current = '';
+    setVoicePartial('');
+    let barged = false;
+
+    const takeOver = (seed: string) => {
+      if (barged) return;
+      barged = true;
+      sectionReadRef.current = null;
+      voiceSpeakRef.current = false;
+      requestRef.current?.abort();
+      const tts = voiceTtsAbortRef.current;
+      voiceTtsAbortRef.current = null;
+      tts?.abort();
+      setVoiceSpeaking(false);
+      if (seed.trim()) {
+        voicePartialRef.current = seed;
+        setVoicePartial(seed);
+      }
+    };
+
+    const finishBarge = (raw: string) => {
+      clearVoiceFinalTimer();
+      clearVoiceTurnTimers();
+      pcmCaptureRef.current?.stop();
+      pcmCaptureRef.current = null;
+      asrSessionRef.current?.close();
+      asrSessionRef.current = null;
+      voice.setSuppressAutoListen(false);
+      void handleVoiceUtterance(raw);
+    };
+
+    const scheduleEndpoint = () => {
+      if (voiceEndpointTimerRef.current != null) window.clearTimeout(voiceEndpointTimerRef.current);
+      voiceEndpointTimerRef.current = window.setTimeout(() => {
+        voiceEndpointTimerRef.current = null;
+        if (gen !== voiceGenRef.current || !barged) return;
+        finishBarge(voicePartialRef.current);
+      }, VOICE_ENDPOINT_MS);
+    };
+
+    try {
+      const session = openAsrSession((ev) => {
+        if (gen !== voiceGenRef.current) return;
+        if (ev.type === 'partial') {
+          const raw = ev.text ?? '';
+          voicePartialRef.current = raw;
+          setVoicePartial(raw);
+          if (!barged) {
+            if (isMeaningfulBargePartial(raw)) {
+              takeOver(raw);
+              scheduleEndpoint();
+            }
+            return;
+          }
+          if (raw.trim() && pcmCaptureRef.current) scheduleEndpoint();
+        }
+        if (ev.type === 'final') {
+          const raw = ev.text || voicePartialRef.current;
+          if (!barged) {
+            if (!isMeaningfulBargePartial(raw)) return;
+            takeOver(raw);
+            finishBarge(raw);
+            return;
+          }
+          finishBarge(raw);
+        }
+        if (ev.type === 'error') {
+          if (asrSessionRef.current === session) asrSessionRef.current = null;
+          pcmCaptureRef.current?.stop();
+          pcmCaptureRef.current = null;
+          if (!barged) voice.setSuppressAutoListen(false);
+        }
+      });
+      asrSessionRef.current = session;
+      const capture = await startPcmCapture((chunk) => session.sendPcm(chunk));
+      if (gen !== voiceGenRef.current || asrSessionRef.current !== session) {
+        capture.stop();
+        return;
+      }
+      pcmCaptureRef.current = capture;
+    } catch {
+      voice.setSuppressAutoListen(false);
+    }
+  }
 
   function draftAsk(text: string) {
     setQuestion(text);
@@ -2225,7 +2344,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         voiceTtsAbortRef.current = abort;
         setVoiceSpeaking(true);
         setVoiceMode(true);
-        if (voiceConvRef.current) voice.stopMic();
+        if (voiceConvRef.current) {
+          voice.stopMic();
+          void armBargeInAsr('speaking');
+        }
         void speakAnswer(answer, abort.signal)
           .catch(() => undefined)
           .finally(() => {
@@ -2233,8 +2355,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             if (voiceTtsAbortRef.current !== abort) return;
             voiceTtsAbortRef.current = null;
             setVoiceSpeaking(false);
+            stopVoiceSession(); // natural end: clear armed barge before provider listen
             if (!voiceConvRef.current) {
-              if (!asrSessionRef.current && !pcmCaptureRef.current) setVoiceMode(false);
+              setVoiceMode(false);
               return;
             }
             // Barge-in aborts TTS (abort ref mismatch above). Do NOT gate on

@@ -51,6 +51,11 @@ type VoiceSessionApi = {
   setSpeaking: (v: boolean) => void;
   setBusy: (v: boolean) => void;
   setPartial: (text: string) => void;
+  /**
+   * While true, heal-stuck auto-listen will not start a provider listen turn.
+   * Detail uses this while local barge-in ASR is collecting after interrupting TTS.
+   */
+  setSuppressAutoListen: (v: boolean) => void;
   /** Stop mic/ASR only — session stays active (for TTS / ask). */
   stopMic: () => void;
   /** After hold (ask/TTS/nav), listen again if session still active. */
@@ -94,6 +99,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const voiceGenRef = useRef(0);
   const handlerRef = useRef<VoiceUtteranceHandler | null>(null);
   const bargeInHandlerRef = useRef<(() => void) | null>(null);
+  /** Detail local barge-in ASR collecting — block heal from opening a second mic. */
+  const suppressAutoListenRef = useRef(false);
   const [floatHeadExtra, setFloatHeadExtraState] = useState<ReactNode | null>(null);
   const listenTurnRef = useRef<() => Promise<void>>(async () => undefined);
   const handleUtteranceRef = useRef<(raw: string) => Promise<void>>(async () => undefined);
@@ -129,6 +136,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
 
   const end = useCallback((message?: string) => {
     activeRef.current = false;
+    suppressAutoListenRef.current = false;
     voiceEmptyTurnsRef.current = 0;
     asrReconnectRef.current = 0;
     voiceGenRef.current += 1;
@@ -246,6 +254,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     releaseVoiceIo();
     const gen = ++voiceGenRef.current;
     voiceUtteranceHandledRef.current = false;
+    suppressAutoListenRef.current = false;
     setSpeakingState(false);
     setListening(true);
     voicePartialRef.current = '';
@@ -350,6 +359,10 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     bargeInHandlerRef.current = handler;
   }, []);
 
+  const setSuppressAutoListen = useCallback((v: boolean) => {
+    suppressAutoListenRef.current = v;
+  }, []);
+
   const setFloatHeadExtra = useCallback((node: ReactNode | null) => {
     setFloatHeadExtraState(node);
   }, []);
@@ -376,6 +389,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     if (!active || listening || speaking || busy) return;
     const t = window.setTimeout(() => {
       if (!activeRef.current) return;
+      if (suppressAutoListenRef.current) return;
       if (asrSessionRef.current || pcmCaptureRef.current) return;
       void listenTurnRef.current();
     }, 1600);
@@ -404,6 +418,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     setSpeaking: setSpeakingState,
     setBusy: setBusyState,
     setPartial,
+    setSuppressAutoListen,
     stopMic,
     resumeListen,
     finalizeListen,
@@ -411,7 +426,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   }), [
     active, listening, speaking, busy, partial, toast,
     start, end, setUtteranceHandler, setBargeInHandler, setFloatHeadExtra,
-    setPartial, stopMic, resumeListen, finalizeListen,
+    setPartial, setSuppressAutoListen, stopMic, resumeListen, finalizeListen,
   ]);
 
   // Typed ask sets busy via detail page — must NOT open the float.
