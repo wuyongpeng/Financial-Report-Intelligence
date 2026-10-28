@@ -1,5 +1,5 @@
 /**
- * 关键关系（v1）：程序发现跨指标勾稽，模型仅在「追问原因」时解释。
+ * 关键关系（v1）：程序发现跨指标勾稽；概览只读展示数据与提示，原因可由右侧自行追问。
  * 不下投资结论、不恢复「重点关注」。
  */
 import { formatYoyBadge, resolveYoy, describeYoy, yoyTone, type YoyResult } from './crawl-display';

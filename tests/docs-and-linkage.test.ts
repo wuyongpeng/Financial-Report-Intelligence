@@ -70,7 +70,7 @@ const sampleCard = {
   askPrompt: '请结合原文解释利润与经营现金流为何可能出现这种关系。',
 };
 
-test('indicator linkage uses 数据 + 提示 sections with page chips only when sourced', () => {
+test('indicator linkage keeps short 数据 + 提示 lines with page chips, no ask button or chevron', () => {
   assert.equal(RELATION_DATA_LABEL, '数据');
   assert.equal(RELATION_TAKE_LABEL, '提示');
   const result: MetricRelationshipsResult = { status: 'has_cards', cards: [sampleCard] };
@@ -79,22 +79,22 @@ test('indicator linkage uses 数据 + 提示 sections with page chips only when 
     pageChip: (page: number) => `P${page}`,
     pageDescription: (page: number) => `PDF 第 ${page} 页`,
     onCite: () => {},
-    onAsk: () => {},
   }));
   assert.match(html, /class="cd-brief cd-rel-block"/);
   assert.match(html, /class="cd-brief-kicker">指标联动/);
-  assert.match(html, /<details[^>]*><summary/);
+  assert.match(html, /<details[^>]*data-focus-card[^>]*><summary/);
   assert.doesNotMatch(html, /<details[^>]*\bopen(?:=|\s|>)/);
   assert.match(html, /账面盈利但经营现金流为负/);
-  assert.match(html, /cd-rel-section-label">数据</);
-  assert.match(html, /cd-rel-section-label">提示</);
-  assert.match(html, /cd-rel-numbers/);
+  assert.match(html, /cd-rel-prefix">数据</);
+  assert.match(html, /cd-rel-prefix">提示</);
+  assert.match(html, /cd-rel-line/);
   assert.match(html, /\[P10\]/);
   // Missing page on operating_cash_flow — no fake chip for that row
   assert.equal((html.match(/class="cd-cite"/g) || []).length, 1);
-  assert.match(html, /追问原因/);
-  assert.match(html, /原因待核验/);
+  assert.doesNotMatch(html, /追问原因|cd-rel-ask|cd-rel-chevron|原因待核验/);
   assert.doesNotMatch(html, /怎么看|查看依据|>结论</);
+  assert.match(html, /data-focus-id="cash_vs_profit"/);
+  assert.match(html, /data-focus-kind="finding"/);
 });
 
 test('indicator linkage without onCite still renders numbers and does not crash without pages', () => {
@@ -110,9 +110,9 @@ test('indicator linkage without onCite still renders numbers and does not crash 
     }],
   };
   const html = renderToStaticMarkup(createElement(MetricLinkage, { result }));
-  assert.match(html, /cd-rel-numbers/);
+  assert.match(html, /cd-rel-line/);
   assert.doesNotMatch(html, /class="cd-cite"/);
-  assert.doesNotMatch(html, /追问原因/);
+  assert.doesNotMatch(html, /追问原因|cd-rel-chevron/);
 });
 
 test('indicator linkage retains honest empty and missing-data states', () => {

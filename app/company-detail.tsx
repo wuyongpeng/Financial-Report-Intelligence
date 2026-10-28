@@ -2634,8 +2634,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             pageChip={pageChip}
             pageDescription={pageDescription}
             onCite={(c) => cite({ page: c.page, quote: c.quote }, false, c.metric ?? null)}
-            onAsk={draftAsk}
-            askDisabled={asking}
+            pickedClass={pickedCard}
           />
           </div>
 
@@ -2738,7 +2737,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </div>}
           </section>
 
-          <p className="cd-data-note">角标可定位原文 · 请对照 PDF</p>
+          <p className="cd-data-note">结论带原文，数据有出处</p>
         </div>
       </main>
       {middleCollapsed && <div className="cd-rail cd-rail-middle"><button type="button" aria-label="展开概览栏" title="展开概览栏" aria-expanded={false} aria-controls="cd-dashboard-panel" onClick={()=>{

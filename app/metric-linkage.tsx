@@ -16,9 +16,8 @@ type Props = {
   pageDescription?: (page: number) => string;
   /** Jump left pane to PDF quote — same path as four-core footnotes. */
   onCite?: (cite: MetricLinkageCite) => void;
-  /** Prefill chat with the card ask prompt. */
-  onAsk?: (prompt: string) => void;
-  askDisabled?: boolean;
+  /** Overview pick highlight class for a card id (same as other focus cards). */
+  pickedClass?: (id: string) => string;
 };
 
 function citeForNumber(n: MetricRelNumber, cites: MetricRelCite[]): MetricRelCite | null {
@@ -28,14 +27,20 @@ function citeForNumber(n: MetricRelNumber, cites: MetricRelCite[]): MetricRelCit
     ?? { page: n.page, quote: n.label, metric: n.metric };
 }
 
-/** Overview metric-linkage cards: 数据 (with page chips) + 提示; optional 追问原因. */
+function focusQuote(card: MetricRelationshipsResult['cards'][number]): string {
+  const data = card.numbers.length > 0
+    ? card.numbers.map((n) => `${n.label} ${n.valueText}`).join(' · ')
+    : card.facts.join(' ');
+  return `${card.title}。数据 ${data}。提示 ${card.howToRead}`;
+}
+
+/** Overview metric-linkage: short 数据 + 提示 lines with page chips; read-only except overview dblclick focus. */
 export default function MetricLinkage({
   result,
   pageChip,
   pageDescription,
   onCite,
-  onAsk,
-  askDisabled,
+  pickedClass,
 }: Props) {
   return (
     <section className="cd-brief cd-rel-block" aria-label="指标联动">
@@ -44,81 +49,72 @@ export default function MetricLinkage({
       </div>
       {result.status === 'has_cards' ? (
         <div className="cd-rel-list">
-          {result.cards.map(card => (
-            <details key={card.id} className={`cd-rel-card${card.tone === 'ok' ? ' cd-rel-ok' : ''}`} data-rel-id={card.id}>
-              <summary className="cd-rel-summary">
-                <span className="cd-rel-dot" aria-hidden="true" />
-                <span className="cd-rel-title">{card.title}</span>
-                <svg className="cd-rel-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                  <path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </summary>
-              <div className="cd-rel-detail">
-                <div className="cd-rel-section">
-                  <p className="cd-rel-section-label">{RELATION_DATA_LABEL}</p>
-                  {card.numbers.length > 0 ? (
-                    <ul className="cd-rel-numbers">
-                      {card.numbers.map((n) => {
-                        const cite = citeForNumber(n, card.cites);
-                        const chip = cite && pageChip ? pageChip(cite.page) : null;
-                        return (
-                          <li key={`${card.id}-${n.metric}`} className="cd-rel-number">
-                            <span className="cd-rel-number-label">{n.label}</span>
-                            <span className="cd-rel-number-value">
-                              {n.valueText}
-                              {cite && chip && onCite ? (
-                                <button
-                                  type="button"
-                                  className="cd-cite"
-                                  data-source-jump
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onCite({ page: cite.page, quote: cite.quote, metric: cite.metric ?? n.metric });
-                                  }}
-                                  title={pageDescription
-                                    ? `单击定位原文（来源栏加宽至约40%），${pageDescription(cite.page)}`
-                                    : `单击定位原文 · PDF 第 ${cite.page} 页`}
-                                >
-                                  [{chip}]
-                                </button>
-                              ) : null}
+          {result.cards.map(card => {
+            const page = card.cites.find((c) => c.page != null)?.page;
+            return (
+              <details
+                key={card.id}
+                className={`cd-rel-card cd-focus-card${card.tone === 'ok' ? ' cd-rel-ok' : ''}${pickedClass?.(card.id) ?? ''}`}
+                data-rel-id={card.id}
+                data-focus-card
+                data-focus-id={card.id}
+                data-focus-kind="finding"
+                data-focus-title={card.title}
+                data-focus-quote={focusQuote(card)}
+                {...(page != null ? { 'data-focus-page': String(page) } : {})}
+              >
+                <summary className="cd-rel-summary">
+                  <span className="cd-rel-dot" aria-hidden="true" />
+                  <span className="cd-rel-title">{card.title}</span>
+                </summary>
+                <div className="cd-rel-detail">
+                  <p className="cd-rel-line">
+                    <span className="cd-rel-prefix">{RELATION_DATA_LABEL}</span>
+                    <span className="cd-rel-body">
+                      {card.numbers.length > 0 ? (
+                        card.numbers.map((n, i) => {
+                          const cite = citeForNumber(n, card.cites);
+                          const chip = cite && pageChip ? pageChip(cite.page) : null;
+                          return (
+                            <span key={`${card.id}-${n.metric}`} className="cd-rel-num">
+                              {i > 0 ? <span className="cd-rel-sep" aria-hidden="true"> · </span> : null}
+                              <span className="cd-rel-number-label">{n.label}</span>
+                              {' '}
+                              <span className="cd-rel-number-value">
+                                {n.valueText}
+                                {cite && chip && onCite ? (
+                                  <button
+                                    type="button"
+                                    className="cd-cite"
+                                    data-source-jump
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onCite({ page: cite.page, quote: cite.quote, metric: cite.metric ?? n.metric });
+                                    }}
+                                    title={pageDescription
+                                      ? `单击定位原文（来源栏加宽至约40%），${pageDescription(cite.page)}`
+                                      : `单击定位原文 · PDF 第 ${cite.page} 页`}
+                                  >
+                                    [{chip}]
+                                  </button>
+                                ) : null}
+                              </span>
                             </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : (
-                    card.facts.map((line, index) => <p key={index} className="cd-rel-fact">{line}</p>)
-                  )}
-                  {card.numbers.length > 0 && card.facts.length > 0 ? (
-                    <div className="cd-rel-facts">
-                      {card.facts.map((line, index) => <p key={index} className="cd-rel-fact">{line}</p>)}
-                    </div>
-                  ) : null}
+                          );
+                        })
+                      ) : (
+                        card.facts.join(' ')
+                      )}
+                    </span>
+                  </p>
+                  <p className="cd-rel-line">
+                    <span className="cd-rel-prefix">{RELATION_TAKE_LABEL}</span>
+                    <span className="cd-rel-body cd-rel-how">{card.howToRead}</span>
+                  </p>
                 </div>
-                <div className="cd-rel-section">
-                  <p className="cd-rel-section-label">{RELATION_TAKE_LABEL}</p>
-                  <p className="cd-rel-how">{card.howToRead}</p>
-                  {card.reasonBoundary ? <p className="cd-rel-boundary">{card.reasonBoundary}</p> : null}
-                </div>
-                {onAsk && card.askPrompt ? (
-                  <div className="cd-rel-actions">
-                    <button
-                      type="button"
-                      className="cd-rel-ask"
-                      disabled={askDisabled}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAsk(card.askPrompt);
-                      }}
-                    >
-                      追问原因
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </details>
-          ))}
+              </details>
+            );
+          })}
         </div>
       ) : (
         <p className="cd-rel-empty">{result.status === 'checked_none' ? METRIC_REL_EMPTY.checked_none : METRIC_REL_EMPTY.insufficient}</p>
