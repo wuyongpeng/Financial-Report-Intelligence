@@ -2523,7 +2523,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             data-focus-quote={trendFocusQuote()}
           >
             <div className="cd-card-head">
-              <h3>指标趋势</h3>
+              <p className="cd-brief-kicker">指标趋势</p>
               <span>近 {Math.min(trendHistory.length,8)} 期 · 按报告时序</span>
               <button type="button" className="cd-trend-spark" disabled={asking||memoryLoading} onClick={pinTrendFocus} aria-label="智析" title="智析">✧</button>
             </div>
@@ -2542,7 +2542,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 onClick={() => setDepthOpen((v) => !v)}
               >
                 <div>
-                  <h3>深度归因{industrySkillBadge(selected.industry)} <span className="cd-more-chevron" aria-hidden="true">{depthOpen ? '▾' : '▸'}</span></h3>
+                  <p className="cd-brief-kicker">深度归因{industrySkillBadge(selected.industry)} <span className="cd-more-chevron" aria-hidden="true">{depthOpen ? '▾' : '▸'}</span></p>
                 </div>
               </button>
             </div>
