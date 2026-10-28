@@ -208,15 +208,10 @@
 .cd-verdict-fallback{margin:8px 0 0;font-size:13px;line-height:1.65;color:#7d8b9f}
 .cd-verdict-fallback-hint{display:block;margin-top:4px;color:#9aa8b8;font-size:12px}
 .cd-brief-title .cd-verdict-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle;background:#8b97a9}
-.cd-verdict-up{border-color:#d7e8d8}
+/* 结论标题/边框中性墨色；仅圆点保留绿=健康、红=风险、金=中性 */
 .cd-verdict-up .cd-verdict-dot{background:#16a34a}
-.cd-verdict-up .cd-brief-title{color:#215e3a}
-.cd-verdict-mid{border-color:#ead9a8}
 .cd-verdict-mid .cd-verdict-dot{background:#c9a227}
-.cd-verdict-mid .cd-brief-title{color:#7a6418}
-.cd-verdict-down{border-color:#ead4d4}
 .cd-verdict-down .cd-verdict-dot{background:#dc2626}
-.cd-verdict-down .cd-brief-title{color:#9b2c2c}
 
 /* 重点关注 UI 已下线（产品决策）；样式保留便于日后恢复 */
 /* 重点关注：最多两卡；蓝灰色系与概览一致 */
