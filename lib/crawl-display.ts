@@ -205,7 +205,7 @@ export function sourceBadgeDetail(source: CrawlSourceKind | null) {
   return '监控池内，等待温和抓取';
 }
 
-/** Ops 列表「来源」列：期次缺口用「待抓取」，勿与未覆盖公司的「尚未抓取」混用。 */
+/** Ops 列表「来源」列。日历缺口行已不进 flattenCrawlFilings；expected 分支仅作兜底。 */
 export function filingSourceLabel(row: { state?: PeriodCollectState | null; sourceApi?: string | null }) {
   if (row.state === 'expected' && !row.sourceApi) return '待抓取';
   const api = row.sourceApi;
@@ -278,6 +278,9 @@ export function flattenCrawlFilings(companies: CrawlCompanyCoverage[]): CrawlFil
   for (const company of companies) {
     for (const period of company.periodStatuses ?? []) {
       if (!isCanonicalPeriod(period.period) || !periodMeetsAutoCutoff(period.period)) continue;
+      // Calendar gaps are coverage hints for workers/monitor — not real captures. Keep them
+      // out of the /sources filings table (no fake 「待抓取 / 不可删」 rows).
+      if (period.state === 'expected' && !period.announcementId) continue;
       rows.push({
         key: period.announcementId ?? `${company.code}:${period.period}`,
         code: company.code,

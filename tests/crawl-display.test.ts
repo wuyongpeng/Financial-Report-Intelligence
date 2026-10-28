@@ -52,24 +52,24 @@ test('opening label includes company name and code', () => {
   assert.equal(openingCompanyLabel('601138'), '601138');
 });
 
-test('flattenCrawlFilings keeps expected rows so they can be crawled', () => {
+test('flattenCrawlFilings omits calendar-gap expected rows from the sources list', () => {
   const rows = flattenCrawlFilings([company({
     code: '601138',
     name: '工业富联',
     periodStatuses: [
       { period: '2026H1', state: 'parsed', announcementId: 'a1', title: '2026年半年度报告', verdictStatus: 'ready', verdictGeneratedAt: '2026-09-17T09:00:00Z' },
       { period: '2025FY', state: 'expected' },
+      { period: '2026Q1', state: 'expected', announcementId: null },
       { period: '最新', state: 'parsed', announcementId: 'a0' },
       { period: '其他', state: 'discovered', announcementId: 'a9', title: '投资者关系活动记录表' },
     ],
   })]);
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 1);
   assert.equal(rows[0].period, '2026H1');
   assert.equal(rows[0].announcementId, 'a1');
   assert.equal(rows[0].verdictGeneratedAt, '2026-09-17T09:00:00Z');
   assert.equal(rows[0].industryGroup, '科技');
-  assert.equal(rows[1].period, '2025FY');
-  assert.equal(rows[1].announcementId, null);
+  assert.ok(!rows.some((row) => row.state === 'expected'));
 });
 
 

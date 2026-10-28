@@ -2436,13 +2436,9 @@ export default function CrawlOverview() {
                     </td>
                     <td className="co-col-period">
                       <Link
-                        href={item.state === 'expected' && !item.announcementId ? companyHref(item) : companyHref(item, item.period)}
+                        href={companyHref(item, item.period)}
                         className="co-period-link"
-                        data-tip={
-                          item.state === 'expected' && !item.announcementId
-                            ? `${periodChipTitle(period)}\n该期尚未入库（日历缺口），打开公司页将显示最新已抓取报告；请用「抓取」补齐。`
-                            : periodChipTitle(period)
-                        }
+                        data-tip={periodChipTitle(period)}
                       >
                         {item.period}
                       </Link>
@@ -2464,22 +2460,18 @@ export default function CrawlOverview() {
                           disabled={crawlBusy}
                           onClick={() => askCrawl(item.code, item.name, period)}
                         >{crawlBusy ? '抓取中' : '抓取'}</button>
-                        {!(item.state === 'expected' && !item.announcementId) ? (
-                          <button
-                            type="button"
-                            className="co-text-act"
-                            disabled={parseBusy}
-                            onClick={() => askParse(item.code, item.name, period)}
-                          >{parseBusy ? '解析中' : '解析'}</button>
-                        ) : null}
-                        {!(item.state === 'expected' && !item.announcementId) ? (
-                          <button
-                            type="button"
-                            className="co-text-act"
-                            disabled={verdictBusy || (!canFillVerdict(item) && !parseBusy)}
-                            onClick={() => askVerdict(item.code, item.name, period)}
-                          >{verdictBusy ? '智析中' : '智析'}</button>
-                        ) : null}
+                        <button
+                          type="button"
+                          className="co-text-act"
+                          disabled={parseBusy}
+                          onClick={() => askParse(item.code, item.name, period)}
+                        >{parseBusy ? '解析中' : '解析'}</button>
+                        <button
+                          type="button"
+                          className="co-text-act"
+                          disabled={verdictBusy || (!canFillVerdict(item) && !parseBusy)}
+                          onClick={() => askVerdict(item.code, item.name, period)}
+                        >{verdictBusy ? '智析中' : '智析'}</button>
                         {item.announcementId ? (
                           <button
                             type="button"
@@ -2488,11 +2480,7 @@ export default function CrawlOverview() {
                             title="剔除错抓/非完整财报，释放该期次"
                             onClick={() => askDiscard(item.code, item.name, period)}
                           >{discardBusy ? '剔除中' : '删除'}</button>
-                        ) : (
-                          item.state === 'expected' ? (
-                            <span className="co-text-act is-muted" title="日历缺口尚无入库公告，无法删除；可点抓取补齐，或等披露后自动发现">不可删</span>
-                          ) : null
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>

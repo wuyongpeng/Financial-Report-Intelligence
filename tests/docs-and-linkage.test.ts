@@ -46,6 +46,7 @@ test('repo docs root exposes exactly the five public documents in order', async 
 test('documentation links route Chinese names and reject unsafe protocols and unknown local files', () => {
   const names = ['产品介绍.md'];
   assert.equal(productDocumentLink('产品介绍.md', names), documentHref('产品介绍.md'));
+  assert.equal(documentHref('产品介绍.md'), `/docs?file=${encodeURIComponent('产品介绍.md')}`);
   assert.equal(productDocumentLink('../docs/产品介绍.md#说明', names), `${documentHref('产品介绍.md')}#${encodeURIComponent('说明')}`);
   assert.equal(productDocumentLink('#说明', names), '#说明');
   assert.equal(productDocumentLink('https://example.com', names), 'https://example.com');
