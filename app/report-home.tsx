@@ -40,8 +40,11 @@ import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed 
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
-import { isVoiceFarewell } from '@/lib/voice/farewell-intent';
+import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
+import { isVoiceCapabilityIntent, voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
+import { speakAnswer } from '@/lib/voice/client-tts';
+import { clearHomeChatTurns, markHomeAskHandoff } from '@/lib/chat-surface';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
@@ -287,7 +290,31 @@ export default function ReportHome() {
   useEffect(() => {
     const handler = async (text: string): Promise<VoiceUtteranceResult> => {
       if (isVoiceFarewell(text)) {
+        const line = pickVoiceFarewellLine();
+        voice.setBusy(true);
+        voice.setSpeaking(true);
+        try {
+          await speakAnswer(line, undefined);
+        } catch { /* ignore TTS failure on exit */ }
+        finally {
+          voice.setSpeaking(false);
+          voice.setBusy(false);
+        }
         return { action: 'end' };
+      }
+      // 「你是谁 / 你能干什么」— brand one-liner, do not search.
+      if (isVoiceCapabilityIntent(text)) {
+        const line = voiceCapabilitySpeech();
+        voice.setBusy(true);
+        voice.setSpeaking(true);
+        try {
+          await speakAnswer(line, undefined);
+        } catch { /* ignore */ }
+        finally {
+          voice.setSpeaking(false);
+          voice.setBusy(false);
+        }
+        return { action: 'resume' };
       }
       // Greetings / filler must not fill the super-entry or trigger search.
       if (isVoiceGreetingOrNoise(text)) {
@@ -322,6 +349,14 @@ export default function ReportHome() {
       voice.resumeListen();
     }, 300);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Detail → home: keep voice mic if active, but never inherit a report chat thread.
+  // Home turns stay home-only; clearing on mount avoids a prior SPA visit leaking in.
+  useEffect(() => {
+    clearHomeChatTurns();
+    setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -552,6 +587,9 @@ export default function ReportHome() {
       voiceNavigatingRef.current = true;
       voice.stopMic();
     }
+    // Home ask → detail: isolate conversational context (fresh report thread).
+    clearHomeChatTurns();
+    markHomeAskHandoff(question);
     const url = buildCompanyAskUrl(company.code, question, periodToken);
     router.push(url);
   }
@@ -608,6 +646,8 @@ export default function ReportHome() {
         voiceNavigatingRef.current = true;
         voice.stopMic(); // keep session; detail handler will resume
       }
+      // Leaving home for a company: drop home-only turns (detail has its own thread).
+      clearHomeChatTurns();
       router.push(`/${code}`);
     };
 

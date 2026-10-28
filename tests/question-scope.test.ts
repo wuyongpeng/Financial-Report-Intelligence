@@ -24,7 +24,7 @@ test('meta-model phrasings are detected without false-positive on 估值模型 a
 test('weather and chitchat are clear off-topic', () => {
   assert.equal(isClearOffTopicQuestion('北京明天啥天气'), true);
   assert.equal(isClearOffTopicQuestion('今天天气如何'), true);
-  assert.equal(isClearOffTopicQuestion('你是谁'), true);
+  assert.equal(isClearOffTopicQuestion('你是谁'), false);
   assert.equal(isClearOffTopicQuestion('长期应付职工薪酬为什么是空的'), false);
 });
 
@@ -41,6 +41,15 @@ test('classifyQuestionScope + outOfScopeReply cover meta, weather, and finance c
     explicitPage: null,
   });
   assert.deepEqual(meta, { outOfScope: true, outOfScopeKind: 'meta-model' });
+
+  const identity = classifyQuestionScope({
+    originalQuestion: '你是谁',
+    retrievalQuestion: '你是谁',
+    metricNames: [],
+    explicitPage: null,
+  });
+  assert.deepEqual(identity, { outOfScope: true, outOfScopeKind: 'identity' });
+  assert.match(outOfScopeReply('identity'), /财报智析.*Eva|Eva/);
 
   const weather = classifyQuestionScope({
     originalQuestion: '北京明天啥天气',

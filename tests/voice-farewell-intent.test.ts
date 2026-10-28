@@ -42,9 +42,10 @@ test('isVoiceFarewell rejects finance / bare acknowledgment', () => {
   }
 });
 
-test('pickVoiceFarewellLine returns a short warm line', () => {
+test('pickVoiceFarewellLine returns a short warm Eva line', () => {
   const line = pickVoiceFarewellLine(0);
   assert.ok(FAREWELL_LINES.includes(line as (typeof FAREWELL_LINES)[number]));
-  assert.ok(line.length <= 20);
-  assert.match(line, /问我|叫我/);
+  assert.ok(line.length <= 24);
+  assert.match(line, /Eva/);
+  assert.match(line, /问|叫/);
 });

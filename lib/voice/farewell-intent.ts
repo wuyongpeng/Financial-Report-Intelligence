@@ -5,9 +5,9 @@
  */
 
 const FAREWELL_LINES = [
-  '知道了，再见，有问题随时问我',
-  '好的，有需要再叫我',
-  '嗯，先这样，随时问我',
+  '知道了，再见，随时问 Eva',
+  '好的，有需要再叫 Eva',
+  '嗯，先这样，随时问 Eva',
 ] as const;
 
 /** Normalize ASR / typed text for matching. */

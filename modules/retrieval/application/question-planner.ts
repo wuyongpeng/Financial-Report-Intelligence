@@ -1,5 +1,6 @@
 import { nameVariants, WELL_KNOWN_ALIASES } from '@/lib/company-aliases';
 import type { MemoryMessage } from '@/lib/conversations';
+import { isProductIdentityQuestion } from '@/lib/product-identity';
 import {
   METRIC_PATTERNS,
   type OutOfScopeKind,
@@ -22,7 +23,7 @@ export function wantsEvaluativeJudgement(query: string) {
 
 /** Prior turn that should never be merged into a later finance ask. */
 export function isDisposablePriorQuestion(question: string) {
-  return isMetaModelQuestion(question) || isClearOffTopicQuestion(question);
+  return isMetaModelQuestion(question) || isProductIdentityQuestion(question) || isClearOffTopicQuestion(question);
 }
 
 /**
@@ -131,7 +132,7 @@ export function isMetaModelQuestion(question: string) {
 export function isClearOffTopicQuestion(question: string) {
   const q = question.trim();
   if (!q) return false;
-  if (/你是谁|你叫什么|自我介绍|你是什么助手/.test(q)) return true;
+  // Identity / capability (你是谁) → hard Eva intro via outOfScopeKind identity, not soft footer.
   return /天气|气温|下雨|下雪|限行|雾霾|空气质量|外卖|几点了|现在几点|讲个笑话|写首诗|写一首诗|翻译成|怎么做(?:饭|菜)|足球比分|篮球赛|星座|今日运势|今天吃什么/.test(q);
 }
 
@@ -167,6 +168,10 @@ export function classifyQuestionScope(input: {
   if (INVESTMENT_SCOPE.test(original)) return { outOfScope: true, outOfScopeKind: 'investment' };
   // Meta-model: answer from config (not a hard reject-only message).
   if (isMetaModelQuestion(original)) return { outOfScope: true, outOfScopeKind: 'meta-model' };
+  // 「你是谁 / 你能干什么」— warm Eva one-liner (voice + typed).
+  if (isProductIdentityQuestion(original) || isProductIdentityQuestion(input.retrievalQuestion)) {
+    return { outOfScope: true, outOfScopeKind: 'identity' };
+  }
   if (input.summary) return { outOfScope: false };
   if (input.metricNames.length || input.explicitPage != null) return { outOfScope: false };
   // Follow-ups rewrite into retrievalQuestion with prior finance context — treat as in-scope.

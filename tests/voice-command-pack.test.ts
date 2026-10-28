@@ -95,7 +95,8 @@ test('cite / layout / style / meta intents', () => {
   assert.equal(isVoiceCapabilityIntent('营收多少'), false);
   const speech = voiceCapabilitySpeech();
   assert.equal(speech, VOICE_CAPABILITY_LINES.join(''));
-  assert.match(speech, /页码|出处/);
+  assert.match(speech, /财报智析|Eva/);
+  assert.match(speech, /出处|财报/);
 });
 
 test('tts pause/resume does not steal page continue or farewell', () => {

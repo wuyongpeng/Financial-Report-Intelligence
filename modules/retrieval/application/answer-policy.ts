@@ -1,4 +1,5 @@
 import { unsupportedYears } from '@/lib/chat-evidence';
+import { EVA_INTRO_LINE } from '@/lib/product-identity';
 import { llmModelName } from '@/lib/llm-providers';
 import type { QueryPlan, RetrievedPassage, RetrievalMetric } from '../domain/retrieval';
 
@@ -22,6 +23,9 @@ export function ensureSoftScopeFooter(answer: string, spoken = false) {
 export function outOfScopeReply(kind: QueryPlan['outOfScopeKind'] = 'off-topic') {
   if (kind === 'investment') {
     return '不提供投资建议或股价预测。可以继续查看本期指标、经营变化与财报原文。';
+  }
+  if (kind === 'identity') {
+    return EVA_INTRO_LINE;
   }
   if (kind === 'meta-model') {
     const model = llmModelName();

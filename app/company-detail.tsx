@@ -44,6 +44,7 @@ import { voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-
 import { voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
 import { findTocPage, matchSection, buildSectionReadChunks } from '@/lib/voice/section-match';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
+import { clearHomeChatTurns, consumeHomeAskHandoff } from '@/lib/chat-surface';
 import { VOICE_ENDPOINT_MS, VOICE_IDLE_EMPTY_TURNS, VOICE_IDLE_EXIT_TOAST, isMeaningfulBargePartial } from '@/lib/voice/timing';
 import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { effectivePaneFlex, paneCollapseGate } from '@/lib/pane-collapse';
@@ -334,9 +335,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   // A reasoning model thinks before it speaks; say so instead of showing dead air.
   const [thinking, setThinking] = useState(false);
   const [mobilePane, setMobilePane] = useState('dashboard');
-  // Comparing two periods is the core job, so a period switch must not discard
-  // the conversation the reader already built up.
+  // Conversations are reportId-scoped (server-enforced). Map survives period switches
+  // within this mount so each report can resume its own thread — never cross-company,
+  // and never hydrate a prior thread on a home→detail `?q=` handoff.
   const conversationIds = useRef(new Map<string, string>());
+  /** One-shot: home ask deep-link starts a fresh report thread (seed question first). */
+  const homeAskHandoffRef = useRef(Boolean(autoAskQuestion?.trim()));
   const memoryReady = useRef(false);
   const [memoryLoading, setMemoryLoading] = useState(true);
   const [baselineId, setBaselineId] = useState<string | null>(null);
@@ -381,8 +385,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setReportListOpen(false);
     if (report.id === activeId.current) return;
     requestRef.current?.abort(); busyRef.current = false;
-    // Same-company period switch keeps the QA thread; only `newConversation` / `+` clears it.
+    // Period switch → different reportId → different thread. Clear UI immediately so
+    // company/period A messages cannot flash or stick on B while hydrate runs.
     memoryReady.current = false; setMemoryLoading(true);
+    setMessages([]); setQuestion('');
     activeId.current = report.id;
     setSelected(report); onSelect(report.id); clearPendingSelection(); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
     setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setDepthOpen(false); setFocused(null);
@@ -544,26 +550,62 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   useEffect(() => {
     const abort = new AbortController();
     memoryReady.current = false;
+    // Always drop previous report's UI thread before hydrate (home/detail + A→B isolation).
+    setMessages([]);
+    clearHomeChatTurns();
     void (async () => {
       try {
         // Guest cookie must land before hydrate so Postgres owner_key stays stable on HTTP demos.
         await ensureGuestCookie();
         if (abort.signal.aborted) return;
+
+        // Home → detail ask: do not carry home chitchat or an older report thread.
+        // Fresh conversation so the deep-link utterance seeds as the first turn.
+        // Once auto-asked, later period switches hydrate normally even if `q` lingers.
+        const wantFreshHandoff = !autoAskedRef.current
+          && (homeAskHandoffRef.current || consumeHomeAskHandoff(autoAskQuestion));
+        if (wantFreshHandoff) {
+          homeAskHandoffRef.current = true;
+          conversationIds.current.delete(selected.id);
+          try {
+            const created = await fetch('/api/conversations', {
+              method: 'POST',
+              signal: abort.signal,
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ reportId: selected.id }),
+            });
+            const payload = await readContractJson(created, parseCreateConversationResponse);
+            if (!abort.signal.aborted && payload.conversation) {
+              conversationIds.current.set(selected.id, payload.conversation.id);
+            }
+          } catch {
+            conversationIds.current.delete(selected.id);
+          }
+          if (!abort.signal.aborted) setMessages([]);
+          return;
+        }
+
         const response = await fetch(`/api/conversations?reportId=${encodeURIComponent(selected.id)}`, { signal: abort.signal, cache: 'no-store', credentials: 'same-origin' });
         const data = await readContractJson(response, parseConversationListResponse);
         const id = conversationIds.current.get(selected.id) ?? data.conversations[0]?.id;
-        // Empty / anonymous: keep in-memory company thread; never wipe on soft miss.
-        if (!id) return;
+        if (!id) {
+          if (!abort.signal.aborted) setMessages([]);
+          return;
+        }
         const detail = await fetch(`/api/conversations/${id}`, { signal: abort.signal, cache: 'no-store', credentials: 'same-origin' });
         const payload = await readContractJson(detail, parseConversationDetailResponse);
         if (abort.signal.aborted) return;
         conversationIds.current.set(selected.id, id);
         setMessages(payload.messages.map(m => ({ role: m.role, text: m.content || (m.role === 'assistant' ? '这次回答尚未完成，可重新提问。' : ''), citations: m.evidence })));
-      } catch { /* Fail / 401 / empty: keep existing messages so period switches do not look like 新建对话. */ }
+      } catch {
+        // Fail / 401 / empty: stay empty — never keep another report's messages.
+        if (!abort.signal.aborted) setMessages([]);
+      }
       finally { if (!abort.signal.aborted) { memoryReady.current = true; setMemoryLoading(false); } }
     })();
     return () => abort.abort();
-  }, [selected.id]);
+  }, [selected.id, autoAskQuestion]);
   useEffect(() => {
     const abort = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -1131,7 +1173,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       asrSessionRef.current?.close();
       asrSessionRef.current = null;
       voice.setUtteranceHandler(null);
-      // If leaving for home handoff, keep voiceConvRef true so session continuity is intentional.
+      // Mic/float may continue on home; chat messages stay on this report (unmounted).
       if (!voiceHandoffHomeRef.current) {
         // Soft page leave without handoff: do not force-end; provider keeps going if still active.
       }
@@ -1670,7 +1712,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         voiceSpeakRef.current = false;
         setVoiceSpeaking(true);
         voiceHandoffHomeRef.current = true;
-        // Keep voiceConvRef true so continuity is intentional across home.
+        // Keep mic session; conversational history stays with this report (not home).
         void speakAnswer(line, abort.signal)
           .catch(() => undefined)
           .finally(() => {
@@ -2396,7 +2438,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     askRef.current = ask;
   });
 
-  // Home deep-link: fill + send once preferred period is resolved and chat memory is ready.
+  // Home deep-link: seed ONLY this utterance into a fresh report thread (no home history).
   useEffect(() => {
     if (!autoAskQuestion || autoAskedRef.current) return;
     if (!periodBootstrapDone || memoryLoading || loading || asking) return;
@@ -2414,9 +2456,19 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const timer = window.setTimeout(() => {
       if (autoAskedRef.current) return;
       autoAskedRef.current = true;
+      homeAskHandoffRef.current = false;
       setChatCollapsed(false);
       setMobilePane('chat');
       setQuestion(questionText);
+      // Drop `q` so refresh/back does not re-seed or look like shared home context.
+      try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('q')) {
+          url.searchParams.delete('q');
+          const next = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : '');
+          window.history.replaceState(null, '', next);
+        }
+      } catch { /* ignore */ }
       // Home→detail with live voice: speak the deep-link answer, then resumeListen.
       if (voice.active) {
         voiceConvRef.current = true;
