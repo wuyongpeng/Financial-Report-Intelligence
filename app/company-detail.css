@@ -274,13 +274,6 @@
 .cd-module-conclusion{margin:0 0 10px;font-size:13px;line-height:1.65;color:#3d4f66}
 .cd-module-cites{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 10px}
 .cd-module-empty{margin:0;font-size:12px;color:#91a0b4}
-.cd-ratio-row{display:flex;align-items:center;gap:6px 16px;flex-wrap:wrap;margin:8px 0 10px;padding:6px 12px;min-height:36px;border:1px solid var(--cd-line);border-radius:8px;background:#fff}
-.cd-ratio-row>b{font-size:12px;font-weight:600;color:#5b6d86;white-space:nowrap}
-.cd-ratio-chip{display:inline-flex;align-items:baseline;gap:5px;font-size:12px;color:#73849c;white-space:nowrap}
-.cd-ratio-chip strong{font-size:13px;font-weight:600;color:#24364f;font-variant-numeric:tabular-nums}
-.cd-ratio-empty{font-size:12px;color:#91a0b4}
-.cd-ratio-chip .cd-cite{vertical-align:baseline;opacity:.7;background:#eef2f9;color:#7387a6;font-size:10px!important;padding:2px 4px;margin:0}
-.cd-ratio-chip .cd-cite:hover{opacity:1;background:#eef2f9;color:#5b6d86}
 /* 指标联动：复用财报速览外框、标题与内边距，内部条目默认折叠。 */
 .cd-rel-block{background:#fff;border-color:#e2e8f0}
 .cd-rel-list{margin-top:6px}

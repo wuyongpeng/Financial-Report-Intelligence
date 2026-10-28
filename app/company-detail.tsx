@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { amount, anomaliesConclusion, attributionConclusion, cashConversion, comparableHistory, sequentialHistory, debtRatio, filingType, format, grossMargin, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { amount, anomaliesConclusion, attributionConclusion, comparableHistory, sequentialHistory, filingType, format, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
 import { buildMetricRelationships } from '@/lib/metric-relationships';
 import MetricLinkage from './metric-linkage';
@@ -875,13 +875,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     function pickedCard(id: string) {
     return overviewPick?.cardId === id ? ' cd-focus-picked' : '';
   }
-  const leverage = debtRatio(selected), conversion = cashConversion(selected), margin = grossMargin(selected);
-  const ratioChips = [
-    { key: '资产负债率', label: '资产负债率', value: leverage, suffix: '%', metric: 'total_liabilities' as MetricName },
-    { key: '毛利率', label: '毛利率', value: margin, suffix: '%', metric: 'operating_cost' as MetricName },
-    { key: '现金含利润比', label: '现金含利润比', value: conversion, suffix: '%', metric: 'operating_cash_flow' as MetricName },
-  ].filter((chip): chip is typeof chip & { value: number } => chip.value !== undefined);
-
   // A single click only jumps inside the left column; enlarging stays explicit.
   /** Widen source pane for PDF reading (~40%). Gutters already allow manual tweak. */
   function widenSourceForPdf(targetPct = SOURCE_WIDE) {
@@ -2529,27 +2522,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {overlay&&overlay!==metric&&<p className="cd-note">虚线为{labels[overlay]}，已按首期指数化到与{labels[metric]}同一刻度，只反映相对变化速度，不能读绝对值。</p>}
           </section>
 
-          <section
-            className={`cd-ratio-row cd-focus-card${pickedCard('ratio')}`}
-            aria-label="关键比率"
-            data-focus-card
-            data-focus-id="ratio"
-            data-focus-kind="metric"
-            data-focus-title="关键比率"
-            data-focus-quote={ratioChips.length
-              ? `关键比率：${ratioChips.map(chip => `${chip.label} ${chip.value.toFixed(1)}${chip.suffix}`).join('，')}`
-              : '关键比率缺必要科目，暂不计算'}
-          >
-            <b>关键比率</b>
-            {ratioChips.length ? ratioChips.map(chip => (
-              <span className="cd-ratio-chip" key={chip.key}>
-                {chip.label}
-                <strong>{chip.value.toFixed(1)}{chip.suffix}</strong>
-                {footnote(chip.metric)}
-              </span>
-            )) : <span className="cd-ratio-empty">缺必要科目，暂不计算</span>}
-          </section>
-
           <section className={`cd-more-analysis${depthOpen ? '' : ' cd-more-collapsed'}`} id="cd-more">
             <div className="cd-more-title">
               <button
@@ -2630,7 +2602,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </div>}
           </section>
 
-          <p className="cd-data-note">数据来自已解析财报 · 数字旁角标可定位原文 · 未复核指标请结合 PDF 核验</p>
+          <p className="cd-data-note">角标可定位原文 · 请对照 PDF</p>
         </div>
       </main>
       {middleCollapsed && <div className="cd-rail cd-rail-middle"><button type="button" aria-label="展开概览栏" title="展开概览栏" aria-expanded={false} aria-controls="cd-dashboard-panel" onClick={()=>{

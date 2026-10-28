@@ -1,6 +1,6 @@
 /**
  * 关键关系（v1）：程序发现跨指标勾稽，模型仅在「追问原因」时解释。
- * 组名与「关键比率」成对；不下投资结论、不恢复「重点关注」。
+ * 不下投资结论、不恢复「重点关注」。
  */
 import { formatYoyBadge, resolveYoy, describeYoy, yoyTone, type YoyResult } from './crawl-display';
 import { FOCUS_THRESHOLDS } from './focus-highlights-config';
