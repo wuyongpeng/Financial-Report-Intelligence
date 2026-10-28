@@ -2601,8 +2601,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             <div className="cd-baseline-row">
               <span className="cd-baseline-label">对比基准</span>
               <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}>
-                <option value="">{defaultPrevious?`较 ${period(defaultPrevious)} · 上年同期`:'暂无上年同期'}</option>
-                {baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{`较 ${period(r)}`}</option>)}
+                <option value="">{defaultPrevious?period(defaultPrevious):'暂无'}</option>
+                {baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}
               </select>
             </div>
           )}
