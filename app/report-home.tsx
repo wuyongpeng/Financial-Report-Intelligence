@@ -41,6 +41,7 @@ import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
 import { isVoiceFarewell } from '@/lib/voice/farewell-intent';
+import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
@@ -254,6 +255,8 @@ export default function ReportHome() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const onSearchSubmitRef = useRef<(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) => Promise<void>>(async () => undefined);
   const voiceNavigatingRef = useRef(false);
+  /** User typed/edited the super-entry while a voice session was active. */
+  const searchEditedDuringVoiceRef = useRef(false);
 
   const coveragePlaceholderKey = useMemo(
     () => coverage.map((item) => `${item.code}:${item.reportPeriod ?? ''}`).sort().join('|'),
@@ -285,6 +288,10 @@ export default function ReportHome() {
     const handler = async (text: string): Promise<VoiceUtteranceResult> => {
       if (isVoiceFarewell(text)) {
         return { action: 'end' };
+      }
+      // Greetings / filler must not fill the super-entry or trigger search.
+      if (isVoiceGreetingOrNoise(text)) {
+        return { action: 'resume' };
       }
       setSearch(text);
       voice.setBusy(true);
@@ -835,9 +842,22 @@ export default function ReportHome() {
         role="search"
         onSubmit={(e) => {
           e.preventDefault();
-          if (voiceListening || submitting) return;
-          if (!search.trim()) return;
-          void onSearchSubmit(search.trim());
+          if (submitting) return;
+          const typed = search.trim();
+          if (!typed) return;
+          // While listening, treat the box as the utterance (lets user correct ASR).
+          if (voiceListening) {
+            voice.setPartial(typed);
+            voice.finalizeListen();
+            return;
+          }
+          if (voice.active && searchEditedDuringVoiceRef.current) {
+            searchEditedDuringVoiceRef.current = false;
+            voice.setSuppressAutoListen(false);
+            void onSearchSubmit(typed, { fromVoice: true });
+            return;
+          }
+          void onSearchSubmit(typed);
         }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -847,9 +867,20 @@ export default function ReportHome() {
         <input
           ref={searchInputRef}
           aria-label="搜索或提问：公司名称、股票代码，或自然语言问题"
-          placeholder={voiceListening ? '正在聆听…' : activePlaceholder}
+          placeholder={voiceListening ? '正在聆听…可手动改字' : activePlaceholder}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSearch(v);
+            if (!voice.active && !voiceListening) return;
+            searchEditedDuringVoiceRef.current = true;
+            voice.setPartial(v);
+            // Pause mic so ASR partials do not fight keyboard edits; keep session.
+            if (voiceListening) {
+              voice.setSuppressAutoListen(true);
+              voice.stopMic();
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
             if (search.trim() || voiceListening || submitting) return;
@@ -865,13 +896,28 @@ export default function ReportHome() {
               el.setSelectionRange(end, end);
             });
           }}
-          disabled={submitting || voiceListening}
+          disabled={submitting}
         />
-        {search && !voiceListening && (
-          <button className="rh-clear" type="button" aria-label="清空搜索" onClick={() => setSearch('')}>
+        {search ? (
+          <button
+            className="rh-clear"
+            type="button"
+            aria-label="清空搜索"
+            onClick={() => {
+              setSearch('');
+              if (voice.active || voiceListening) {
+                searchEditedDuringVoiceRef.current = true;
+                voice.setPartial('');
+                if (voiceListening) {
+                  voice.setSuppressAutoListen(true);
+                  voice.stopMic();
+                }
+              }
+            }}
+          >
             <Icon name="x" size={16} />
           </button>
-        )}
+        ) : null}
         {(() => {
           const stopGlyph = (
             <svg className="rh-search-glyph" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
@@ -930,7 +976,11 @@ export default function ReportHome() {
               type="button"
               aria-label="语音提问"
               title="语音提问"
-              onClick={() => { void voice.start(); }}
+              onClick={() => {
+                searchEditedDuringVoiceRef.current = false;
+                voice.setSuppressAutoListen(false);
+                void voice.start();
+              }}
             >
               {waveGlyph}
             </button>
@@ -938,7 +988,9 @@ export default function ReportHome() {
         })()}
       </form>
       {voiceListening ? (
-        <p className="rh-search-hint" role="status">正在聆听… 也可在底部语音浮层点「说完了」</p>
+        <p className="rh-search-hint" role="status">正在聆听…可直接改输入框；也可在底部浮层点「说完了」</p>
+      ) : voice.active ? (
+        <p className="rh-search-hint" role="status">语音会话中：可手动改字后回车搜索，或点波形继续说</p>
       ) : (
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
       )}
