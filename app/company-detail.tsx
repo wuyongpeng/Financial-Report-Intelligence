@@ -2597,6 +2597,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           </section>
 
           <div className="cd-metrics-block">
+          {baselineOptions.length>0 && (
+            <div className="cd-baseline-row">
+              <span className="cd-baseline-label">对比基准</span>
+              <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}>
+                <option value="">{defaultPrevious?`较 ${period(defaultPrevious)} · 上年同期`:'暂无上年同期'}</option>
+                {baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{`较 ${period(r)}`}</option>)}
+              </select>
+              {!baselineIsDefault && previous && <span className="cd-baseline-quiet-note">非上年同期</span>}
+            </div>
+          )}
           <div className="cd-metrics" aria-label="四项核心指标">{metricNames.map(m => {
             const row = deltas.find(x => x.metric === m);
             const yoy = row?.yoy;
@@ -2626,7 +2636,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
               <span className={`cd-pill ${pill}`} title={hover}>{delta}</span>
             </article>;
           })}</div>
-          {baselineOptions.length>0 && <div className="cd-baseline-row"><select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`较 ${period(defaultPrevious)} · 上年同期`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{`较 ${period(r)}`}</option>)}</select>{!baselineIsDefault && previous && <span className="cd-baseline-quiet-note">非上年同期</span>}</div>}
           </div>
           <MetricLinkage
             key={`${selected.id}:${previous?.id ?? "default"}`}
