@@ -2604,7 +2604,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 <option value="">{defaultPrevious?`较 ${period(defaultPrevious)} · 上年同期`:'暂无上年同期'}</option>
                 {baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{`较 ${period(r)}`}</option>)}
               </select>
-              {!baselineIsDefault && previous && <span className="cd-baseline-quiet-note">非上年同期</span>}
             </div>
           )}
           <div className="cd-metrics" aria-label="四项核心指标">{metricNames.map(m => {
