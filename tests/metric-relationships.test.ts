@@ -305,3 +305,20 @@ test('关键关系：文案不含投资建议禁用词', () => {
     assert.ok(!/建议减持|买入|卖出|投资建议|暂无风险/.test(allText(card)));
   }
 });
+
+test('关键关系：有出处的指标 numbers 带 page，缺出处不编造', () => {
+  const selected = build('2026FY', [
+    metric('revenue', 1.2e10, 5, { prior_value: 1e10, yoy_pct: 20 }),
+    metric('net_profit', 8e8, 10, { prior_value: 1e9, yoy_pct: -20 }),
+  ]);
+  const orphan = selected.metrics.find((m) => m.metric === 'net_profit')!;
+  delete (orphan as { source_page?: number }).source_page;
+
+  const result = buildMetricRelationships(selected);
+  const card = result.cards.find((c) => c.id === 'revenue_vs_profit');
+  assert.ok(card);
+  assert.equal(card!.numbers.find((n) => n.metric === 'revenue')?.page, 5);
+  assert.equal(card!.numbers.find((n) => n.metric === 'net_profit')?.page, undefined);
+  assert.ok(card!.cites.every((c) => c.page === 5));
+  assert.equal(card!.cites.length, 1);
+});

@@ -580,3 +580,8 @@ export const METRIC_REL_EMPTY = {
   checked_none: '已检查的关系未发现明显背离',
   insufficient: '缺少可比数据，暂无法判断',
 } as const;
+
+/** UI section labels — swap TAKE only when product renames the second block. */
+export const RELATION_DATA_LABEL = '数据' as const;
+/** Provisional product name for the interpretive block (not 结论 / 怎么看). */
+export const RELATION_TAKE_LABEL = '提示' as const;

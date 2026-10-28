@@ -2470,6 +2470,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </>}
           </section>
 
+          <div className="cd-metrics-block">
           <div className="cd-metrics" aria-label="四项核心指标">{metricNames.map(m => {
             const row = deltas.find(x => x.metric === m);
             const yoy = row?.yoy;
@@ -2500,7 +2501,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </article>;
           })}</div>
           {baselineOptions.length>0 && <div className="cd-baseline-row"><label>对比基准 <select aria-label="选择同比对比基准" value={previous?.id ?? ''} onChange={e=>setBaselineId(e.target.value||null)}><option value="">{defaultPrevious?`${period(defaultPrevious)}（上年同期）`:'暂无上年同期'}</option>{baselineOptions.filter(r=>r.id!==defaultPrevious?.id).map(r=><option key={r.id} value={r.id}>{period(r)}</option>)}</select></label>{!baselineIsDefault && previous && <span className="cd-note">当前以 {period(previous)} 为基准，非上年同期。</span>}</div>}
-          <MetricLinkage key={`${selected.id}:${previous?.id ?? "default"}`} result={metricRelationships} />
+          </div>
+          <MetricLinkage
+            key={`${selected.id}:${previous?.id ?? "default"}`}
+            result={metricRelationships}
+            pageChip={pageChip}
+            pageDescription={pageDescription}
+            onCite={(c) => cite({ page: c.page, quote: c.quote }, false, c.metric ?? null)}
+            onAsk={draftAsk}
+            askDisabled={asking}
+          />
           </div>
 
           <section
