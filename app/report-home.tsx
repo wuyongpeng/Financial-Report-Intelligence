@@ -44,7 +44,21 @@ import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-int
 import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
 import { isVoiceCapabilityIntent, voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
 import { speakAnswer } from '@/lib/voice/client-tts';
-import { clearHomeChatTurns, markHomeAskHandoff } from '@/lib/chat-surface';
+import {
+  appendHomeChatTurn,
+  clearHomeChatTurns,
+  getHomeChatTurns,
+  markHomeAskHandoff,
+} from '@/lib/chat-surface';
+import {
+  homeRosterSourcePreference,
+  isHomeRosterQuestion,
+} from '@/lib/home-roster-intent';
+import { answerHomeRosterLocally } from '@/lib/home-roster-answer';
+import {
+  buildHomeRosterRows,
+  formatHomeRosterSnapshot,
+} from '@/lib/home-roster-snapshot';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
@@ -238,6 +252,8 @@ export default function ReportHome() {
   const [viewMode, setViewMode] = useState<ViewMode>(() => readStoredView());
   const [listSort, setListSort] = useState<{ key: ListSortKey; dir: ListSortDir } | null>(null);
   const [waitToast, setWaitToast] = useState<string | null>(null);
+  /** Ephemeral home-AI reply (typed + voice); never seeds detail chat. */
+  const [homeAnswer, setHomeAnswer] = useState<string | null>(null);
   const [starred, setStarred] = useState<string[]>(() => readStarredCodes());
   const [submitting, setSubmitting] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -357,6 +373,7 @@ export default function ReportHome() {
   useEffect(() => {
     clearHomeChatTurns();
     setSearch('');
+    setHomeAnswer(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -635,6 +652,100 @@ export default function ReportHome() {
     })();
   }
 
+  async function deliverHomeAnswer(answer: string, opts?: { fromVoice?: boolean }) {
+    const line = answer.trim();
+    if (!line) return;
+    setHomeAnswer(line);
+    appendHomeChatTurn('assistant', line);
+    const shouldSpeak = Boolean(opts?.fromVoice || voice.active);
+    if (!shouldSpeak) return;
+    voice.setBusy(true);
+    voice.setSpeaking(true);
+    try {
+      await speakAnswer(line, undefined);
+    } catch { /* ignore TTS */ }
+    finally {
+      voice.setSpeaking(false);
+      voice.setBusy(false);
+    }
+  }
+
+  async function runHomeRosterAsk(raw: string, opts?: { fromVoice?: boolean }) {
+    const pref = homeRosterSourcePreference(raw);
+    const source = pref === 'pool'
+      ? coverage
+      : pref === 'filtered'
+        ? filtered
+        : (visibleCards.length ? visibleCards : filtered);
+    const rows = buildHomeRosterRows(source, { starred: starredSet });
+    const snapshot = formatHomeRosterSnapshot(rows, {
+      visibleCount: visibleCards.length,
+      filteredCount: filtered.length,
+      poolCount: coverage.length,
+      industry,
+      viewMode,
+    });
+    appendHomeChatTurn('user', raw);
+    setHomeAnswer(null);
+
+    const local = answerHomeRosterLocally(raw, rows);
+    if (local?.openCode) {
+      await deliverHomeAnswer(local.answer, opts);
+      const hit = coverage.find((c) => c.code === local.openCode) ?? matchCompany(local.openCode, coverage);
+      if (hit) {
+        if (opts?.fromVoice && voice.active) {
+          voiceNavigatingRef.current = true;
+          voice.stopMic();
+        }
+        clearHomeChatTurns();
+        router.push(`/${hit.code}`);
+      }
+      return;
+    }
+    if (local?.answer) {
+      await deliverHomeAnswer(local.answer, opts);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/home/ask', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          question: raw,
+          rosterSnapshot: snapshot,
+          rows,
+          history: getHomeChatTurns().slice(0, -1),
+        }),
+      });
+      if (!response.ok) throw new Error(`home ask ${response.status}`);
+      const payload = await response.json() as { answer?: string; openCode?: string | null };
+      const answer = typeof payload.answer === 'string' ? payload.answer.trim() : '';
+      if (!answer) throw new Error('empty home ask');
+      await deliverHomeAnswer(answer, opts);
+      const openCode = typeof payload.openCode === 'string' ? payload.openCode : '';
+      if (openCode && /^\d{6}$/.test(openCode)) {
+        const hit = coverage.find((c) => c.code === openCode);
+        if (hit) {
+          if (opts?.fromVoice && voice.active) {
+            voiceNavigatingRef.current = true;
+            voice.stopMic();
+          }
+          clearHomeChatTurns();
+          router.push(`/${hit.code}`);
+        }
+      }
+    } catch {
+      await deliverHomeAnswer(
+        rows.length
+          ? `当前清单有 ${rows.length} 家。可以说「现在首页有哪些公司」，或点名打开一家；细问财报请进详情。`
+          : '当前首页清单为空。稍后再问，或调整筛选。',
+        opts,
+      );
+    }
+  }
+
   async function onSearchSubmit(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) {
     const raw = (override ?? search).trim();
     if (!raw || submitting) return;
@@ -650,6 +761,18 @@ export default function ReportHome() {
       clearHomeChatTurns();
       router.push(`/${code}`);
     };
+
+    // Home roster / homepage-context asks: inject visible list into home AI (typed+voice).
+    // Keep isolation — never hand these turns to company-detail chat.
+    if (isHomeRosterQuestion(raw)) {
+      setSubmitting(true);
+      try {
+        await runHomeRosterAsk(raw, { fromVoice: opts?.fromVoice });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     // Pure 6-digit code without question → open, join if listed, or offer code-join dialog
     if (/^\d{6}$/.test(raw) && !parsed.hasQuestionIntent) {
@@ -1033,6 +1156,21 @@ export default function ReportHome() {
         <p className="rh-search-hint" role="status">语音会话中：可手动改字后回车搜索，或点波形继续说</p>
       ) : (
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
+      )}
+
+      {homeAnswer && (
+        <div className="rh-home-answer" role="status" aria-live="polite">
+          <div className="rh-home-answer-label">Eva</div>
+          <p>{homeAnswer}</p>
+          <button
+            type="button"
+            className="rh-home-answer-dismiss"
+            aria-label="关闭回答"
+            onClick={() => setHomeAnswer(null)}
+          >
+            <Icon name="x" size={14} />
+          </button>
+        </div>
       )}
 
       {source === 'crawl-mock' && (

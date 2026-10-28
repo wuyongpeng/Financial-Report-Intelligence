@@ -23,6 +23,11 @@
 .rh-search input::placeholder{color:#95a2b5}
 .rh-search-hint{margin:6px auto 0;max-width:820px;text-align:center;font-size:12px;line-height:1.4;color:#94a3b8;font-weight:400;letter-spacing:.01em;min-height:18px}
 .rh-search-hint-spacer{visibility:hidden}
+.rh-home-answer{position:relative;margin:10px auto 0;max-width:820px;padding:14px 40px 14px 16px;border:1px solid #d4e2ff;background:linear-gradient(180deg,#f7faff,#eef4ff);border-radius:14px;color:#35558f;box-shadow:0 4px 16px #24344c0d}
+.rh-home-answer-label{font-size:11px;font-weight:650;letter-spacing:.04em;color:#3064db;margin:0 0 6px}
+.rh-home-answer p{margin:0;font-size:14px;line-height:1.7;color:#334155;white-space:pre-wrap}
+.rh-home-answer-dismiss{position:absolute;top:10px;right:10px;border:0;background:transparent;color:#8494ab;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;padding:0}
+.rh-home-answer-dismiss:hover{background:#e2eaf8;color:#475569}
 .rh-search-submit{border:0;border-radius:999px;width:48px;height:48px;min-height:48px;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1;flex:none;transition:background .15s,color .15s,transform .12s,box-shadow .15s}
 .rh-search-submit svg,.rh-search-glyph{display:block;width:18px;height:18px}
 .rh-search-submit:disabled{opacity:.45;cursor:not-allowed}
