@@ -49,7 +49,7 @@ test('classifyQuestionScope + outOfScopeReply cover meta, weather, and finance c
     explicitPage: null,
   });
   assert.deepEqual(identity, { outOfScope: true, outOfScopeKind: 'identity' });
-  assert.match(outOfScopeReply('identity'), /财报智析.*Eva|Eva/);
+  assert.equal(outOfScopeReply('identity'), '我是 Eva，你的财报智能分析助手。');
 
   const weather = classifyQuestionScope({
     originalQuestion: '北京明天啥天气',

@@ -1,12 +1,12 @@
 /**
  * Shared product self-intro — voice TTS and typed hard replies stay in sync.
- * Keep short: one warm spoken sentence naming 财报智析·Eva.
+ * Keep short: one warm spoken sentence naming Eva.
  */
 export const EVA_PRODUCT_NAME = '财报智析·Eva';
 
 /** 「你是谁 / 你能干什么」— one liner for chat bubble + TTS. */
 export const EVA_INTRO_LINE =
-  '我是财报智析·Eva，帮你阅读可信财报，结论都能核对到原文出处。';
+  '我是 Eva，你的财报智能分析助手。';
 
 const IDENTITY_RE =
   /^(?:你是谁|你叫什么|自我介绍|介绍一下你自己|你是什么助手|你能干什么|你有什么功能|你会做什么|你可以做什么|你能干嘛|你能做什么)[\s?？!！.。]*$/;
