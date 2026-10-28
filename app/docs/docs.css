@@ -1,0 +1,32 @@
+.eva-docs{max-width:1200px;margin:0 auto;padding:32px 28px 64px;color:#24364f}
+.eva-docs-header{margin-bottom:28px}
+.eva-docs-back,.eva-docs-list-back{font-size:13px;color:#73849c;text-decoration:none}
+.eva-docs-header h1{font-size:28px;margin:20px 0 8px;letter-spacing:-.03em}
+.eva-docs-header p{margin:0;color:#7d8b9f;font-size:14px}
+.eva-docs-layout{display:grid;grid-template-columns:270px minmax(0,1fr);gap:28px;align-items:start}
+.eva-docs-nav{padding:18px 12px;border:1px solid #e2e8f0;border-radius:14px;background:#fff}
+.eva-docs-nav-title{display:flex;justify-content:space-between;padding:0 10px 12px;font-size:13px;font-weight:600}
+.eva-docs-nav-title span{font-weight:400;color:#91a0b4;font-size:12px}
+.eva-docs-nav a{display:block;padding:10px;border-radius:7px;color:#536782;text-decoration:none;font-size:14px;line-height:1.4}
+.eva-docs-nav a:hover{background:#f5f8fc;color:#3064db}
+.eva-docs-nav a[aria-current=page]{background:#edf3ff;color:#3064db;font-weight:600}
+.eva-docs-welcome{padding:52px 40px;border:1px solid #e2e8f0;border-radius:14px;background:linear-gradient(180deg,#f7faff,#fff)}
+.eva-docs-symbol{font-size:34px;color:#9ab0d1}
+.eva-docs-welcome h2{font-size:22px;margin:16px 0 12px}
+.eva-docs-welcome p{max-width:470px;color:#73849c;font-size:14px;line-height:1.8}
+.eva-docs-welcome a{display:inline-block;margin-top:14px;color:#3064db;text-decoration:none;font-size:14px}
+.eva-docs-content{min-width:0;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:28px 32px;font-size:14px;line-height:1.85;overflow-wrap:anywhere}
+.eva-docs-content h1{font-size:25px;line-height:1.4;margin:24px 0 18px}
+.eva-docs-content h2{font-size:20px;margin:30px 0 14px}
+.eva-docs-content h3{font-size:16px;margin:22px 0 10px}
+.eva-docs-content a{color:#3064db}
+.eva-docs-content blockquote{margin:18px 0;border-left:3px solid #d5e2f4;padding:6px 16px;color:#64758d;background:#f8fafc}
+.eva-docs-content pre{overflow:auto;padding:16px;border-radius:8px;background:#f4f7fb;line-height:1.6}
+.eva-docs-content :not(pre)>code{background:#f1f5f9;padding:2px 5px;border-radius:4px;font-size:.9em}
+.eva-docs-content hr{border:0;border-top:1px solid #e8edf4;margin:28px 0}
+.eva-docs-table{overflow-x:auto;margin:18px 0}
+.eva-docs-table table{border-collapse:collapse;width:100%;font-size:13px}
+.eva-docs-table th,.eva-docs-table td{border:1px solid #e2e8f0;padding:9px 12px;text-align:left;min-width:90px}
+.eva-docs-table th{background:#f6f8fc;font-weight:600}
+.eva-docs-empty{padding:0 10px;font-size:13px;color:#91a0b4;line-height:1.7}
+@media(max-width:760px){.eva-docs{padding:22px 16px 40px}.eva-docs-layout{grid-template-columns:1fr;gap:18px}.eva-docs-layout.is-reading .eva-docs-nav{max-height:210px;overflow:auto}.eva-docs-content{padding:20px}.eva-docs-welcome{padding:28px}.eva-docs-header h1{font-size:24px}}

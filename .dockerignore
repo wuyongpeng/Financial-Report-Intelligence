@@ -30,9 +30,10 @@ data/pdf-archive
 **/reports/**/*.pdf
 
 # docs / tests / local noise
-docs
 *.md
 !README.md
+!docs/
+!docs/**/*.md
 playwright-report
 test-results
 .tmp

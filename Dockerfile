@@ -24,6 +24,8 @@ RUN npm run build \
   && mkdir -p .next/standalone/.next \
   && cp -r .next/static .next/standalone/.next/static \
   && if [ -d public ]; then cp -r public .next/standalone/public; fi \
+  && mkdir -p .next/standalone/docs \
+  && cp -r docs/. .next/standalone/docs/ \
   && mkdir -p .next/standalone/data \
   && cp -r data/industry-skills .next/standalone/data/industry-skills \
   && cp -r data/watch-skills .next/standalone/data/watch-skills \
