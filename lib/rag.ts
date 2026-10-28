@@ -15,6 +15,7 @@ import {
 } from '@/modules/retrieval/application/question-planner';
 import { PostgresRetrievalRepository } from '@/modules/retrieval/infrastructure/postgres-retrieval-repository';
 import type { RetrievalContext } from '@/modules/retrieval/domain/retrieval';
+import { loadStoredVerdict } from '@/lib/report-verdict-store';
 
 /** Compatibility name retained for answer generation and existing client contracts. */
 export type RagContext = RetrievalContext;
@@ -57,5 +58,6 @@ export async function loadRagContext(
       title: report.title,
       published_at: report.publishedAt,
     }]),
+    loadOverviewVerdict: loadStoredVerdict,
   });
 }

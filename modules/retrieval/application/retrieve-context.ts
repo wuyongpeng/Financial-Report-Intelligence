@@ -4,6 +4,12 @@ import { labels, type MetricName } from '@/lib/detail-model';
 import { resolveYoy } from '@/lib/crawl-display';
 import { canonicalPeriodFromTitle } from '@/lib/ingest-period';
 import type { Evidence, MemoryMessage } from '@/lib/conversations';
+import {
+  formatOverviewSnapshot,
+  pickOverviewBaseline,
+  reportFromRetrieval,
+} from '@/lib/overview-snapshot';
+import type { ReportVerdict } from '@/lib/report-verdict';
 import type { RetrievalRepository } from '../domain/retrieval-repository';
 import type {
   QueryPlan,
@@ -41,16 +47,19 @@ async function findRelatedReports(input: {
   reportId: string;
   period: string;
   plan: QueryPlan;
+  /** Preloaded same-company history (overview baseline); avoids a second query. */
+  companyHistory?: RetrievalReport[];
 }) {
   const related: RetrievalReport[] = [];
   const seen = new Set<string>();
   if (input.plan.needsHistory) {
-    addUniqueReports(related, seen, await input.repository.findCompanyHistory({
+    const history = input.companyHistory ?? await input.repository.findCompanyHistory({
       code: input.target.code,
       excludeReportId: input.reportId,
       periodSuffix: input.period.replace(/^20\d{2}/, ''),
       limit: 10,
-    }), input.reportId);
+    });
+    addUniqueReports(related, seen, history, input.reportId);
   }
   if (input.plan.namedPeerCodes.length) {
     addUniqueReports(related, seen, await input.repository.findNamedPeerReports({
@@ -89,6 +98,8 @@ export async function retrieveContext(input: {
   repository: RetrievalRepository;
   passageRetriever: PassageRetriever;
   observeTarget?: RetrievalObserver;
+  /** Optional: stored AI overview (深度归因); injected by composition root. */
+  loadOverviewVerdict?: (reportId: string) => Promise<ReportVerdict | null>;
 }): Promise<RetrievalContext> {
   const target = await input.repository.findReport(input.reportId);
   if (!target) throw new ApiError(404, '报告不存在');
@@ -122,16 +133,28 @@ export async function retrieveContext(input: {
       peers: [],
     };
   }
+  // Always load a slim company history so overview (四核心/指标联动) matches the middle pane.
+  const companyHistory = await input.repository.findCompanyHistory({
+    code: target.code,
+    excludeReportId: input.reportId,
+    periodSuffix: period.replace(/^20\d{2}/, ''),
+    limit: plan.needsHistory ? 10 : 6,
+  });
   const related = await findRelatedReports({
     repository: input.repository,
     target,
     reportId: input.reportId,
     period,
     plan,
+    companyHistory,
   });
-  const reports = [target, ...related];
+  // Ensure overview baseline report is present even when the plan does not ask for history.
+  const historyExtra = companyHistory.filter(row => row.id !== input.reportId && !related.some(r => r.id === row.id));
+  const reports = [target, ...related, ...historyExtra];
   const reportById = new Map(reports.map(report => [report.id, report]));
-  const relatedMetrics = await input.repository.findMetrics(related.map(report => report.id));
+  const relatedMetrics = await input.repository.findMetrics(
+    [...related, ...historyExtra].map(report => report.id),
+  );
   const allMetrics = [...current, ...relatedMetrics].map(metric => overlayPeriod(metric, reportById.get(metric.reportId)));
   const selectedReports = selectUniqueReports(reports, allMetrics, input.reportId);
   const selectedIds = selectedReports.map(report => report.id);
@@ -225,11 +248,41 @@ export async function retrieveContext(input: {
 
   const peers = selectedReports.filter(report => report.code !== target.code).map(report => ({ code: report.code, company_name: report.companyName }));
   const relatedPeriods = [...new Set(metrics.map(metric => metric.period))].filter(Boolean);
+
+  // Compact middle-pane snapshot on every in-scope ask (typed + voice share this path).
+  const detailCurrent = reportFromRetrieval(target, current);
+  const historyDetailReports = companyHistory.map(row => reportFromRetrieval(
+    row,
+    allMetrics.filter(metric => metric.reportId === row.id),
+  ));
+  const overviewPrevious = pickOverviewBaseline(detailCurrent, historyDetailReports);
+  const storedVerdict = input.loadOverviewVerdict
+    ? await input.loadOverviewVerdict(input.reportId).catch(() => null)
+    : null;
+  const overviewSnapshot = formatOverviewSnapshot({
+    report: detailCurrent,
+    previous: overviewPrevious,
+    verdict: storedVerdict,
+    citeTag: (cite) => {
+      const created = addEvidence({
+        reportId: target.id,
+        companyName: target.companyName,
+        period,
+        page: cite.page,
+        quote: cite.quote,
+        metric: cite.metric,
+        code: target.code,
+      });
+      return `【${created.id}】`;
+    },
+  });
+
   const structuredContext = [
     `当前报告：${target.companyName}（${target.code}），${period || '报告期尚未解析'}，行业 ${target.industry}。`,
     plan.softScopeHint
       ? '本轮问题与财报关联度可能偏低：请先用一两句简短有用的话回答用户（含常识性问题如天气），再在末尾加软提示；边界不要过硬，天气/宏观因素也可能影响业绩。不要编造本份报告里没有的财务数字。'
       : '',
+    overviewSnapshot,
     '以下数据来自服务端数据库，可含同公司其他报告期及同业已入库财报；不同公司、不同报告期严格分开。金额为原单位，ROE 变化若以差值表达请用百分点。',
     related.length ? `本轮已附带 ${related.length} 份相关财报（同公司跨期 ${related.filter(report => report.code === target.code).length} 份，同业/点名公司 ${related.filter(report => report.code !== target.code).length} 份）。可用报告期：${relatedPeriods.join('、') || '无'}。` : '',
     '同比仅当报告期后缀相同（如 2026Q1 对 2025Q1）。年报与季报可作补充参考，不得称为同比。若已提供上期或同业数据，评估业绩好坏应使用这些对比，不要以「仅有单期」为由拒绝回答。',

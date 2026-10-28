@@ -119,8 +119,11 @@ test('retrieveContext routes structured values without model-dependent behavior'
   assert.equal(context.mode, 'structured-query');
   assert.match(context.directAnswer ?? '', /美的集团 2025FY 营业收入：100元/);
   assert.equal(context.metrics[0].period, '2025FY');
-  assert.deepEqual(context.evidence.map(item => item.id), ['E1', 'E2', 'E3']);
-  assert.deepEqual(repository.calls, ['report', 'metrics:current', 'watched', 'metrics:', 'chunks:current']);
+  // Overview snapshot always loads company history + may register extra cite evidence.
+  assert.ok(context.evidence.map(item => item.id).includes('E1'));
+  assert.ok(context.evidence.length >= 3);
+  assert.match(context.structuredContext, /页面概览快照/);
+  assert.deepEqual(repository.calls, ['report', 'metrics:current', 'watched', 'history', 'metrics:', 'chunks:current']);
 });
 
 test('retrieveContext loads history and named/industry peers according to the plan', async () => {
