@@ -139,92 +139,146 @@ export function parseHomeQuery(raw: string): ParsedHomeQuery {
 export type ListedNameCode = { code: string; name: string };
 
 
+function dedupeListed(rows: ListedNameCode[]): ListedNameCode[] {
+  const seen = new Set<string>();
+  const out: ListedNameCode[] = [];
+  for (const row of rows) {
+    if (!row?.code || seen.has(row.code)) continue;
+    seen.add(row.code);
+    out.push({ code: row.code, name: row.name });
+  }
+  return out;
+}
+
+function sortListedCandidates(rows: ListedNameCode[]): ListedNameCode[] {
+  return [...rows].sort(
+    (a, b) => a.name.length - b.name.length || a.code.localeCompare(b.code),
+  );
+}
+
 /**
- * Simple precise match against a name/code list (longest name substring wins).
- * Used for both monitor pool and full A-share recognition table — not AI.
+ * All reasonable name/code hits against a list (monitor pool or A-share universe).
+ * Precise code / full-name / alias stay narrow; short stems union variant+startsWith
+ * so 「东鹏」returns both 东鹏控股 and 东鹏饮料 instead of suffix-stem monopoly.
  */
-export function matchByNameOrCode(
+export function matchByNameOrCodeAll(
   query: string,
   list: ListedNameCode[],
-): ListedNameCode | null {
+): ListedNameCode[] {
   const q = query.trim();
-  if (!q || !list.length) return null;
+  if (!q || !list.length) return [];
 
   if (/^\d{6}$/.test(q)) {
-    return list.find((c) => c.code === q) ?? null;
+    const hit = list.find((c) => c.code === q);
+    return hit ? [{ code: hit.code, name: hit.name }] : [];
   }
   // Forms like 三一重工(600031) / 三一重工（600031）
   const parenCode = q.match(/[（(]\s*(\d{6})\s*[）)]/)?.[1] ?? q.match(/(?<!\d)(\d{6})(?!\d)/)?.[1];
   if (parenCode) {
     const byCode = list.find((c) => c.code === parenCode);
-    if (byCode) return byCode;
+    if (byCode) return [{ code: byCode.code, name: byCode.name }];
   }
 
   const byNameLen = [...list].sort(
     (a, b) => b.name.length - a.name.length || a.code.localeCompare(b.code),
   );
-  for (const company of byNameLen) {
-    if (company.name && q.includes(company.name)) return company;
-  }
+  const embedded = byNameLen.filter((c) => c.name && q.includes(c.name));
+  if (embedded.length) return sortListedCandidates(dedupeListed(embedded));
 
   const aliasOfficial = officialNameFromAlias(q);
   if (aliasOfficial) {
-    const aliasHit = byNameLen.find((c) => c.name === aliasOfficial)
-      ?? byNameLen.find((c) => c.name.includes(aliasOfficial) || aliasOfficial.includes(c.name));
-    if (aliasHit) return aliasHit;
+    const aliasHits = list.filter(
+      (c) => c.name === aliasOfficial || c.name.includes(aliasOfficial) || aliasOfficial.includes(c.name),
+    );
+    if (aliasHits.length) return sortListedCandidates(dedupeListed(aliasHits));
   }
 
   const cleaned = stripQueryNoise(q);
-  if (cleaned) {
-    const lower = cleaned.toLowerCase();
-    const exact = list.find(
-      (c) => c.name === cleaned || c.name.toLowerCase() === lower || c.code === cleaned,
-    );
-    if (exact) return exact;
+  if (!cleaned) return [];
 
-    const cleanedAlias = officialNameForToken(cleaned) ?? officialNameFromAlias(cleaned);
-    if (cleanedAlias) {
-      const aliasHit = list.find((c) => c.name === cleanedAlias)
-        ?? list.find((c) => c.name.includes(cleanedAlias) || cleanedAlias.includes(c.name));
-      if (aliasHit) return aliasHit;
+  const lower = cleaned.toLowerCase();
+  const exact = list.filter(
+    (c) => c.name === cleaned || c.name.toLowerCase() === lower || c.code === cleaned,
+  );
+  if (exact.length) return sortListedCandidates(dedupeListed(exact));
+
+  const cleanedAlias = officialNameForToken(cleaned) ?? officialNameFromAlias(cleaned);
+  if (cleanedAlias) {
+    const aliasHits = list.filter(
+      (c) => c.name === cleanedAlias || c.name.includes(cleanedAlias) || cleanedAlias.includes(c.name),
+    );
+    if (aliasHits.length) return sortListedCandidates(dedupeListed(aliasHits));
+  }
+
+  const fuzzy: ListedNameCode[] = [];
+  for (const c of list) {
+    if (nameVariants(c.name).includes(cleaned)) fuzzy.push(c);
+    else if (c.name.startsWith(cleaned) || c.name.toLowerCase().startsWith(lower)) fuzzy.push(c);
+    else if (
+      cleaned.length >= 4
+      && (c.name.includes(cleaned) || c.name.toLowerCase().includes(lower))
+    ) {
+      fuzzy.push(c);
     }
+  }
 
-    const variantHits = list.filter((c) => nameVariants(c.name).includes(cleaned));
-    if (variantHits.length === 1) return variantHits[0];
-    if (variantHits.length > 1) {
-      return [...variantHits].sort((a, b) => a.name.length - b.name.length || a.code.localeCompare(b.code))[0] ?? null;
-    }
-
-    const starts = list.filter(
-      (c) => c.name.startsWith(cleaned) || c.name.toLowerCase().startsWith(lower),
-    );
-    if (starts.length === 1) return starts[0];
-    const contains = list.filter(
-      (c) => c.name.includes(cleaned) || c.name.toLowerCase().includes(lower),
-    );
-    if (contains.length === 1) return contains[0];
-
-    // Pinyin: hanwu / hwj → 寒武纪（多命中时取名称更短的更精确者）
-    if (/^[a-z]+$/i.test(lower)) {
-      const pyHits = list.filter((c) => {
-        const py = pinyinKeys(c.name);
-        return (
-          py.full === lower
-          || py.initials === lower
-          || py.full.startsWith(lower)
-          || py.initials.startsWith(lower)
-          || py.full.includes(lower)
-        );
-      });
-      if (pyHits.length === 1) return pyHits[0];
-      if (pyHits.length > 1) {
-        const exactFull = pyHits.find((c) => pinyinKeys(c.name).full === lower);
-        if (exactFull) return exactFull;
-        return [...pyHits].sort((a, b) => a.name.length - b.name.length || a.code.localeCompare(b.code))[0] ?? null;
+  if (/^[a-z]+$/i.test(lower)) {
+    for (const c of list) {
+      const py = pinyinKeys(c.name);
+      if (
+        py.full === lower
+        || py.initials === lower
+        || py.full.startsWith(lower)
+        || py.initials.startsWith(lower)
+        || py.full.includes(lower)
+      ) {
+        fuzzy.push(c);
       }
     }
   }
 
+  // Single contains fallback when stem/prefix miss (legacy unique-contains path).
+  if (!fuzzy.length) {
+    const contains = list.filter(
+      (c) => c.name.includes(cleaned) || c.name.toLowerCase().includes(lower),
+    );
+    if (contains.length === 1) return [{ code: contains[0].code, name: contains[0].name }];
+  }
+
+  return sortListedCandidates(dedupeListed(fuzzy));
+}
+
+/**
+ * Best single match (precise code/name/alias, or unique fuzzy).
+ * Ambiguous fuzzy multi-hits return null — callers that need a picker use matchByNameOrCodeAll.
+ */
+export function matchByNameOrCode(
+  query: string,
+  list: ListedNameCode[],
+): ListedNameCode | null {
+  const all = matchByNameOrCodeAll(query, list);
+  if (!all.length) return null;
+  if (all.length === 1) return all[0];
+
+  const q = query.trim();
+  if (/^\d{6}$/.test(q) || /[（(]\s*\d{6}\s*[）)]/.test(q) || /(?<!\d)\d{6}(?!\d)/.test(q)) {
+    return all[0] ?? null;
+  }
+  const cleaned = stripQueryNoise(q) || q;
+  const exact = all.find((c) => c.name === cleaned || c.code === cleaned);
+  if (exact) return exact;
+  const aliasOfficial = officialNameForToken(cleaned) ?? officialNameFromAlias(q) ?? officialNameFromAlias(cleaned);
+  if (aliasOfficial) {
+    const aliasHit = all.find((c) => c.name === aliasOfficial)
+      ?? all.find((c) => c.name.includes(aliasOfficial) || aliasOfficial.includes(c.name));
+    if (aliasHit) return aliasHit;
+  }
+  // Legacy: pinyin / multi-variant used to pick the shortest name.
+  if (/^[a-z]+$/i.test(cleaned)) {
+    const exactFull = all.find((c) => pinyinKeys(c.name).full === cleaned.toLowerCase());
+    if (exactFull) return exactFull;
+    return all[0] ?? null;
+  }
   return null;
 }
 
@@ -245,6 +299,14 @@ export function resolveListedCompany(
   return matchByNameOrCode(query, universe);
 }
 
+/** All listed A-share candidates for a free-text query (picker when length > 1). */
+export function resolveListedCompanies(
+  query: string,
+  universe: ListedNameCode[] = getAshareUniverse(),
+): ListedNameCode[] {
+  return matchByNameOrCodeAll(query, universe);
+}
+
 export function matchCompany(
   query: string,
   coverage: CrawlCompanyCoverage[],
@@ -252,6 +314,17 @@ export function matchCompany(
   const hit = matchByNameOrCode(query, coverage);
   if (!hit) return null;
   return coverage.find((c) => c.code === hit.code) ?? null;
+}
+
+/** Monitor-pool companies matching a query (0..n). */
+export function matchCompanies(
+  query: string,
+  coverage: CrawlCompanyCoverage[],
+): CrawlCompanyCoverage[] {
+  const hits = matchByNameOrCodeAll(query, coverage);
+  if (!hits.length) return [];
+  const byCode = new Map(coverage.map((c) => [c.code, c]));
+  return hits.map((h) => byCode.get(h.code)).filter((c): c is CrawlCompanyCoverage => Boolean(c));
 }
 
 function kindFromReportType(type: string | null | undefined): PeriodKind | undefined {

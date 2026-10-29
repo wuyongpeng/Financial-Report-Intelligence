@@ -25,12 +25,15 @@ import {
 import {
   buildCompanyAskUrl,
   coverageHasMatchingReport,
+  matchCompanies,
   matchCompany,
   parseHomeQuery,
   queryMatchesCompany,
+  resolveListedCompanies,
   resolveListedCompany,
   periodLabelZh,
   pickBestReport,
+  type ListedNameCode,
   type ParsedPeriod,
 } from '@/lib/home-search';
 import { metricYoyHoverDetail, type Report } from '@/lib/detail-model';
@@ -491,22 +494,31 @@ export default function ReportHome() {
   const starredSet = useMemo(() => new Set(starred), [starred]);
 
   const parsedSearch = useMemo(() => parseHomeQuery(search), [search]);
-  const recognizedListed = useMemo(() => {
+  const recognizedListedCandidates = useMemo(() => {
     const raw = search.trim();
-    if (!raw) return null;
-    return resolveListedCompany(raw) ?? resolveListedCompany(parsedSearch.companyQuery || raw);
+    if (!raw) return [] as ListedNameCode[];
+    const primary = resolveListedCompanies(raw);
+    if (primary.length) return primary;
+    const cleaned = parsedSearch.companyQuery || raw;
+    if (cleaned && cleaned !== raw) return resolveListedCompanies(cleaned);
+    return [] as ListedNameCode[];
   }, [search, parsedSearch.companyQuery]);
+  const recognizedListed = recognizedListedCandidates.length === 1 ? recognizedListedCandidates[0] : null;
+  const recognizedListedCodes = useMemo(
+    () => new Set(recognizedListedCandidates.map((c) => c.code)),
+    [recognizedListedCandidates],
+  );
   const keyword = search.trim();
   const filtered = useMemo(() => {
     let rows = coverage;
-    if (recognizedListed) {
-      rows = coverage.filter((item) => item.code === recognizedListed.code);
+    if (recognizedListedCandidates.length) {
+      rows = coverage.filter((item) => recognizedListedCodes.has(item.code));
     } else if (keyword) {
       rows = coverage.filter((item) => matchKeyword(item, parsedSearch.companyQuery || keyword));
       // Free-text questions without a resolvable company keep the full card grid.
       if (parsedSearch.hasQuestionIntent && !parsedSearch.companyQuery) rows = coverage;
     }
-    if (industry !== '全部' && !recognizedListed) rows = rows.filter((item) => item.industryGroup === industry);
+    if (industry !== '全部' && !recognizedListedCandidates.length) rows = rows.filter((item) => item.industryGroup === industry);
     rows = [...rows];
 
     if (listSort && viewMode === 'list') {
@@ -547,7 +559,7 @@ export default function ReportHome() {
     // Starred companies first; keep relative order within each group.
     rows.sort((a, b) => Number(starredSet.has(b.code)) - Number(starredSet.has(a.code)));
     return rows;
-  }, [coverage, keyword, industry, sortMode, listSort, viewMode, starredSet, recognizedListed, parsedSearch]);
+  }, [coverage, keyword, industry, sortMode, listSort, viewMode, starredSet, recognizedListedCandidates, recognizedListedCodes, parsedSearch]);
 
   const gridCols = viewMode === 'list' ? 1 : 3;
   const initialRows = 3;
@@ -811,15 +823,25 @@ export default function ReportHome() {
 
     // Short name/code filter-only: open company, or offer to join monitor pool if only in 全量识别名录.
     if (!parsed.hasQuestionIntent) {
-      const hit = matchCompany(parsed.companyQuery || raw, coverage)
-        ?? matchCompany(raw, coverage);
-      if (hit) {
-        goCompany(hit.code);
+      const poolHits = matchCompanies(parsed.companyQuery || raw, coverage);
+      const poolHitsRaw = poolHits.length ? poolHits : matchCompanies(raw, coverage);
+      if (poolHitsRaw.length === 1) {
+        goCompany(poolHitsRaw[0].code);
         return;
       }
-      const listed = resolveListedCompany(raw) ?? resolveListedCompany(parsed.companyQuery || raw);
-      if (listed) {
-        setDialog({ kind: 'missing-company', listed, query: raw });
+      if (poolHitsRaw.length > 1) {
+        document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      const listedAll = resolveListedCompanies(raw);
+      const listedFallback = listedAll.length ? listedAll : resolveListedCompanies(parsed.companyQuery || raw);
+      if (listedFallback.length === 1) {
+        setDialog({ kind: 'missing-company', listed: listedFallback[0], query: raw });
+        return;
+      }
+      if (listedFallback.length > 1) {
+        // Ambiguous: keep empty-state candidate list visible for click-to-join.
+        document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
       document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -829,11 +851,27 @@ export default function ReportHome() {
     setSubmitting(true);
     try {
       // 1) Recognize listed company from A-share table (precise name/code, not AI)
-      const listed = resolveListedCompany(raw) ?? resolveListedCompany(parsed.companyQuery || raw);
-      if (!listed) {
+      const listedAll = resolveListedCompanies(raw);
+      const listedCandidates = listedAll.length ? listedAll : resolveListedCompanies(parsed.companyQuery || raw);
+      if (!listedCandidates.length) {
         setDialog({ kind: 'unrecognized', query: raw });
         return;
       }
+      if (listedCandidates.length > 1) {
+        const inPool = listedCandidates
+          .map((listed) => coverage.find((c) => c.code === listed.code))
+          .filter((c): c is CrawlCompanyCoverage => Boolean(c));
+        if (inPool.length === 1) {
+          const company = inPool[0];
+          if (isActiveTypedAsk) rememberActiveAsk(raw, company);
+          await navigateWithAsk(company, raw, parsed.period, { fromVoice: opts?.fromVoice });
+          return;
+        }
+        // Multiple listed hits (or 0/N in pool): let user pick from the candidate list.
+        document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      const listed = listedCandidates[0];
       // 2) Check whether it is in the active 60-company monitor pool
       const company = coverage.find((c) => c.code === listed.code)
         ?? matchCompany(listed.code, coverage)
@@ -1007,9 +1045,11 @@ export default function ReportHome() {
     }
   }
 
-  const listedOutsidePool = recognizedListed
-    && !coverage.some((item) => item.code === recognizedListed.code)
-    ? recognizedListed
+  const listedOutsidePoolCandidates = recognizedListedCandidates.filter(
+    (listed) => !coverage.some((item) => item.code === listed.code),
+  );
+  const listedOutsidePool = listedOutsidePoolCandidates.length === 1
+    ? listedOutsidePoolCandidates[0]
     : null;
 
   return (
@@ -1548,7 +1588,24 @@ export default function ReportHome() {
         {!filtered.length && !loading && (
           <div className="rh-empty">
             <b>没有符合条件的公司</b>
-            {listedOutsidePool ? (
+            {listedOutsidePoolCandidates.length > 1 ? (
+              <>
+                <p>识别到多家相关公司，但不在当前监控池。点选要加入的一家：</p>
+                <ul className="rh-listed-candidates">
+                  {listedOutsidePoolCandidates.map((listed) => (
+                    <li key={listed.code}>
+                      <button
+                        type="button"
+                        onClick={() => setDialog({ kind: 'missing-company', listed, query: search.trim() })}
+                      >
+                        <span className="rh-listed-candidate-name">{listed.name}</span>
+                        <span className="rh-listed-candidate-code">{listed.code}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : listedOutsidePool ? (
               <>
                 <p>
                   已识别到「{listedOutsidePool.name}」（{listedOutsidePool.code}），但不在当前监控池。

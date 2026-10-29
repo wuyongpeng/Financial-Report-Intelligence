@@ -5,6 +5,7 @@ import {
   hasQuestionIntent,
   matchCompany,
   parseHomeQuery,
+  resolveListedCompanies,
   resolveListedCompany,
   parsePeriodHints,
   stripQueryNoise,
@@ -179,4 +180,21 @@ test('pickRecentPeriods newest first capped at 3', () => {
     pickRecentPeriods(['2025FY', '2026Q1', '2026H1', '2024FY', '2025FY']),
     ['2026H1', '2026Q1', '2025FY'],
   );
+});
+
+test('resolveListedCompanies returns both 东鹏控股 and 东鹏饮料 for 东鹏', () => {
+  const hits = resolveListedCompanies('东鹏');
+  assert.deepEqual(
+    hits.map((h) => h.code).sort(),
+    ['003012', '605499'],
+  );
+  assert.equal(resolveListedCompany('东鹏'), null);
+  assert.equal(resolveListedCompany('东鹏饮料')?.code, '605499');
+  assert.equal(resolveListedCompany('东鹏控股')?.code, '003012');
+});
+
+test('resolveListedCompanies keeps precise single hits', () => {
+  assert.deepEqual(resolveListedCompanies('605499').map((h) => h.code), ['605499']);
+  assert.deepEqual(resolveListedCompanies('美的').map((h) => h.code), ['000333']);
+  assert.equal(resolveListedCompanies('完全不存在的公司xyz').length, 0);
 });
