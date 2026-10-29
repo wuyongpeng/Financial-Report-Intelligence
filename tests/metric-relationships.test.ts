@@ -4,6 +4,7 @@ import {
   buildMetricRelationships,
   containsInvestmentAdvice,
   METRIC_REL_EMPTY,
+  METRIC_REL_DETECTOR_COUNT,
 } from '../lib/metric-relationships';
 import type { MetricName, Report } from '../lib/detail-model';
 
@@ -73,15 +74,16 @@ test('关键关系：营收↑净利↓出卡，含两期事实、归母净利�
 });
 
 test('关键关系：收入与利润同步增长（理解向，非警报）', () => {
+  // 利润增速不低于营收，避免利润桥「利润率拖累」抢走 growth 主题槽位
   const selected = build('2026FY', [
-    metric('revenue', 1.2e10, 5, { yoy_pct: 12 }),
-    metric('net_profit', 1.1e9, 10, { yoy_pct: 10 }),
-    metric('operating_cash_flow', 1e9, 20),
+    metric('revenue', 1.2e10, 5, { yoy_pct: 20 }),
+    metric('net_profit', 1.25e9, 10, { yoy_pct: 25 }),
+    metric('operating_cash_flow', 1.2e9, 20),
   ]);
   const previous = build('2025FY', [
     metric('revenue', 1e10, 5),
     metric('net_profit', 1e9, 10),
-    metric('operating_cash_flow', 9e8, 20),
+    metric('operating_cash_flow', 1e9, 20),
   ]);
   const result = buildMetricRelationships(selected, {
     previous,
@@ -242,7 +244,7 @@ test('关键关系：已检查无明显背离 → checked_none 文案', () => {
   assert.ok(!/暂无风险/.test(METRIC_REL_EMPTY.checked_none));
 });
 
-test('关键关系：三类均缺数据 → insufficient', () => {
+test('关键关系：已注册关系均缺数据 → insufficient', () => {
   const selected = build('2026FY', [
     metric('roe', 12, 3),
   ]);
@@ -321,4 +323,179 @@ test('关键关系：有出处的指标 numbers 带 page，缺出处不编造', 
   assert.equal(card!.numbers.find((n) => n.metric === 'net_profit')?.page, undefined);
   assert.ok(card!.cites.every((c) => c.page === 5));
   assert.equal(card!.cites.length, 1);
+});
+
+
+test('关键关系：已注册约 10 类检测器', () => {
+  assert.equal(METRIC_REL_DETECTOR_COUNT, 10);
+});
+
+test('关键关系：毛利率收窄出卡', () => {
+  const selected = build('2026FY', [
+    metric('revenue', 1.1e10, 5),
+    metric('operating_cost', 8.5e9, 6),
+  ]);
+  const previous = build('2025FY', [
+    metric('revenue', 1e10, 5),
+    metric('operating_cost', 7e9, 6),
+  ]);
+  const result = buildMetricRelationships(selected, { previous });
+  const card = result.cards.find((c) => c.id === 'revenue_cost_margin');
+  assert.ok(card);
+  assert.match(card!.title, /毛利率|营业成本/);
+  assert.equal(card!.tone, 'watch');
+  assert.equal(containsInvestmentAdvice(allText(card!)), false);
+});
+
+test('关键关系：利润桥在利润率拖累时出卡', () => {
+  // 营收 +10%，利润 -20% → 规模正、利润率负
+  const selected = build('2026FY', [
+    metric('revenue', 1.1e10, 5),
+    metric('net_profit', 8e8, 10),
+  ]);
+  const previous = build('2025FY', [
+    metric('revenue', 1e10, 5),
+    metric('net_profit', 1e9, 10),
+  ]);
+  const result = buildMetricRelationships(selected, {
+    previous,
+    preferDisclosedYoy: false,
+  });
+  const wide = buildMetricRelationships(selected, {
+    previous,
+    preferDisclosedYoy: false,
+    maxCards: 10,
+  });
+  const bridge = wide.cards.find((c) => c.id === 'profit_bridge');
+  const revProfit = wide.cards.find((c) => c.id === 'revenue_vs_profit');
+  assert.ok(bridge || revProfit);
+  if (bridge) {
+    assert.match(bridge.title, /利润率|规模/);
+    assert.equal(bridge.tone, 'watch');
+  }
+  // 默认上限下 growth 主题去重后至多一张
+  const growthIds = result.cards.filter((c) =>
+    ['revenue_vs_profit', 'revenue_cost_margin', 'profit_bridge'].includes(c.id),
+  );
+  assert.ok(growthIds.length <= 1);
+});
+
+test('关键关系：资产负债率偏高出卡', () => {
+  const selected = build('2026FY', [
+    metric('total_assets', 1e10, 30),
+    metric('total_liabilities', 7.5e9, 31),
+  ]);
+  const result = buildMetricRelationships(selected);
+  const card = result.cards.find((c) => c.id === 'debt_vs_assets');
+  assert.ok(card);
+  assert.match(card!.title, /资产负债率/);
+});
+
+test('关键关系：受限货币资金占比高出卡', () => {
+  const selected = build('2026FY', [
+    metric('cash_and_equivalents', 1e9, 40),
+    metric('restricted_cash', 4e8, 41),
+  ]);
+  const result = buildMetricRelationships(selected);
+  const card = result.cards.find((c) => c.id === 'restricted_cash_share');
+  assert.ok(card);
+  assert.match(card!.title, /受限/);
+});
+
+test('关键关系：商誉占归母权益高出卡', () => {
+  const selected = build('2026FY', [
+    metric('goodwill', 3e9, 50),
+    metric('equity_parent', 1e10, 51),
+  ]);
+  const result = buildMetricRelationships(selected);
+  const card = result.cards.find((c) => c.id === 'goodwill_vs_equity');
+  assert.ok(card);
+  assert.match(card!.title, /商誉/);
+});
+
+test('关键关系：资产扩张快于营收出卡', () => {
+  const selected = build('2026FY', [
+    metric('total_assets', 1.3e10, 30, { yoy_pct: 30 }),
+    metric('revenue', 1.05e10, 5, { yoy_pct: 5 }),
+  ]);
+  const previous = build('2025FY', [
+    metric('total_assets', 1e10, 30),
+    metric('revenue', 1e10, 5),
+  ]);
+  const result = buildMetricRelationships(selected, { previous });
+  const card = result.cards.find((c) => c.id === 'assets_vs_revenue_growth');
+  assert.ok(card);
+  assert.match(card!.title, /资产/);
+});
+
+test('关键关系：经营现金流率走弱出卡', () => {
+  const selected = build('2026FY', [
+    metric('revenue', 1.2e10, 5),
+    metric('operating_cash_flow', 6e8, 20),
+  ]);
+  const previous = build('2025FY', [
+    metric('revenue', 1e10, 5),
+    metric('operating_cash_flow', 1.2e9, 20),
+  ]);
+  const wide = buildMetricRelationships(selected, { previous, maxCards: 10 });
+  const card = wide.cards.find((c) => c.id === 'revenue_ocf_rate');
+  assert.ok(card);
+  assert.match(card!.title, /现金流率|经营现金流/);
+});
+
+test('关键关系：主题去重 — 现金主题只留更值得关注的一张', () => {
+  // profit+ ocf-（极高优）+ 现金流率恶化，同属 cash
+  const selected = build('2026FY', [
+    metric('net_profit', 1e9, 10),
+    metric('operating_cash_flow', -2e8, 20),
+    metric('revenue', 1.2e10, 5),
+  ]);
+  const previous = build('2025FY', [
+    metric('net_profit', 8e8, 10),
+    metric('operating_cash_flow', 5e8, 20),
+    metric('revenue', 1e10, 5),
+  ]);
+  const wide = buildMetricRelationships(selected, { previous, maxCards: 10 });
+  const cashCards = wide.cards.filter((c) =>
+    c.id === 'cash_vs_profit' || c.id === 'revenue_ocf_rate',
+  );
+  assert.equal(cashCards.length, 1);
+  assert.equal(cashCards[0].id, 'cash_vs_profit');
+});
+
+test('关键关系：多命中时最多 3 张且按关注度优先', () => {
+  const selected = build('2026FY', [
+    metric('revenue', 1.2e10, 5, { prior_value: 1e10, yoy_pct: 20 }),
+    metric('net_profit', 8e8, 10, { prior_value: 1e9, yoy_pct: -20 }),
+    metric('operating_cash_flow', -1e8, 20),
+    metric('profit_ex_non_recurring', 2e8, 11),
+    metric('non_recurring_pnl', 6e8, 12),
+    metric('operating_cost', 9e9, 6),
+    metric('total_assets', 1e10, 30),
+    metric('total_liabilities', 7.5e9, 31),
+    metric('cash_and_equivalents', 1e9, 40),
+    metric('restricted_cash', 4e8, 41),
+    metric('goodwill', 3e9, 50),
+    metric('equity_parent', 1e10, 51),
+  ]);
+  const previous = build('2025FY', [
+    metric('revenue', 1e10, 5),
+    metric('net_profit', 1e9, 10),
+    metric('operating_cash_flow', 8e8, 20),
+    metric('operating_cost', 7e9, 6),
+    metric('total_assets', 8e9, 30),
+    metric('total_liabilities', 5e9, 31),
+  ]);
+  const result = buildMetricRelationships(selected, { previous });
+  assert.ok(result.cards.length <= 3);
+  assert.equal(result.cards.length, 3);
+  const ids = result.cards.map((c) => c.id);
+  assert.ok(ids.includes('cash_vs_profit'));
+  assert.ok(
+    !ids.includes('revenue_vs_profit') ||
+      ids.indexOf('cash_vs_profit') < ids.indexOf('revenue_vs_profit'),
+  );
+  for (const card of result.cards) {
+    assert.equal(containsInvestmentAdvice(allText(card)), false);
+  }
 });
