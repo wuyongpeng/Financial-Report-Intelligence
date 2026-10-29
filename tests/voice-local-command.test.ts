@@ -64,6 +64,9 @@ const MUST_MATCH: [string, LocalCommand][] = [
   // —— pack: capability / tts / style / layout / zoom / cite / read / toc
   ['你能干什么', { kind: 'capability' }],
   ['介绍一下你自己', { kind: 'capability' }],
+  ['我该怎么提问', { kind: 'how-to-ask' }],
+  ['可以问什么', { kind: 'how-to-ask' }],
+  ['问什么好', { kind: 'how-to-ask' }],
   ['先别念了', { kind: 'tts-pause' }],
   ['暂停朗读', { kind: 'tts-pause' }],
   ['停一下', { kind: 'tts-pause' }],
@@ -169,6 +172,8 @@ const MUST_NOT_MATCH = [
   '为什么净利润下降',
   '你好',
   '谢谢',
+  '怎么算营收同比',
+  '有什么风险因素',
   '',
   '   ',
 ];
@@ -197,7 +202,7 @@ test('covers every command kind in the pack', () => {
   const kinds = new Set<string>(MUST_MATCH.map(([, c]) => c.kind));
   // tts-resume-bare / continue are context-driven — covered below.
   for (const k of [
-    'capability', 'tts-pause', 'tts-resume', 'style', 'layout', 'zoom', 'cite', 'read-page-head',
+    'capability', 'how-to-ask', 'tts-pause', 'tts-resume', 'style', 'layout', 'zoom', 'cite', 'read-page-head',
     'read-section', 'toc-open', 'toc-jump', 'page-nav', 'home', 'farewell',
   ]) {
     assert.ok(kinds.has(k), `table lacks ${k}`);

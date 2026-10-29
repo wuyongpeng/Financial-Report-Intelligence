@@ -47,6 +47,7 @@ import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
 import { isVoiceCapabilityIntent, voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
+import { isVoiceHowToAskIntent, voiceHowToAskSpeech } from '@/lib/voice/how-to-ask-intent';
 import { speakAnswer } from '@/lib/voice/client-tts';
 import {
   appendHomeChatTurn,
@@ -343,6 +344,20 @@ export default function ReportHome() {
       // 「你是谁 / 你能干什么」— brand one-liner, do not search.
       if (isVoiceCapabilityIntent(text)) {
         const line = voiceCapabilitySpeech();
+        voice.setBusy(true);
+        voice.setSpeaking(true);
+        try {
+          await speakAnswer(line, undefined);
+        } catch { /* ignore */ }
+        finally {
+          voice.setSpeaking(false);
+          voice.setBusy(false);
+        }
+        return { action: 'resume' };
+      }
+      // 「怎么问 / 问什么」— home has no company industry; nudge open + generic tips.
+      if (isVoiceHowToAskIntent(text)) {
+        const line = voiceHowToAskSpeech(null, 'home');
         voice.setBusy(true);
         voice.setSpeaking(true);
         try {
@@ -780,6 +795,17 @@ export default function ReportHome() {
   async function onSearchSubmit(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) {
     const raw = (override ?? search).trim();
     if (!raw || submitting) return;
+    // 「怎么问」 on home: local tip, do not search / open company.
+    if (isVoiceHowToAskIntent(raw)) {
+      setSubmitting(true);
+      try {
+        appendHomeChatTurn('user', raw);
+        await deliverHomeAnswer(voiceHowToAskSpeech(null, 'home'), { fromVoice: opts?.fromVoice });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
     const parsed = parseHomeQuery(raw);
     const isActiveTypedAsk = Boolean(parsed.hasQuestionIntent && !opts?.fromPlaceholder && search.trim());
     const handoffVoice = Boolean(opts?.fromVoice && voice.active);

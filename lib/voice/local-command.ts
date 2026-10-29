@@ -1,4 +1,5 @@
 import { isVoiceCapabilityIntent } from './meta-intent';
+import { isVoiceHowToAskIntent } from './how-to-ask-intent';
 import { parseVoiceTtsControlIntent } from './tts-control-intent';
 import { parseVoiceStyleIntent, type VoiceAnswerStyle } from './style-intent';
 import { parseVoiceLayoutIntent } from './layout-intent';
@@ -29,6 +30,7 @@ export type PageNavCommand =
  */
 export type LocalCommand =
   | { kind: 'capability' }
+  | { kind: 'how-to-ask' }
   | { kind: 'tts-pause' }
   | { kind: 'tts-resume' }
   | { kind: 'style'; style: VoiceAnswerStyle }
@@ -61,6 +63,8 @@ export function parseLocalCommand(text: string, ctx: LocalCommandContext): Local
   if (!text || !text.trim()) return null;
 
   if (isVoiceCapabilityIntent(text)) return { kind: 'capability' };
+
+  if (isVoiceHowToAskIntent(text)) return { kind: 'how-to-ask' };
 
   const tts = parseVoiceTtsControlIntent(text);
   if (tts) return { kind: tts.kind === 'pause' ? 'tts-pause' : 'tts-resume' };

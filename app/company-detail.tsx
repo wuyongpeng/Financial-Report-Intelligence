@@ -43,6 +43,7 @@ import { nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT, VOICE_PDF_ZOOM_MIN, VOICE_PDF_ZOOM
 import { VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
 import { voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
 import { voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
+import { voiceHowToAskSpeech } from '@/lib/voice/how-to-ask-intent';
 import { findTocPage, matchSection, buildSectionReadChunks } from '@/lib/voice/section-match';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
 import { clearHomeChatTurns, consumeHomeAskHandoff } from '@/lib/chat-surface';
@@ -1560,6 +1561,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       case 'capability': {
         cancelSectionRead();
         out(voiceCapabilitySpeech(), { chat: true, speak: true });
+        return;
+      }
+      case 'how-to-ask': {
+        cancelSectionRead();
+        out(voiceHowToAskSpeech(selected.industry, 'detail'), { chat: true, speak: true });
         return;
       }
       case 'tts-pause': {
