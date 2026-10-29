@@ -2,10 +2,13 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    # 可按需用 VM_IP:5432 直连（内网临时）
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
     volumes:
       - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro

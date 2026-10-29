@@ -1,6 +1,6 @@
 # 财报智析台 V1：单 VM 部署
 
-这是一个可单机交付的 V1：网页、10 分钟增量采集 Worker、PostgreSQL 和本地 PDF 归档都运行在同一台虚机上。数据库不暴露端口；PDF 保存在虚机的 `data/reports` 目录。
+这是一个可单机交付的 V1：网页、10 分钟增量采集 Worker、PostgreSQL 和本地 PDF 归档都运行在同一台虚机上。Postgres 可按需用 `VM_IP:5432` 直连（内网）；PDF 保存在虚机的 `data/reports` 目录。
 
 ## 架构
 
