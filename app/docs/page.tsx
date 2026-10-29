@@ -1,14 +1,24 @@
 import Link from 'next/link';
+import { isValidElement, type ReactNode } from 'react';
 import { notFound, redirect } from 'next/navigation';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { documentHref, listProductDocuments, productDocumentLink, readProductDocument } from '@/lib/product-documents';
+import MermaidBlock from './mermaid-block';
 import './docs.css';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '文档中心｜财报智析 Eva' };
 
 const DEFAULT_DOC = '产品介绍.md';
+
+function extractMermaidSource(node: ReactNode): string | null {
+  if (!isValidElement(node)) return null;
+  const props = node.props as { className?: string; children?: ReactNode };
+  const className = props.className ?? '';
+  if (!className.includes('language-mermaid')) return null;
+  return String(props.children ?? '').replace(/\n$/, '');
+}
 
 export default async function DocumentsPage({ searchParams }: {
   searchParams: Promise<{ file?: string | string[] }>;
@@ -44,6 +54,11 @@ export default async function DocumentsPage({ searchParams }: {
           <Markdown remarkPlugins={[remarkGfm]} urlTransform={url => productDocumentLink(url, names)} components={{
             a: ({ href, children }) => href ? <a href={href}>{children}</a> : <span>{children}</span>,
             table: ({ children }) => <div className="eva-docs-table"><table>{children}</table></div>,
+            pre: ({ children }) => {
+              const chart = extractMermaidSource(children);
+              if (chart != null) return <MermaidBlock chart={chart} />;
+              return <pre>{children}</pre>;
+            },
           }}>{content}</Markdown>
         </article>
       </div>

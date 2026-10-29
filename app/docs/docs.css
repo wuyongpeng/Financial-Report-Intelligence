@@ -30,3 +30,7 @@
 .eva-docs-table th{background:#f6f8fc;font-weight:600}
 .eva-docs-empty{padding:0 10px;font-size:13px;color:#91a0b4;line-height:1.7}
 @media(max-width:760px){.eva-docs{padding:22px 16px 40px}.eva-docs-layout{grid-template-columns:1fr;gap:18px}.eva-docs-layout.is-reading .eva-docs-nav{max-height:210px;overflow:auto}.eva-docs-content{padding:20px}.eva-docs-welcome{padding:28px}.eva-docs-header h1{font-size:24px}}
+
+.eva-docs-mermaid{overflow-x:auto;margin:18px 0;padding:16px;border:1px solid #e2e8f0;border-radius:10px;background:#fbfcfe}
+.eva-docs-mermaid svg{display:block;max-width:100%;height:auto;margin:0 auto}
+.eva-docs-mermaid-fallback{overflow:auto;padding:16px;border-radius:8px;background:#f4f7fb;line-height:1.6}
