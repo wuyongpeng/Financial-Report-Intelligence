@@ -1,0 +1,25 @@
+.hom-root{position:relative;display:inline-flex;align-items:center}
+.hom-trigger{border:1px solid #d7e3f8;background:linear-gradient(90deg,#f8fbff,#eef5ff);color:#35558f;width:32px;height:32px;border-radius:8px;font-size:18px;line-height:1;padding:0;display:inline-grid;place-items:center}
+.hom-trigger:hover{border-color:#aec4ef;background:linear-gradient(90deg,#eef5ff,#e7f0ff);color:#1f4fad}
+.hom-menu{position:absolute;right:0;top:calc(100% + 6px);min-width:148px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 28px #13213b1a;padding:6px;z-index:80}
+.hom-item{display:block;width:100%;text-align:left;border:0;background:transparent;color:#31465f;font-size:13px;padding:9px 12px;border-radius:7px;text-decoration:none;cursor:pointer}
+.hom-item:hover{background:#f3f7fd;color:#1f4fad}
+.hom-drawer-backdrop,.hom-about-backdrop{position:fixed;inset:0;background:#12213f66;z-index:120;display:flex;justify-content:flex-end;backdrop-filter:blur(2px)}
+.hom-about-backdrop{justify-content:center;align-items:center;padding:20px}
+.hom-drawer{width:min(420px,100%);height:100%;background:#fff;box-shadow:-18px 0 40px #13213b24;padding:28px 24px;display:flex;flex-direction:column;gap:12px;animation:hom-slide .2s ease}
+.hom-drawer h2{margin:0;font-size:20px;color:#203047}
+.hom-label{font-size:13px;color:#5b6d86}
+.hom-textarea{width:100%;border:1px solid #d5dde8;border-radius:10px;padding:12px;font:inherit;font-size:14px;color:#203047;resize:vertical;min-height:160px}
+.hom-drawer-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:auto}
+.hom-btn{border:0;border-radius:8px;background:#3064db;color:#fff;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer}
+.hom-btn:disabled{opacity:.65;cursor:default}
+.hom-btn-ghost{border:1px solid #d5dde8;border-radius:8px;background:#fff;color:#3d5270;padding:8px 14px;font-size:13px;cursor:pointer}
+.hom-error{margin:0;color:#b91c1c;font-size:13px}
+.hom-about{width:min(340px,100%);background:#fff;border-radius:16px;padding:28px 24px 22px;text-align:center;box-shadow:0 24px 60px #13213b33}
+.hom-about h2{margin:0 0 18px;font-size:15px;font-weight:600;color:#5b6d86}
+.hom-about-logo{display:block;margin:0 auto 14px}
+.hom-about-name{margin:0;font-size:18px;font-weight:700;color:#203047}
+.hom-about-ver{margin:8px 0 0;font-size:13px;color:#6b7a8d}
+.hom-about-copy{margin:18px 0 16px;font-size:12px;color:#8b97a9}
+.hom-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:140;box-shadow:0 8px 24px #0003}
+@keyframes hom-slide{from{transform:translateX(28px);opacity:0}to{transform:none;opacity:1}}

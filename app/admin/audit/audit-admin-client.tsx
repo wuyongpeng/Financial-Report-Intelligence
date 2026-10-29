@@ -188,6 +188,12 @@ export function AuditAdminClient() {
         <div>
           <h1 style={{ ...h1, margin: 0 }}>访问审计</h1>
           <p style={{ ...muted, margin: '6px 0 0' }}>/admin/audit · 时间均为 Asia/Shanghai</p>
+          <nav style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }} aria-label="管理页">
+            <a href="/admin/audit" style={{ fontSize: 12, color: '#1f4fad', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #aec4ef', background: '#edf3ff', fontWeight: 600 }}>访问审计</a>
+            <a href="/admin/check" style={{ fontSize: 12, color: '#5b6d86', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff' }}>指标核对</a>
+            <a href="/admin/survey" style={{ fontSize: 12, color: '#5b6d86', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff' }}>用户调研</a>
+            <a href="/admin/feedback" style={{ fontSize: 12, color: '#5b6d86', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff' }}>意见收集</a>
+          </nav>
         </div>
         <button type="button" style={btnGhost} onClick={() => void logout()}>退出</button>
       </header>

@@ -80,5 +80,14 @@ async function migrate() {
     await tx`CREATE INDEX IF NOT EXISTS client_audit_events_created_idx ON client_audit_events (created_at DESC)`;
     await tx`CREATE INDEX IF NOT EXISTS client_audit_events_owner_idx ON client_audit_events (owner_key, created_at DESC)`;
     await tx`CREATE INDEX IF NOT EXISTS client_audit_events_type_idx ON client_audit_events (event_type, created_at DESC)`;
+    await tx`CREATE TABLE IF NOT EXISTS user_feedback (
+      id BIGSERIAL PRIMARY KEY,
+      message TEXT NOT NULL,
+      page TEXT,
+      url TEXT,
+      user_agent TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS user_feedback_created_idx ON user_feedback (created_at DESC)`;
   });
 }
