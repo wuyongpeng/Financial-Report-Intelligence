@@ -158,27 +158,6 @@ export function AdminHeader({
   );
 }
 
-export const adminStyles = {
-  wrap,
-  wrapWide,
-  h1,
-  muted,
-  input,
-  btn,
-  btnGhost,
-  err,
-  head,
-  filters,
-  tableWrap,
-  table,
-  th,
-  td,
-  cardRow,
-  card,
-  cardLabel,
-  cardValue,
-} as const;
-
 const wrap: CSSProperties = {
   maxWidth: 480, margin: '48px auto', padding: '0 16px',
   fontFamily: 'system-ui, -apple-system, sans-serif', color: '#203047',
@@ -229,3 +208,24 @@ const card: CSSProperties = {
 };
 const cardLabel: CSSProperties = { fontSize: 12, color: '#6b7a8d', margin: 0 };
 const cardValue: CSSProperties = { fontSize: 18, fontWeight: 650, margin: '6px 0 0', fontVariantNumeric: 'tabular-nums' };
+
+export const adminStyles = {
+  wrap,
+  wrapWide,
+  h1,
+  muted,
+  input,
+  btn,
+  btnGhost,
+  err,
+  head,
+  filters,
+  tableWrap,
+  table,
+  th,
+  td,
+  cardRow,
+  card,
+  cardLabel,
+  cardValue,
+} as const;
