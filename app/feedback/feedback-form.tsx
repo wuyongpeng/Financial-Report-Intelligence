@@ -55,6 +55,7 @@ export default function FeedbackForm() {
       ) : (
         <>
           <label style={{ display: 'block', fontSize: 13, color: '#6b7a8d', marginBottom: 6 }} htmlFor="fb-message">
+            <span style={{ color: '#dc2626', marginRight: 4, fontWeight: 600 }} aria-hidden="true">*</span>
             反馈内容（必填）
           </label>
           <textarea
@@ -70,7 +71,8 @@ export default function FeedbackForm() {
             }}
           />
           <label style={{ display: 'block', fontSize: 13, color: '#6b7a8d', margin: '14px 0 6px' }} htmlFor="fb-contact">
-            联系方式（选填，方便我们回你）
+            <span style={{ visibility: 'hidden', marginRight: 4, fontWeight: 600 }} aria-hidden="true">*</span>
+            联系方式（选填）
           </label>
           <input
             id="fb-contact"

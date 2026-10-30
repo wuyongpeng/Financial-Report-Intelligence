@@ -11,6 +11,8 @@
 .hom-drawer h2{margin:0;font-size:20px;color:#203047}
 .hom-context{margin:0;font-size:13px;color:#35558f;background:#edf3ff;border-radius:8px;padding:8px 10px}
 .hom-label{font-size:13px;color:#5b6d86}
+.hom-req{color:#dc2626;margin-right:4px;font-weight:600}
+.hom-req-spacer{visibility:hidden;margin-right:4px;font-weight:600}
 .hom-textarea{width:100%;border:1px solid #d5dde8;border-radius:10px;padding:12px;font:inherit;font-size:14px;color:#203047;resize:vertical;min-height:140px}
 .hom-input{width:100%;border:1px solid #d5dde8;border-radius:10px;padding:10px 12px;font:inherit;font-size:14px;color:#203047;background:#fff}
 .hom-drawer-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:auto}

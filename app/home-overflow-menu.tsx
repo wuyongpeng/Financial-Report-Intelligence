@@ -163,7 +163,10 @@ export default function HomeOverflowMenu({
             {pageLabel?.trim() ? (
               <p className="hom-context">关于：{pageLabel.trim()}</p>
             ) : null}
-            <label className="hom-label" htmlFor="hom-feedback-message">反馈内容（必填）</label>
+            <label className="hom-label" htmlFor="hom-feedback-message">
+              <span className="hom-req" aria-hidden="true">*</span>
+              反馈内容（必填）
+            </label>
             <textarea
               id="hom-feedback-message"
               className="hom-textarea"
@@ -173,7 +176,10 @@ export default function HomeOverflowMenu({
               onChange={(e) => setMessage(e.target.value)}
               placeholder="例如：希望支持某类指标、某处看不懂…"
             />
-            <label className="hom-label" htmlFor="hom-feedback-contact">联系方式（选填，方便我们回你）</label>
+            <label className="hom-label" htmlFor="hom-feedback-contact">
+              <span className="hom-req-spacer" aria-hidden="true">*</span>
+              联系方式（选填）
+            </label>
             <input
               id="hom-feedback-contact"
               className="hom-input"
