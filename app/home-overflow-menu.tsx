@@ -4,7 +4,17 @@ import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
 import './home-overflow-menu.css';
 
-export default function HomeOverflowMenu() {
+export type HomeOverflowMenuProps = {
+  /** Home shows 数据采集; detail hides it. Default true. */
+  showSources?: boolean;
+  /** Short context for feedback, e.g. 「贵州茅台 2025H1」. Falls back to pathname. */
+  pageLabel?: string;
+};
+
+export default function HomeOverflowMenu({
+  showSources = true,
+  pageLabel,
+}: HomeOverflowMenuProps) {
   const [open, setOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -58,14 +68,16 @@ export default function HomeOverflowMenu() {
     setSending(true);
     setError('');
     try {
+      const href = typeof window !== 'undefined' ? window.location.href : '/';
+      const page = (pageLabel?.trim() || (typeof window !== 'undefined' ? window.location.pathname : '/') || '/').slice(0, 200);
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           message: text,
           contact: contact.trim() || undefined,
-          page: '/',
-          url: typeof window !== 'undefined' ? window.location.href : '/',
+          page,
+          url: href,
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
         }),
       });
@@ -97,14 +109,16 @@ export default function HomeOverflowMenu() {
       </button>
       {open ? (
         <div className="hom-menu" role="menu" id={menuId}>
-          <Link
-            role="menuitem"
-            className="hom-item"
-            href="/sources"
-            onClick={() => setOpen(false)}
-          >
-            数据采集
-          </Link>
+          {showSources ? (
+            <Link
+              role="menuitem"
+              className="hom-item"
+              href="/sources"
+              onClick={() => setOpen(false)}
+            >
+              数据采集
+            </Link>
+          ) : null}
           <button
             type="button"
             role="menuitem"
@@ -142,6 +156,9 @@ export default function HomeOverflowMenu() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="hom-feedback-title">向 Eva 发送反馈</h2>
+            {pageLabel?.trim() ? (
+              <p className="hom-context">关于：{pageLabel.trim()}</p>
+            ) : null}
             <label className="hom-label" htmlFor="hom-feedback-message">反馈内容（必填）</label>
             <textarea
               id="hom-feedback-message"
