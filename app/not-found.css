@@ -1,0 +1,30 @@
+.nf-page{
+  min-height:100dvh;display:grid;place-items:center;padding:32px 20px;
+  background:var(--bg,#f3f5f9);color:#203047;
+  font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+.nf-card{
+  width:min(420px,100%);text-align:center;
+  background:#fff;border:1px solid #e5eaf1;border-radius:16px;
+  padding:40px 28px 32px;box-shadow:0 18px 48px #13213b12;
+}
+.nf-code{
+  margin:0;font-size:13px;font-weight:600;letter-spacing:.04em;color:#3064db;
+}
+.nf-code span{color:#aec0db;font-weight:500;margin:0 2px}
+.nf-title{margin:14px 0 0;font-size:24px;font-weight:700;letter-spacing:-.02em;color:#203047}
+.nf-hint{margin:10px 0 0;font-size:13px;line-height:1.6;color:#6b7a8d}
+.nf-actions{display:flex;justify-content:center;gap:12px;margin-top:28px;flex-wrap:wrap}
+.nf-primary{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:112px;height:36px;padding:0 16px;border-radius:8px;
+  background:#3064db;color:#fff;text-decoration:none;font-size:13px;font-weight:600;
+  box-shadow:0 5px 13px #1357da28;
+}
+.nf-primary:hover{background:#2754c0}
+.nf-secondary{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:112px;height:36px;padding:0 16px;border-radius:8px;
+  border:1px solid #d5dde8;background:#fff;color:#3d5270;text-decoration:none;font-size:13px;
+}
+.nf-secondary:hover{border-color:#aec4ef;color:#1f4fad;background:#f7faff}

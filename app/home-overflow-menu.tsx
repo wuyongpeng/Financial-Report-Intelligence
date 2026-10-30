@@ -94,6 +94,14 @@ export default function HomeOverflowMenu() {
       </button>
       {open ? (
         <div className="hom-menu" role="menu" id={menuId}>
+          <Link
+            role="menuitem"
+            className="hom-item"
+            href="/sources"
+            onClick={() => setOpen(false)}
+          >
+            数据采集
+          </Link>
           <button
             type="button"
             role="menuitem"
@@ -160,15 +168,14 @@ export default function HomeOverflowMenu() {
             className="hom-about"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="hom-about-title"
+            aria-label="关于 Eva"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="hom-about-title">关于 Eva</h2>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img className="hom-about-logo" src="/favicon.svg" alt="Eva" width={72} height={72} />
-            <p className="hom-about-name">财报智析 Eva</p>
+            <p className="hom-about-name" id="hom-about-title">财报智析 Eva</p>
             <p className="hom-about-ver">Version 1.0</p>
-            <p className="hom-about-copy">© 2026 yongpeng3@staff.sina.com</p>
+            <p className="hom-about-copy">© 2026 eva</p>
             <button type="button" className="hom-btn-ghost" onClick={() => setAboutOpen(false)}>关闭</button>
           </div>
         </div>

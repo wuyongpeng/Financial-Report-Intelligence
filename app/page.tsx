@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import ReportHome from './report-home';
 import HomeOverflowMenu from './home-overflow-menu';
@@ -17,7 +16,6 @@ export default async function HomePage({
       <header className="topbar home-topbar">
         <div className="home-topbar-spacer" aria-hidden="true" />
         <div className="top-actions">
-          <Link className="rh-system-link" href="/sources" aria-label="打开数据采集">数据采集</Link>
           <HomeOverflowMenu />
         </div>
       </header>
