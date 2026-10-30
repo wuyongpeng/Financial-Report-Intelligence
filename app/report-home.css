@@ -156,6 +156,10 @@ a.rh-company-card .rh-star{position:relative;z-index:4}
 .rh-listed-candidates li{margin:0}
 .rh-listed-candidates button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #dce2eb;border-radius:8px;background:#f8fafc;color:#203047;font-size:14px;padding:10px 14px;margin:0;cursor:pointer;text-align:left}
 .rh-listed-candidates button:hover{border-color:#93c5fd;background:#edf3ff}
+.rh-sibling-candidates{margin:16px 0 8px;padding:14px 16px;border:1px dashed #d5dde8;border-radius:12px;background:#f8fafc}
+.rh-sibling-candidates-title{margin:0 0 10px;font-size:13px;color:#5b6d85;font-weight:500}
+.rh-listed-candidates-inline{margin:0;max-width:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+
 .rh-listed-candidate-name{font-weight:560}
 .rh-listed-candidate-code{font-size:12px;color:#68758a;font-variant-numeric:tabular-nums}
 

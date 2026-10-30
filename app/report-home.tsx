@@ -1611,6 +1611,27 @@ export default function ReportHome() {
           </div>
         ) : null}
 
+        {filtered.length > 0 && !loading && listedOutsidePoolCandidates.length > 0 ? (
+          <div className="rh-sibling-candidates" role="region" aria-label="未在监控池的相关公司">
+            <p className="rh-sibling-candidates-title">
+              还有 {listedOutsidePoolCandidates.length} 家相关公司未在监控池，点选加入：
+            </p>
+            <ul className="rh-listed-candidates rh-listed-candidates-inline">
+              {listedOutsidePoolCandidates.map((listed) => (
+                <li key={listed.code}>
+                  <button
+                    type="button"
+                    onClick={() => setDialog({ kind: 'missing-company', listed, query: search.trim() })}
+                  >
+                    <span className="rh-listed-candidate-name">{listed.name}</span>
+                    <span className="rh-listed-candidate-code">{listed.code}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {!filtered.length && !loading && (
           <div className="rh-empty">
             <b>没有符合条件的公司</b>
