@@ -175,7 +175,7 @@ export default function HomeOverflowMenu() {
             <img className="hom-about-logo" src="/favicon.svg" alt="Eva" width={72} height={72} />
             <p className="hom-about-name" id="hom-about-title">财报智析 Eva</p>
             <p className="hom-about-ver">Version 1.0</p>
-            <p className="hom-about-copy">© 2026 eva</p>
+            <p className="hom-about-copy">© 2026 Sina Eva. All rights reserved.</p>
             <button type="button" className="hom-btn-ghost" onClick={() => setAboutOpen(false)}>关闭</button>
           </div>
         </div>
