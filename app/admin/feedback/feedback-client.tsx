@@ -11,6 +11,7 @@ import {
 type FeedbackItem = {
   id: number;
   message: string;
+  contact: string | null;
   page: string | null;
   url: string | null;
   user_agent: string | null;
@@ -97,18 +98,20 @@ export function FeedbackAdminClient() {
             <tr>
               <th style={s.th}>时间</th>
               <th style={s.th}>反馈</th>
+              <th style={s.th}>联系方式</th>
               <th style={s.th}>页面</th>
               <th style={s.th}>浏览器</th>
             </tr>
           </thead>
           <tbody>
             {!loading && items.length === 0 ? (
-              <tr><td colSpan={4} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
+              <tr><td colSpan={5} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
             ) : null}
             {items.map((item) => (
               <tr key={item.id}>
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.created_at)}</td>
-                <td style={{ ...s.td, maxWidth: 520, whiteSpace: 'pre-wrap' }}>{item.message}</td>
+                <td style={{ ...s.td, maxWidth: 420, whiteSpace: 'pre-wrap' }}>{item.message}</td>
+                <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.contact || '—'}</td>
                 <td style={s.td} title={item.url ?? undefined}>{item.page || item.url || '—'}</td>
                 <td style={{ ...s.td, maxWidth: 220 }} title={item.user_agent ?? undefined}>
                   {item.user_agent ? (item.user_agent.length > 48 ? `${item.user_agent.slice(0, 48)}…` : item.user_agent) : '—'}

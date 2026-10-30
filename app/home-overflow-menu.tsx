@@ -20,6 +20,7 @@ export default function HomeOverflowMenu() {
     }
   }, []);
   const [message, setMessage] = useState('');
+  const [contact, setContact] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
@@ -62,6 +63,7 @@ export default function HomeOverflowMenu() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          contact: contact.trim() || undefined,
           page: '/',
           url: typeof window !== 'undefined' ? window.location.href : '/',
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
@@ -70,6 +72,7 @@ export default function HomeOverflowMenu() {
       const body = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) throw new Error(body.error || '发送失败');
       setMessage('');
+      setContact('');
       setFeedbackOpen(false);
       setToast('感谢反馈，已收到');
     } catch (e) {
@@ -139,15 +142,27 @@ export default function HomeOverflowMenu() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="hom-feedback-title">向 Eva 发送反馈</h2>
-            <label className="hom-label" htmlFor="hom-feedback-message">请描述您的反馈 （必填）</label>
+            <label className="hom-label" htmlFor="hom-feedback-message">反馈内容（必填）</label>
             <textarea
               id="hom-feedback-message"
               className="hom-textarea"
-              rows={8}
+              rows={7}
               value={message}
               disabled={sending}
               onChange={(e) => setMessage(e.target.value)}
               placeholder="例如：希望支持某类指标、某处看不懂…"
+            />
+            <label className="hom-label" htmlFor="hom-feedback-contact">联系方式（选填，方便我们回你）</label>
+            <input
+              id="hom-feedback-contact"
+              className="hom-input"
+              type="text"
+              value={contact}
+              disabled={sending}
+              onChange={(e) => setContact(e.target.value)}
+              placeholder="邮箱 / 微信 / 手机号"
+              autoComplete="off"
+              maxLength={120}
             />
             {error ? <p className="hom-error">{error}</p> : null}
             <div className="hom-drawer-actions">
@@ -174,7 +189,7 @@ export default function HomeOverflowMenu() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img className="hom-about-logo" src="/favicon.svg" alt="Eva" width={72} height={72} />
             <p className="hom-about-name" id="hom-about-title">财报智析 Eva</p>
-            <p className="hom-about-ver">Version 1.0</p>
+            <p className="hom-about-ver">Version 0.1</p>
             <p className="hom-about-copy">© 2026 Sina Eva. All rights reserved.</p>
             <button type="button" className="hom-btn-ghost" onClick={() => setAboutOpen(false)}>关闭</button>
           </div>

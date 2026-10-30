@@ -83,11 +83,13 @@ async function migrate() {
     await tx`CREATE TABLE IF NOT EXISTS user_feedback (
       id BIGSERIAL PRIMARY KEY,
       message TEXT NOT NULL,
+      contact TEXT,
       page TEXT,
       url TEXT,
       user_agent TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
+    await tx`ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS contact TEXT`;
     await tx`CREATE INDEX IF NOT EXISTS user_feedback_created_idx ON user_feedback (created_at DESC)`;
   });
 }

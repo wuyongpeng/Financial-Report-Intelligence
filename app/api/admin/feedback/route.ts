@@ -20,12 +20,13 @@ export async function GET(request: Request) {
       ? await db<Array<{
         id: number;
         message: string;
+        contact: string | null;
         page: string | null;
         url: string | null;
         user_agent: string | null;
         created_at: string;
       }>>`
-        SELECT id, message, page, url, user_agent, created_at
+        SELECT id, message, contact, page, url, user_agent, created_at
         FROM user_feedback
         WHERE id < ${beforeId}
         ORDER BY id DESC
@@ -34,12 +35,13 @@ export async function GET(request: Request) {
       : await db<Array<{
         id: number;
         message: string;
+        contact: string | null;
         page: string | null;
         url: string | null;
         user_agent: string | null;
         created_at: string;
       }>>`
-        SELECT id, message, page, url, user_agent, created_at
+        SELECT id, message, contact, page, url, user_agent, created_at
         FROM user_feedback
         ORDER BY id DESC
         LIMIT ${limit}
