@@ -14,6 +14,7 @@ test('parseFeedbackInput requires non-empty message', () => {
     'fallback-ua',
   );
   assert.equal(ok.message, '希望加分部收入');
+  assert.equal(ok.category, '其它');
   assert.equal(ok.contact, 'me@example.com');
   assert.equal(ok.page, '/');
   assert.equal(ok.userAgent, 'jest');
@@ -22,8 +23,21 @@ test('parseFeedbackInput requires non-empty message', () => {
 test('parseFeedbackInput allows empty contact', () => {
   const ok = parseFeedbackInput({ message: '界面很好用', contact: '   ' }, 'Mozilla/5.0');
   assert.equal(ok.contact, null);
+  assert.equal(ok.category, '其它');
   assert.equal(ok.userAgent, 'Mozilla/5.0');
   assert.equal(ok.page, null);
+});
+
+test('parseFeedbackInput accepts known category', () => {
+  const ok = parseFeedbackInput({ message: '数据错了', category: '数据不准' });
+  assert.equal(ok.category, '数据不准');
+});
+
+test('parseFeedbackInput rejects unknown category', () => {
+  assert.throws(
+    () => parseFeedbackInput({ message: 'ok', category: '乱写' }),
+    (error: unknown) => error instanceof ApiError && error.status === 400,
+  );
 });
 
 test('parseFeedbackInput rejects oversized contact', () => {

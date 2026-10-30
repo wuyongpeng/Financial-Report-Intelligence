@@ -2,6 +2,11 @@
 
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
+import {
+  DEFAULT_FEEDBACK_CATEGORY,
+  FEEDBACK_CATEGORIES,
+  type FeedbackCategory,
+} from '@/lib/feedback-input';
 import './home-overflow-menu.css';
 
 export type HomeOverflowMenuProps = {
@@ -29,6 +34,7 @@ export default function HomeOverflowMenu({
       window.history.replaceState({}, '', next);
     }
   }, []);
+  const [category, setCategory] = useState<FeedbackCategory>(DEFAULT_FEEDBACK_CATEGORY);
   const [message, setMessage] = useState('');
   const [contact, setContact] = useState('');
   const [sending, setSending] = useState(false);
@@ -74,6 +80,7 @@ export default function HomeOverflowMenu({
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          category,
           message: text,
           contact: contact.trim() || undefined,
           page,
@@ -85,6 +92,7 @@ export default function HomeOverflowMenu({
       if (!res.ok) throw new Error(body.error || '发送失败');
       setMessage('');
       setContact('');
+      setCategory(DEFAULT_FEEDBACK_CATEGORY);
       setFeedbackOpen(false);
       setToast('感谢反馈，已收到');
     } catch (e) {
@@ -168,12 +176,26 @@ export default function HomeOverflowMenu({
                 <span className="hom-req" aria-hidden="true">*</span>
                 反馈内容（必填）
               </label>
-              <a
-                className="hom-admin-link"
-                href="dingtalk://dingtalkclient/page/profile?corp_id=dingd0e3f5f70ceb88d2ee0f45d8e4f7c288&staff_id=222444"
-              >
-                直接反馈
-              </a>
+              <div className="hom-label-right">
+                <select
+                  id="hom-feedback-category"
+                  className="hom-select"
+                  value={category}
+                  disabled={sending}
+                  aria-label="反馈类型"
+                  onChange={(e) => setCategory(e.target.value as FeedbackCategory)}
+                >
+                  {FEEDBACK_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <a
+                  className="hom-admin-link"
+                  href="dingtalk://dingtalkclient/page/profile?corp_id=dingd0e3f5f70ceb88d2ee0f45d8e4f7c288&staff_id=222444"
+                >
+                  直接反馈
+                </a>
+              </div>
             </div>
             <textarea
               id="hom-feedback-message"

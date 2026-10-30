@@ -90,6 +90,8 @@ async function migrate() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
     await tx`ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS contact TEXT`;
+    await tx`ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS category TEXT`;
+    await tx`UPDATE user_feedback SET category = '其它' WHERE category IS NULL OR category = ''`;
     await tx`CREATE INDEX IF NOT EXISTS user_feedback_created_idx ON user_feedback (created_at DESC)`;
   });
 }

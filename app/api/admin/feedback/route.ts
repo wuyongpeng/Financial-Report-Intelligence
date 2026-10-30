@@ -19,6 +19,7 @@ export async function GET(request: Request) {
     const rows = beforeId
       ? await db<Array<{
         id: number;
+        category: string | null;
         message: string;
         contact: string | null;
         page: string | null;
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
         user_agent: string | null;
         created_at: string;
       }>>`
-        SELECT id, message, contact, page, url, user_agent, created_at
+        SELECT id, category, message, contact, page, url, user_agent, created_at
         FROM user_feedback
         WHERE id < ${beforeId}
         ORDER BY id DESC
@@ -34,6 +35,7 @@ export async function GET(request: Request) {
       `
       : await db<Array<{
         id: number;
+        category: string | null;
         message: string;
         contact: string | null;
         page: string | null;
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
         user_agent: string | null;
         created_at: string;
       }>>`
-        SELECT id, message, contact, page, url, user_agent, created_at
+        SELECT id, category, message, contact, page, url, user_agent, created_at
         FROM user_feedback
         ORDER BY id DESC
         LIMIT ${limit}

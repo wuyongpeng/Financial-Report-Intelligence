@@ -12,6 +12,8 @@
 .hom-context{margin:0;font-size:13px;color:#35558f;background:#edf3ff;border-radius:8px;padding:8px 10px}
 .hom-label-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .hom-label{font-size:13px;color:#5b6d86}
+.hom-label-right{display:inline-flex;align-items:center;gap:10px;flex-shrink:0}
+.hom-select{font:inherit;font-size:12px;color:#5b6d86;border:1px solid #d5dde8;border-radius:6px;padding:3px 8px;background:#fff;max-width:110px}
 .hom-admin-link{font-size:13px;color:#8b97a9;text-decoration:none;flex-shrink:0}
 .hom-admin-link:hover{color:#5b6d86;text-decoration:underline}
 .hom-req{color:#dc2626;margin-right:4px;font-weight:600}

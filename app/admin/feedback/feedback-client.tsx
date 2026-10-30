@@ -10,6 +10,7 @@ import {
 
 type FeedbackItem = {
   id: number;
+  category: string | null;
   message: string;
   contact: string | null;
   page: string | null;
@@ -97,6 +98,7 @@ export function FeedbackAdminClient() {
           <thead>
             <tr>
               <th style={s.th}>时间</th>
+              <th style={s.th}>类型</th>
               <th style={s.th}>反馈</th>
               <th style={s.th}>联系方式</th>
               <th style={s.th}>页面</th>
@@ -105,11 +107,12 @@ export function FeedbackAdminClient() {
           </thead>
           <tbody>
             {!loading && items.length === 0 ? (
-              <tr><td colSpan={5} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
+              <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
             ) : null}
             {items.map((item) => (
               <tr key={item.id}>
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.created_at)}</td>
+                <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.category || '其它'}</td>
                 <td style={{ ...s.td, maxWidth: 420, whiteSpace: 'pre-wrap' }}>{item.message}</td>
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.contact || '—'}</td>
                 <td style={s.td} title={item.url ?? undefined}>{item.page || item.url || '—'}</td>

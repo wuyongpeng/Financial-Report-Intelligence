@@ -12,8 +12,8 @@ export async function POST(request: Request) {
     await ensureBackendSchema();
     const db = getDb();
     const [row] = await db<Array<{ id: number; created_at: string }>>`
-      INSERT INTO user_feedback (message, contact, page, url, user_agent)
-      VALUES (${parsed.message}, ${parsed.contact}, ${parsed.page}, ${parsed.url}, ${parsed.userAgent})
+      INSERT INTO user_feedback (category, message, contact, page, url, user_agent)
+      VALUES (${parsed.category}, ${parsed.message}, ${parsed.contact}, ${parsed.page}, ${parsed.url}, ${parsed.userAgent})
       RETURNING id, created_at
     `;
     return Response.json({ ok: true, id: row.id, createdAt: row.created_at }, {

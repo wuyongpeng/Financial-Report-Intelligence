@@ -2,8 +2,14 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import {
+  DEFAULT_FEEDBACK_CATEGORY,
+  FEEDBACK_CATEGORIES,
+  type FeedbackCategory,
+} from '@/lib/feedback-input';
 
 export default function FeedbackForm() {
+  const [category, setCategory] = useState<FeedbackCategory>(DEFAULT_FEEDBACK_CATEGORY);
   const [message, setMessage] = useState('');
   const [contact, setContact] = useState('');
   const [sending, setSending] = useState(false);
@@ -23,6 +29,7 @@ export default function FeedbackForm() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          category,
           message: text,
           contact: contact.trim() || undefined,
           page: '/feedback',
@@ -35,6 +42,7 @@ export default function FeedbackForm() {
       setDone(true);
       setMessage('');
       setContact('');
+      setCategory(DEFAULT_FEEDBACK_CATEGORY);
     } catch (e) {
       setError(e instanceof Error ? e.message : '发送失败');
     } finally {
@@ -54,10 +62,27 @@ export default function FeedbackForm() {
         <p style={{ color: '#15803d', fontSize: 14 }}>感谢反馈，已收到。</p>
       ) : (
         <>
-          <label style={{ display: 'block', fontSize: 13, color: '#6b7a8d', marginBottom: 6 }} htmlFor="fb-message">
-            <span style={{ color: '#dc2626', marginRight: 4, fontWeight: 600 }} aria-hidden="true">*</span>
-            反馈内容（必填）
-          </label>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+            <label style={{ fontSize: 13, color: '#6b7a8d' }} htmlFor="fb-message">
+              <span style={{ color: '#dc2626', marginRight: 4, fontWeight: 600 }} aria-hidden="true">*</span>
+              反馈内容（必填）
+            </label>
+            <select
+              id="fb-category"
+              aria-label="反馈类型"
+              value={category}
+              disabled={sending}
+              onChange={(e) => setCategory(e.target.value as FeedbackCategory)}
+              style={{
+                font: 'inherit', fontSize: 12, color: '#5b6d86',
+                border: '1px solid #d5dde8', borderRadius: 6, padding: '3px 8px', background: '#fff',
+              }}
+            >
+              {FEEDBACK_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
           <textarea
             id="fb-message"
             rows={8}
