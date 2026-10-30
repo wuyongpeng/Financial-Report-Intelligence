@@ -159,7 +159,7 @@ export default function HomeOverflowMenu({
             aria-labelledby="hom-feedback-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="hom-feedback-title">向 Eva 发送反馈</h2>
+            <h2 id="hom-feedback-title">发送反馈</h2>
             {pageLabel?.trim() ? (
               <p className="hom-context">关于：{pageLabel.trim()}</p>
             ) : null}
@@ -192,6 +192,23 @@ export default function HomeOverflowMenu({
               maxLength={120}
             />
             {error ? <p className="hom-error">{error}</p> : null}
+            <div className="hom-admin-row">
+              <a
+                className="hom-admin-link"
+                href="dingtalk://dingtalkclient/page/profile?corp_id=dingd0e3f5f70ceb88d2ee0f45d8e4f7c288&staff_id=222444"
+              >
+                联系管理员
+              </a>
+              <span className="hom-admin-help">
+                <button type="button" className="hom-admin-q" aria-label="打不开钉钉时的帮助" aria-describedby="hom-admin-tip">
+                  ?
+                </button>
+                <span id="hom-admin-tip" className="hom-admin-tip" role="tooltip">
+                  打不开钉钉？
+                  <a href="mailto:yongpeng3@staff.sina.com">发邮件给管理员</a>
+                </span>
+              </span>
+            </div>
             <div className="hom-drawer-actions">
               <button type="button" className="hom-btn-ghost" disabled={sending} onClick={() => setFeedbackOpen(false)}>
                 取消

@@ -27,3 +27,13 @@
 .hom-about-copy{margin:18px 0 16px;font-size:12px;color:#8b97a9}
 .hom-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:140;box-shadow:0 8px 24px #0003}
 @keyframes hom-slide{from{transform:translateX(28px);opacity:0}to{transform:none;opacity:1}}
+.hom-admin-row{display:flex;align-items:center;gap:6px;margin-top:4px}
+.hom-admin-link{font-size:13px;color:#3064db;text-decoration:none}
+.hom-admin-link:hover{text-decoration:underline}
+.hom-admin-help{position:relative;display:inline-flex;align-items:center}
+.hom-admin-q{border:0;background:transparent;color:#8b97a9;width:18px;height:18px;padding:0;font-size:12px;line-height:1;border-radius:50%;cursor:help;display:inline-grid;place-items:center}
+.hom-admin-q:hover,.hom-admin-help:focus-within .hom-admin-q{color:#5b6d86;background:#eef2f7}
+.hom-admin-tip{display:none;position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);min-width:max-content;max-width:240px;background:#1f2937;color:#fff;font-size:12px;line-height:1.45;padding:8px 10px;border-radius:8px;box-shadow:0 8px 20px #0003;z-index:5;white-space:nowrap}
+.hom-admin-tip::after{content:"";position:absolute;left:50%;top:100%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#1f2937}
+.hom-admin-help:hover .hom-admin-tip,.hom-admin-help:focus-within .hom-admin-tip{display:block}
+.hom-admin-tip a{color:#93c5fd;text-decoration:underline}
