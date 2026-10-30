@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 
 type AuditEvent = {
@@ -152,8 +153,11 @@ export function AuditAdminClient() {
   if (!admin) {
     return (
       <main style={wrap}>
-        <h1 style={h1}>访问审计</h1>
-        <p style={muted}>需要管理员密码后才能查看访问、提问与反馈记录。</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <h1 style={{ ...h1, margin: 0 }}>访问审计</h1>
+          <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
+        </div>
+        <p style={{ ...muted, marginTop: 8 }}>需要管理员密码后才能查看访问、提问与反馈记录。</p>
         {loginError ? <p style={err}>{loginError}</p> : null}
         <form
           style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}
@@ -195,7 +199,10 @@ export function AuditAdminClient() {
             <a href="/admin/feedback" style={{ fontSize: 12, color: '#5b6d86', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff' }}>意见收集</a>
           </nav>
         </div>
-        <button type="button" style={btnGhost} onClick={() => void logout()}>退出</button>
+        <div style={{ display: 'flex', flexShrink: 0, gap: 8, alignItems: 'center' }}>
+          <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
+          <button type="button" style={btnGhost} onClick={() => void logout()}>退出</button>
+        </div>
       </header>
 
       <form

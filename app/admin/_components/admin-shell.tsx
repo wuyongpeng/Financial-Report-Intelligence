@@ -91,8 +91,11 @@ export function AdminLoginForm({
 }) {
   return (
     <main style={wrap}>
-      <h1 style={h1}>{title}</h1>
-      <p style={muted}>{hint}</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <h1 style={{ ...h1, margin: 0 }}>{title}</h1>
+        <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
+      </div>
+      <p style={{ ...muted, marginTop: 8 }}>{hint}</p>
       {loginError ? <p style={err}>{loginError}</p> : null}
       <form
         style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}
@@ -153,7 +156,10 @@ export function AdminHeader({
         </nav>
         {children}
       </div>
-      <button type="button" style={btnGhost} onClick={onLogout}>退出</button>
+      <div style={{ display: 'flex', flexShrink: 0, gap: 8, alignItems: 'center' }}>
+        <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
+        <button type="button" style={btnGhost} onClick={onLogout}>退出</button>
+      </div>
     </header>
   );
 }
