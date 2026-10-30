@@ -114,6 +114,8 @@ export default function HomeOverflowMenu({
               role="menuitem"
               className="hom-item"
               href="/sources"
+              target="_blank"
+              rel="noopener noreferrer"
               onClick={() => setOpen(false)}
             >
               数据采集
@@ -131,6 +133,8 @@ export default function HomeOverflowMenu({
             role="menuitem"
             className="hom-item"
             href="/docs"
+            target="_blank"
+            rel="noopener noreferrer"
             onClick={() => setOpen(false)}
           >
             帮助中心
