@@ -7,10 +7,12 @@ export type CheckMetric = 'revenue' | 'net_profit' | 'eps' | 'roe';
 
 export type ThirdPartyRow = {
   code: string;
-  revenueYi: number;
-  netProfitYi: number;
-  eps: number;
-  roe: number;
+  name?: string;
+  period: string;
+  revenueYi: number | null;
+  netProfitYi: number | null;
+  eps: number | null;
+  roe: number | null;
 };
 
 export type DbMetricRow = {
@@ -66,7 +68,7 @@ export function checkPeriodRank(token: string): number {
   return year * 10 + quarter;
 }
 
-export function thirdPartyValue(row: ThirdPartyRow, metric: CheckMetric): number {
+export function thirdPartyValue(row: ThirdPartyRow, metric: CheckMetric): number | null {
   if (metric === 'revenue') return row.revenueYi;
   if (metric === 'net_profit') return row.netProfitYi;
   if (metric === 'eps') return row.eps;
@@ -158,19 +160,25 @@ export function buildCheckCells(
   thirdParty: ThirdPartyRow[],
   dbRows: DbMetricRow[],
 ): { cells: CheckCell[]; summary: CheckSummary; periodNote: string } {
-  const byCodeMetric = new Map<string, DbMetricRow>();
-  const latest = latestPeriodByCode(dbRows);
+  // Match ONLY same code + period (do not pick latest DB period).
+  const byCodePeriodMetric = new Map<string, DbMetricRow>();
   const nameByCode = new Map<string, string>();
   for (const row of dbRows) {
     if (row.name) nameByCode.set(row.code, row.name);
-    if (latest.get(row.code) !== row.period) continue;
-    byCodeMetric.set(`${row.code}:${row.metric}`, row);
+    byCodePeriodMetric.set(`${row.code}:${row.period}:${row.metric}`, row);
   }
 
   const periodCounts = new Map<string, number>();
-  for (const p of latest.values()) periodCounts.set(p, (periodCounts.get(p) ?? 0) + 1);
-  const topPeriod = [...periodCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
-  const periodNote = `库内对照期次多为 ${topPeriod}（每家取最新一期）`;
+  for (const tp of thirdParty) {
+    periodCounts.set(tp.period, (periodCounts.get(tp.period) ?? 0) + 1);
+  }
+  const periodList = [...periodCounts.entries()]
+    .sort((a, b) => checkPeriodRank(a[0]) - checkPeriodRank(b[0]))
+    .map(([p, n]) => `${p}×${n}`)
+    .join('、');
+  const periodNote = periodList
+    ? `仅对照第三方已有期次（${periodList}），同公司同期比对`
+    : '仅对照第三方已有期次';
 
   const summary: CheckSummary = {
     revenue: { ok: 0, bad: 0, miss: 0 },
@@ -181,11 +189,28 @@ export function buildCheckCells(
 
   const cells: CheckCell[] = [];
   for (const tp of thirdParty) {
-    const period = latest.get(tp.code) ?? null;
-    const name = nameByCode.get(tp.code) ?? '';
+    const period = tp.period;
+    const name = tp.name || nameByCode.get(tp.code) || '';
     for (const metric of CHECK_METRICS) {
-      const db = byCodeMetric.get(`${tp.code}:${metric}`);
       const third = thirdPartyValue(tp, metric);
+      const db = byCodePeriodMetric.get(`${tp.code}:${period}:${metric}`);
+      // Null/missing third-party metric → MISS for that metric only
+      if (third == null || !Number.isFinite(third)) {
+        summary[metric].miss += 1;
+        cells.push({
+          code: tp.code,
+          name,
+          period,
+          metric,
+          metricLabel: METRIC_LABEL[metric],
+          thirdParty: null,
+          dbConverted: null,
+          dbRaw: db ? formatRaw(db.value, db.unit) : null,
+          status: 'MISS',
+          relDiff: null,
+        });
+        continue;
+      }
       if (!db || !Number.isFinite(db.value)) {
         summary[metric].miss += 1;
         cells.push({
