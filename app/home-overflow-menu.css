@@ -13,7 +13,12 @@
 .hom-label-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .hom-label{font-size:13px;color:#5b6d86}
 .hom-label-right{display:inline-flex;align-items:center;gap:10px;flex-shrink:0}
-.hom-select{font:inherit;font-size:12px;color:#5b6d86;border:1px solid #d5dde8;border-radius:6px;padding:3px 8px;background:#fff;max-width:110px}
+.hom-cat{position:relative;flex-shrink:0}
+.hom-cat-btn{font:inherit;font-size:12px;color:#5b6d86;border:1px solid #d5dde8;border-radius:6px;padding:3px 22px 3px 8px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath fill='%238b97a9' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E") no-repeat right 7px center;cursor:pointer;min-width:88px;text-align:left}
+.hom-cat-btn:disabled{opacity:.65;cursor:default}
+.hom-cat-menu{position:absolute;left:0;top:calc(100% + 4px);z-index:20;min-width:100%;background:#fff;border:1px solid #d5dde8;border-radius:8px;box-shadow:0 8px 20px #13213b1a;padding:4px;display:flex;flex-direction:column;gap:2px}
+.hom-cat-opt{border:0;background:transparent;text-align:left;font:inherit;font-size:12px;color:#31465f;padding:6px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.hom-cat-opt:hover,.hom-cat-opt[aria-selected="true"]{background:#f3f7fd;color:#1f4fad}
 .hom-admin-link{font-size:13px;color:#8b97a9;text-decoration:none;flex-shrink:0}
 .hom-admin-link:hover{color:#5b6d86;text-decoration:underline}
 .hom-req{color:#dc2626;margin-right:4px;font-weight:600}

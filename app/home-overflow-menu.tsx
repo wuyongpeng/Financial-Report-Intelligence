@@ -35,6 +35,7 @@ export default function HomeOverflowMenu({
     }
   }, []);
   const [category, setCategory] = useState<FeedbackCategory>(DEFAULT_FEEDBACK_CATEGORY);
+  const [catOpen, setCatOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [contact, setContact] = useState('');
   const [sending, setSending] = useState(false);
@@ -65,6 +66,24 @@ export default function HomeOverflowMenu({
     return () => window.clearTimeout(t);
   }, [toast]);
 
+  useEffect(() => {
+    if (!catOpen) return;
+    function onDoc(e: MouseEvent) {
+      const el = e.target as Element | null;
+      if (el?.closest?.('.hom-cat')) return;
+      setCatOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setCatOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [catOpen]);
+
   async function submitFeedback() {
     const text = message.trim();
     if (!text) {
@@ -93,6 +112,7 @@ export default function HomeOverflowMenu({
       setMessage('');
       setContact('');
       setCategory(DEFAULT_FEEDBACK_CATEGORY);
+      setCatOpen(false);
       setFeedbackOpen(false);
       setToast('感谢反馈，已收到');
     } catch (e) {
@@ -177,18 +197,36 @@ export default function HomeOverflowMenu({
                 反馈内容（必填）
               </label>
               <div className="hom-label-right">
-                <select
-                  id="hom-feedback-category"
-                  className="hom-select"
-                  value={category}
-                  disabled={sending}
-                  aria-label="反馈类型"
-                  onChange={(e) => setCategory(e.target.value as FeedbackCategory)}
-                >
-                  {FEEDBACK_CATEGORIES.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                <div className="hom-cat">
+                  <button
+                    type="button"
+                    id="hom-feedback-category"
+                    className="hom-cat-btn"
+                    disabled={sending}
+                    aria-label="反馈类型"
+                    aria-haspopup="listbox"
+                    aria-expanded={catOpen}
+                    onClick={() => setCatOpen((v) => !v)}
+                  >
+                    {category}
+                  </button>
+                  {catOpen ? (
+                    <div className="hom-cat-menu" role="listbox" aria-label="反馈类型">
+                      {FEEDBACK_CATEGORIES.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          role="option"
+                          className="hom-cat-opt"
+                          aria-selected={c === category}
+                          onClick={() => { setCategory(c); setCatOpen(false); }}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
                 <a
                   className="hom-admin-link"
                   href="dingtalk://dingtalkclient/page/profile?corp_id=dingd0e3f5f70ceb88d2ee0f45d8e4f7c288&staff_id=222444"
@@ -223,7 +261,7 @@ export default function HomeOverflowMenu({
             />
             {error ? <p className="hom-error">{error}</p> : null}
             <div className="hom-drawer-actions">
-              <button type="button" className="hom-btn-ghost" disabled={sending} onClick={() => setFeedbackOpen(false)}>
+              <button type="button" className="hom-btn-ghost" disabled={sending} onClick={() => { setCatOpen(false); setFeedbackOpen(false); }}>
                 取消
               </button>
               <button type="button" className="hom-btn" disabled={sending} onClick={() => void submitFeedback()}>

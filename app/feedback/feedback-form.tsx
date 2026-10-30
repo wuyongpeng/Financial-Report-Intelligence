@@ -10,6 +10,7 @@ import {
 
 export default function FeedbackForm() {
   const [category, setCategory] = useState<FeedbackCategory>(DEFAULT_FEEDBACK_CATEGORY);
+  const [catOpen, setCatOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [contact, setContact] = useState('');
   const [sending, setSending] = useState(false);
@@ -43,6 +44,7 @@ export default function FeedbackForm() {
       setMessage('');
       setContact('');
       setCategory(DEFAULT_FEEDBACK_CATEGORY);
+      setCatOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : '发送失败');
     } finally {
@@ -67,21 +69,54 @@ export default function FeedbackForm() {
               <span style={{ color: '#dc2626', marginRight: 4, fontWeight: 600 }} aria-hidden="true">*</span>
               反馈内容（必填）
             </label>
-            <select
-              id="fb-category"
-              aria-label="反馈类型"
-              value={category}
-              disabled={sending}
-              onChange={(e) => setCategory(e.target.value as FeedbackCategory)}
-              style={{
-                font: 'inherit', fontSize: 12, color: '#5b6d86',
-                border: '1px solid #d5dde8', borderRadius: 6, padding: '3px 8px', background: '#fff',
-              }}
-            >
-              {FEEDBACK_CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                type="button"
+                id="fb-category"
+                aria-label="反馈类型"
+                aria-haspopup="listbox"
+                aria-expanded={catOpen}
+                disabled={sending}
+                onClick={() => setCatOpen((v) => !v)}
+                style={{
+                  font: 'inherit', fontSize: 12, color: '#5b6d86',
+                  border: '1px solid #d5dde8', borderRadius: 6, padding: '3px 22px 3px 8px',
+                  background: '#fff', cursor: 'pointer', minWidth: 88, textAlign: 'left',
+                }}
+              >
+                {category}
+              </button>
+              {catOpen ? (
+                <div
+                  role="listbox"
+                  aria-label="反馈类型"
+                  style={{
+                    position: 'absolute', left: 0, top: 'calc(100% + 4px)', zIndex: 20,
+                    minWidth: '100%', background: '#fff', border: '1px solid #d5dde8',
+                    borderRadius: 8, boxShadow: '0 8px 20px #13213b1a', padding: 4,
+                    display: 'flex', flexDirection: 'column', gap: 2,
+                  }}
+                >
+                  {FEEDBACK_CATEGORIES.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      role="option"
+                      aria-selected={c === category}
+                      onClick={() => { setCategory(c); setCatOpen(false); }}
+                      style={{
+                        border: 0, background: c === category ? '#f3f7fd' : 'transparent',
+                        textAlign: 'left', font: 'inherit', fontSize: 12,
+                        color: c === category ? '#1f4fad' : '#31465f',
+                        padding: '6px 8px', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
           <textarea
             id="fb-message"
