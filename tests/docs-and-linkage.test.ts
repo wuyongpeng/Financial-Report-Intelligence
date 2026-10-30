@@ -38,7 +38,7 @@ test('documentation lists whitelisted Markdown in fixed order and refuses paths 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('repo docs root exposes exactly the five public documents in order', async () => {
+test('repo docs root exposes exactly the six public documents in order', async () => {
   const documents = await listProductDocuments();
   assert.deepEqual(documents.map(item => item.name), [...PUBLIC_DOCUMENT_ORDER]);
 });

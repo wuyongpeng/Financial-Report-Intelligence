@@ -39,7 +39,7 @@ export default async function DocumentsPage({ searchParams }: {
       <header className="eva-docs-header">
         <Link href="/" className="eva-docs-back">← 返回首页</Link>
         <h1>文档中心</h1>
-        <p>产品介绍 · 财报分析说明 · 功能评测 · 用户调研 · 技术架构</p>
+        <p>产品介绍 · 设计理念 · 财报分析说明 · 功能评测 · 用户调研 · 技术架构</p>
       </header>
       <div className="eva-docs-layout is-reading">
         <nav className="eva-docs-nav" aria-label="文档列表">

@@ -6,6 +6,7 @@ export type ProductDocument = { name: string; title: string };
 /** Public /docs catalog order. Only these top-level Markdown files are listed. */
 export const PUBLIC_DOCUMENT_ORDER = [
   '产品介绍.md',
+  '设计理念.md',
   '财报分析说明.md',
   '功能评测.md',
   '用户调研.md',
