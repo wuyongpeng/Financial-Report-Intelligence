@@ -34,7 +34,7 @@ test('guest Set-Cookie omits Secure unless COOKIE_SECURE=true', () => {
   const previousSecure = process.env.COOKIE_SECURE;
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.APP_SESSION_SECRET = 'test-session-secret-at-least-24-characters';
-  process.env.NODE_ENV = 'production';
+  (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
   delete process.env.COOKIE_SECURE;
   const withoutFlag = ensureGuestSession(new Request('http://10.0.0.1/'));
   assert.ok(withoutFlag.setCookie);
@@ -52,7 +52,7 @@ test('guest Set-Cookie omits Secure unless COOKIE_SECURE=true', () => {
 
   if (previousSecret === undefined) delete process.env.APP_SESSION_SECRET; else process.env.APP_SESSION_SECRET = previousSecret;
   if (previousSecure === undefined) delete process.env.COOKIE_SECURE; else process.env.COOKIE_SECURE = previousSecure;
-  if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+  if (previousNodeEnv === undefined) delete (process.env as Record<string, string | undefined>).NODE_ENV; else (process.env as Record<string, string | undefined>).NODE_ENV = previousNodeEnv;
 });
 
 test('validAdminPassword accepts built-in EVA and optional env password', () => {
