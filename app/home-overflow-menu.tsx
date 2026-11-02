@@ -12,12 +12,15 @@ import './home-overflow-menu.css';
 export type HomeOverflowMenuProps = {
   /** Home shows 数据采集; detail hides it. Default true. */
   showSources?: boolean;
+  /** Detail shows 复制链接; home hides it. Default false. */
+  showCopyLink?: boolean;
   /** Short context for feedback, e.g. 「贵州茅台 2025H1」. Falls back to pathname. */
   pageLabel?: string;
 };
 
 export default function HomeOverflowMenu({
   showSources = true,
+  showCopyLink = false,
   pageLabel,
 }: HomeOverflowMenuProps) {
   const [open, setOpen] = useState(false);
@@ -83,6 +86,35 @@ export default function HomeOverflowMenu({
       document.removeEventListener('keydown', onKey);
     };
   }, [catOpen]);
+
+  async function copyPageLink() {
+    setOpen(false);
+    const href = typeof window !== 'undefined' ? window.location.href : '';
+    if (!href) {
+      setToast('复制失败，请稍后重试');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(href);
+      setToast('链接已复制');
+    } catch {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = href;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (!ok) throw new Error('copy failed');
+        setToast('链接已复制');
+      } catch {
+        setToast('复制失败，请稍后重试');
+      }
+    }
+  }
 
   async function submitFeedback() {
     const text = message.trim();
@@ -157,6 +189,16 @@ export default function HomeOverflowMenu({
           >
             发送反馈
           </button>
+          {showCopyLink ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="hom-item"
+              onClick={() => { void copyPageLink(); }}
+            >
+              复制链接
+            </button>
+          ) : null}
           <Link
             role="menuitem"
             className="hom-item"
