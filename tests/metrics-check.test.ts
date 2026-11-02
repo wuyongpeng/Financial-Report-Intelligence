@@ -91,7 +91,7 @@ test('buildCheckCells matches same code+period; Q3 folds H1 for additive metrics
     { code: '000333', name: '美的集团', period: '2026H1', metric: 'eps', value: 3.52, unit: '元/股' },
     { code: '000333', name: '美的集团', period: '2026H1', metric: 'roe', value: 11.33, unit: '%' },
   ]);
-  assert.match(periodNote, /仅对照第三方已有期次/);
+  assert.match(periodNote, /仅对照问财第三方已有期次/);
   assert.match(periodNote, /加同公司 H1 折成累计/);
   assert.match(periodNote, /ROE 不折算/);
   const h1Rev = cells.find((c) => c.code === '000333' && c.period === '2026H1' && c.metric === 'revenue');

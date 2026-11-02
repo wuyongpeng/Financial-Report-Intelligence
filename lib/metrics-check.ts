@@ -264,8 +264,8 @@ export function buildCheckCells(
     .map(([p, n]) => `${p}×${n}`)
     .join('、');
   const periodNote = periodList
-    ? `仅对照第三方已有期次（${periodList}），同公司同期比对；Q3 若库内为单季则对营收/净利/EPS 加同公司 H1 折成累计再比（ROE 不折算）`
-    : '仅对照第三方已有期次；Q3 若库内为单季则对营收/净利/EPS 加同公司 H1 折成累计再比（ROE 不折算）';
+    ? `仅对照问财第三方已有期次（${periodList}），同公司同期比对；Q3 若库内为单季则对营收/净利/EPS 加同公司 H1 折成累计再比（ROE 不折算）`
+    : '仅对照问财第三方已有期次；Q3 若库内为单季则对营收/净利/EPS 加同公司 H1 折成累计再比（ROE 不折算）';
 
   const summary: CheckSummary = {
     revenue: { ok: 0, bad: 0, miss: 0 },

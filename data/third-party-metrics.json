@@ -105,7 +105,7 @@
     "revenueYi": 328.58,
     "netProfitYi": 97.11,
     "eps": 2.5,
-    "roe": 8.09
+    "roe": 0.81
   },
   {
     "code": "002129",
@@ -123,7 +123,7 @@
     "revenueYi": 235.14,
     "netProfitYi": -45.56,
     "eps": -1.13,
-    "roe": -23.46
+    "roe": -7.64
   },
   {
     "code": "002230",
@@ -141,7 +141,7 @@
     "revenueYi": 181.87,
     "netProfitYi": 0.22,
     "eps": 0.01,
-    "roe": 0.1
+    "roe": 0.99
   },
   {
     "code": "002371",
@@ -159,7 +159,7 @@
     "revenueYi": 314.67,
     "netProfitYi": 53.92,
     "eps": 7.44,
-    "roe": 13.43
+    "roe": 4.85
   },
   {
     "code": "002415",
@@ -177,7 +177,7 @@
     "revenueYi": 740.44,
     "netProfitYi": 129.11,
     "eps": 1.41,
-    "roe": 14.99
+    "roe": 5.95
   },
   {
     "code": "002466",
@@ -246,7 +246,7 @@
     "code": "002714",
     "name": "牧原股份",
     "period": "2026Q3",
-    "revenueYi": 922.0,
+    "revenueYi": 922,
     "netProfitYi": -93.19,
     "eps": -1.67,
     "roe": -11.6
@@ -285,7 +285,7 @@
     "revenueYi": 183.44,
     "netProfitYi": 22.98,
     "eps": 0.25,
-    "roe": 10.26
+    "roe": 4.12
   },
   {
     "code": "300059",
@@ -303,7 +303,7 @@
     "revenueYi": 155.6,
     "netProfitYi": 119.07,
     "eps": 0.75,
-    "roe": 12.28
+    "roe": 3.83
   },
   {
     "code": "300122",
@@ -321,7 +321,7 @@
     "revenueYi": 65.39,
     "netProfitYi": -6.83,
     "eps": -0.29,
-    "roe": -4.41
+    "roe": 0.83
   },
   {
     "code": "300124",
@@ -339,7 +339,7 @@
     "revenueYi": 379.56,
     "netProfitYi": 43.98,
     "eps": 1.63,
-    "roe": 11.89
+    "roe": 4.22
   },
   {
     "code": "300274",
@@ -357,7 +357,7 @@
     "revenueYi": 488.63,
     "netProfitYi": 65.99,
     "eps": 3.21,
-    "roe": 13.5
+    "roe": 2.69
   },
   {
     "code": "300308",
@@ -375,7 +375,7 @@
     "revenueYi": 695.47,
     "netProfitYi": 222.38,
     "eps": 19.78,
-    "roe": 44.26
+    "roe": 12.79
   },
   {
     "code": "300498",
@@ -393,7 +393,7 @@
     "revenueYi": 722.24,
     "netProfitYi": -49.61,
     "eps": -0.75,
-    "roe": -12.87
+    "roe": -1.68
   },
   {
     "code": "300502",
@@ -411,7 +411,7 @@
     "revenueYi": 318.5,
     "netProfitYi": 113.72,
     "eps": 8.16,
-    "roe": 49.22
+    "roe": 14.71
   },
   {
     "code": "300750",
@@ -429,7 +429,7 @@
     "revenueYi": 4421.37,
     "netProfitYi": 645.3,
     "eps": 14.13,
-    "roe": 17.64
+    "roe": 5.55
   },
   {
     "code": "300760",
@@ -447,7 +447,7 @@
     "revenueYi": 270.97,
     "netProfitYi": 71.84,
     "eps": 5.93,
-    "roe": 17.8
+    "roe": 5.84
   },
   {
     "code": "600018",
@@ -465,7 +465,7 @@
     "revenueYi": 328.36,
     "netProfitYi": 130.85,
     "eps": 0.56,
-    "roe": 8.95
+    "roe": 3.08
   },
   {
     "code": "600019",
@@ -483,7 +483,7 @@
     "revenueYi": 2456.48,
     "netProfitYi": 67.39,
     "eps": 0.31,
-    "roe": 3.24
+    "roe": 1.05
   },
   {
     "code": "600030",
@@ -501,7 +501,7 @@
     "revenueYi": 665.9,
     "netProfitYi": 310.22,
     "eps": 2.01,
-    "roe": 10.21
+    "roe": 2.14
   },
   {
     "code": "600031",
@@ -519,7 +519,7 @@
     "revenueYi": 784.13,
     "netProfitYi": 80.04,
     "eps": 0.87,
-    "roe": 8.52
+    "roe": 2.48
   },
   {
     "code": "600036",
@@ -537,7 +537,7 @@
     "revenueYi": 2648.52,
     "netProfitYi": 1164.76,
     "eps": 4.57,
-    "roe": 10.12
+    "roe": 2.94
   },
   {
     "code": "600188",
@@ -555,7 +555,7 @@
     "revenueYi": 1175.04,
     "netProfitYi": 111.17,
     "eps": 1.11,
-    "roe": 10.34
+    "roe": 3.57
   },
   {
     "code": "600276",
@@ -573,7 +573,7 @@
     "revenueYi": 244.09,
     "netProfitYi": 69.23,
     "eps": 1.05,
-    "roe": 12.17
+    "roe": 3.74
   },
   {
     "code": "600309",
@@ -590,8 +590,8 @@
     "period": "2026Q3",
     "revenueYi": 1858.67,
     "netProfitYi": 156.58,
-    "eps": 5.0,
-    "roe": 13.76
+    "eps": 5,
+    "roe": 4.87
   },
   {
     "code": "600436",
@@ -609,7 +609,7 @@
     "revenueYi": 63.49,
     "netProfitYi": 12.88,
     "eps": 2.13,
-    "roe": 8.73
+    "roe": 1.35
   },
   {
     "code": "600519",
@@ -627,7 +627,7 @@
     "revenueYi": 1332.84,
     "netProfitYi": 644.67,
     "eps": 51.53,
-    "roe": 24.47
+    "roe": 7.64
   },
   {
     "code": "600600",
@@ -645,7 +645,7 @@
     "revenueYi": 280.35,
     "netProfitYi": 50.55,
     "eps": 3.71,
-    "roe": 15.75
+    "roe": 3.56
   },
   {
     "code": "600690",
@@ -663,7 +663,7 @@
     "revenueYi": 2218.19,
     "netProfitYi": 149.99,
     "eps": 1.64,
-    "roe": 12.24
+    "roe": 3.86
   },
   {
     "code": "600760",
@@ -681,7 +681,7 @@
     "revenueYi": 135.62,
     "netProfitYi": 10.07,
     "eps": 0.36,
-    "roe": 4.19
+    "roe": 2.26
   },
   {
     "code": "600809",
@@ -699,7 +699,7 @@
     "revenueYi": 283.82,
     "netProfitYi": 83.38,
     "eps": 6.83,
-    "roe": 20.26
+    "roe": 4.86
   },
   {
     "code": "600887",
@@ -717,7 +717,7 @@
     "revenueYi": 938.13,
     "netProfitYi": 88.04,
     "eps": 1.39,
-    "roe": 15.52
+    "roe": 5.51
   },
   {
     "code": "600893",
@@ -735,7 +735,7 @@
     "revenueYi": 294.15,
     "netProfitYi": 1.53,
     "eps": 0.06,
-    "roe": 0.38
+    "roe": 0.02
   },
   {
     "code": "601012",
@@ -753,7 +753,7 @@
     "revenueYi": 438.64,
     "netProfitYi": -47.13,
     "eps": -0.62,
-    "roe": -9.33
+    "roe": -2.16
   },
   {
     "code": "601088",
@@ -771,7 +771,7 @@
     "revenueYi": 2960.31,
     "netProfitYi": 444.03,
     "eps": 2.06,
-    "roe": 8.81
+    "roe": 3.5
   },
   {
     "code": "601138",
@@ -789,7 +789,7 @@
     "revenueYi": 9414.14,
     "netProfitYi": 403.75,
     "eps": 2.04,
-    "roe": 21.77
+    "roe": 9.08
   },
   {
     "code": "601225",
@@ -807,7 +807,7 @@
     "revenueYi": 1227.66,
     "netProfitYi": 170.65,
     "eps": 1.76,
-    "roe": 16.7
+    "roe": 5.55
   },
   {
     "code": "601318",
@@ -816,7 +816,7 @@
     "revenueYi": 5751.38,
     "netProfitYi": 925.85,
     "eps": 5.3,
-    "roe": 9.0
+    "roe": 9
   },
   {
     "code": "601318",
@@ -825,7 +825,7 @@
     "revenueYi": 7281.34,
     "netProfitYi": 966.45,
     "eps": 5.55,
-    "roe": 9.4
+    "roe": 0.39
   },
   {
     "code": "601398",
@@ -843,7 +843,7 @@
     "revenueYi": 6959.47,
     "netProfitYi": 2856.4,
     "eps": 0.78,
-    "roe": 7.0
+    "roe": 2.57
   },
   {
     "code": "601766",
@@ -861,7 +861,7 @@
     "revenueYi": 1946.85,
     "netProfitYi": 103.14,
     "eps": 0.36,
-    "roe": 5.87
+    "roe": 1.32
   },
   {
     "code": "601808",
@@ -879,7 +879,7 @@
     "revenueYi": 357.29,
     "netProfitYi": 32.33,
     "eps": 0.68,
-    "roe": 6.8
+    "roe": 2.55
   },
   {
     "code": "601816",
@@ -897,7 +897,7 @@
     "revenueYi": 336.49,
     "netProfitYi": 107.16,
     "eps": 0.22,
-    "roe": 5.08
+    "roe": 1.87
   },
   {
     "code": "601857",
@@ -915,7 +915,7 @@
     "revenueYi": 23200,
     "netProfitYi": 1557.73,
     "eps": 0.85,
-    "roe": 9.4
+    "roe": 3.17
   },
   {
     "code": "601888",
@@ -933,7 +933,7 @@
     "revenueYi": 388.21,
     "netProfitYi": 36.7,
     "eps": 1.77,
-    "roe": null
+    "roe": 0.98
   },
   {
     "code": "601899",
@@ -951,7 +951,7 @@
     "revenueYi": 2834.53,
     "netProfitYi": 575.26,
     "eps": 2.16,
-    "roe": 28.3
+    "roe": 8.78
   },
   {
     "code": "603259",
@@ -969,7 +969,7 @@
     "revenueYi": 455.37,
     "netProfitYi": 193.98,
     "eps": 6.66,
-    "roe": 22.42
+    "roe": 9.23
   },
   {
     "code": "603288",
@@ -987,7 +987,7 @@
     "revenueYi": 225.53,
     "netProfitYi": 53.8,
     "eps": 0.92,
-    "roe": 13.29
+    "roe": 3.03
   },
   {
     "code": "603501",
@@ -1005,7 +1005,7 @@
     "revenueYi": 221.49,
     "netProfitYi": 22.99,
     "eps": 1.84,
-    "roe": 6.99
+    "roe": 3.27
   },
   {
     "code": "603986",
@@ -1023,7 +1023,7 @@
     "revenueYi": 202.97,
     "netProfitYi": 110.66,
     "eps": 15.83,
-    "roe": 22.15
+    "roe": 7.38
   },
   {
     "code": "688008",
@@ -1041,7 +1041,7 @@
     "revenueYi": 54.14,
     "netProfitYi": 32.37,
     "eps": 2.71,
-    "roe": 16.33
+    "roe": 5.68
   },
   {
     "code": "688111",
@@ -1059,7 +1059,7 @@
     "revenueYi": 50.8,
     "netProfitYi": 26.37,
     "eps": 5.69,
-    "roe": 18.69
+    "roe": 0.79
   },
   {
     "code": "688256",
@@ -1077,7 +1077,7 @@
     "revenueYi": 95.26,
     "netProfitYi": 37.15,
     "eps": 5.91,
-    "roe": 27.73
+    "roe": 9.79
   },
   {
     "code": "688802",
@@ -1095,7 +1095,7 @@
     "revenueYi": 28.24,
     "netProfitYi": 6.39,
     "eps": 1.6,
-    "roe": 4.72
+    "roe": 0.19
   },
   {
     "code": "688981",
