@@ -202,15 +202,16 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
     // Drop `（千元）` from the key so the amount parser sees the number cleanly.
     nearby = nearby.replace(/^\s*\(\s*(?:人民币\s*)?(亿元|百万元|万元|千元|元)\s*\)/, ' ');
   }
-  // Prefer an explicit percent token for ROE (avoids bare leading integers).
+  // ROE: unit often sits in the label as （%）/(%)/% with a bare period number.
+  // Prefer that bare number; never take a later 同比/增减…% as ROE (Muxi 688802).
   if (definition.metric === 'roe') {
-    const percentMatch = nearby.match(/(-?\d+(?:\.\d+)?)\s*%/);
-    if (percentMatch) {
-      const value = Number(percentMatch[1]);
+    const unitInLabel = /^\s*(?:\(%\)|%)(?!\d)/.test(nearby);
+    const roeSearch = unitInLabel ? nearby.replace(/^\s*(?:\(%\)|%)\s*/, '') : nearby;
+
+    const finishRoe = (value: number, after: string) => {
       if (!Number.isFinite(value)) return null;
       if (Math.abs(value) < definition.minAbs || Math.abs(value) > definition.maxAbs) return null;
-      const after = nearby.slice(percentMatch.index! + percentMatch[0].length);
-      // ROE tables list 本期% then 上年同期% (same unit). A following bare/percent
+      // ROE tables list 本期 then 上年同期 (same unit). A following bare/percent
       // number is prior level — not 同比增减 — unless a third % column appears.
       const priorLevel = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?/);
       let priorValue: number | undefined;
@@ -220,11 +221,39 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
         if (parsed !== null && Math.abs(parsed) <= definition.maxAbs) {
           priorValue = parsed;
           const rest = after.slice(priorLevel[0].length);
-          const yoy = parseYoyPercentToken(rest);
-          if (yoy) yoyPct = yoy.value;
+          // 「增加7.15个百分点」is a YoY description, not a % token — leave yoyPct empty.
+          if (!/(?:百分点|同比|增减|较上年)/.test(rest.slice(0, 24))) {
+            const yoy = parseYoyPercentToken(rest);
+            if (yoy) yoyPct = yoy.value;
+          }
         }
       }
       return { value, detectedUnit: '%', priorValue, yoyPct };
+    };
+
+    if (unitInLabel) {
+      const bare = roeSearch.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?/);
+      if (bare) {
+        const value = parseSignedNumber(bare[2], bare[1], bare[3]);
+        if (value !== null) {
+          return finishRoe(value, roeSearch.slice(bare[0].length));
+        }
+      }
+    }
+
+    const percentRe = /(-?\d+(?:\.\d+)?)\s*%/g;
+    let percentMatch: RegExpExecArray | null = null;
+    let match: RegExpExecArray | null;
+    while ((match = percentRe.exec(nearby)) !== null) {
+      const before = nearby.slice(Math.max(0, match.index - 24), match.index);
+      // Skip YoY / change / footnote prose after the label (e.g. 同比增长 44.67%).
+      if (/(?:同比|较上年|增减|变动|变化|百分点|说明|注释)\s*$/.test(before)) continue;
+      if (/(?:同比|较上年|增减|增加|减少|上升|下降|提高|降低)[^。；;\n]{0,16}$/.test(before)) continue;
+      percentMatch = match;
+      break;
+    }
+    if (percentMatch) {
+      return finishRoe(Number(percentMatch[1]), nearby.slice(percentMatch.index + percentMatch[0].length));
     }
   }
   const valueMatch = nearby.match(/(?:人民币)?\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*(%|亿元|百万元|万元|千元|元\/股|元)?/);
@@ -292,6 +321,13 @@ function isCleanLabelHit(page: string, position: number, label: string, metric: 
   if (metric === 'net_profit') {
     const before = page.slice(Math.max(0, position - 28), position);
     if (/扣除非经常性损益后$/.test(before)) return false;
+    if (/扣非后$/.test(before)) return false;
+    return true;
+  }
+  if (metric === 'roe') {
+    // Prefer 加权平均净资产收益率 over 扣除非经常性损益后(的)加权平均净资产收益率.
+    const before = page.slice(Math.max(0, position - 28), position);
+    if (/扣除非经常性损益后的?$/.test(before)) return false;
     if (/扣非后$/.test(before)) return false;
     return true;
   }

@@ -253,6 +253,30 @@ test('ZTE 2026H1 summary keeps 千元 scale and disclosed YoY for 归母净利�
   assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 3.65);
 });
 
+test('Muxi-style ROE: label unit （%） with bare period number, not later YoY %', () => {
+  // 沐曦股份 688802 2026H1: 加权平均净资产收益率（%）4.53，后文营收同比 44.67% 不得误抽。
+  const metrics = parseCoreMetricPages([
+    [
+      '主要财务指标 本报告期（1－6月） 上年同期 本报告期比上年同期增减(%)',
+      '加权平均净资产收益率（%） 4.53 -2.62 增加7.15个百分点',
+      '扣除非经常性损益后的加权平均净资产收益率（%） 4.40 -2.80 增加7.20个百分点',
+      // Misleading YoY % inside the 220-char window after the ROE label (old bug picked 44.67).
+      '同比增长 44.67% 说明详见附注',
+    ].join(' '),
+  ]);
+  const roe = metrics.find((item) => item.metric === 'roe');
+  assert.equal(roe?.value, 4.53);
+  assert.equal(roe?.priorValue, -2.62);
+  assert.equal(roe?.sourceLabel, '加权平均净资产收益率');
+});
+
+test('ROE with explicit trailing % still prefers the period percent token', () => {
+  const metrics = parseCoreMetricPages([
+    '报告摘要 主要财务指标 加权平均净资产收益率 12.08% 10.50%',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 12.08);
+});
+
 test('keeps disclosed YoY when a later statement row repeats the same amount without YoY columns', () => {
   const metrics = parseCoreMetricPages([
     '报告摘要 主要会计数据 单位：人民币千元 归属于上市公司股东的净利润 2,752,825 5,057,571 (45.57%)',
