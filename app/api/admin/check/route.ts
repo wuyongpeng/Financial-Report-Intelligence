@@ -53,7 +53,16 @@ export async function GET(request: Request) {
     await ensureBackendSchema();
     const thirdParty = await loadThirdParty();
     const codes = [...new Set(thirdParty.map((row) => row.code))];
-    const periods = [...new Set(thirdParty.map((row) => row.period))];
+    const periodSet = new Set(thirdParty.map((row) => row.period));
+    // Q3 YTD fold needs companion H1/Q2 rows even if that period is absent from third-party.
+    for (const period of [...periodSet]) {
+      const m = period.match(/^(20\d{2})Q3$/i);
+      if (m) {
+        periodSet.add(`${m[1]}H1`);
+        periodSet.add(`${m[1]}Q2`);
+      }
+    }
+    const periods = [...periodSet];
     const db = getDb();
     const dbRows = codes.length === 0 ? [] : await db<DbMetricRow[]>`
       SELECT m.code, c.name, m.period, m.metric, m.value, m.unit

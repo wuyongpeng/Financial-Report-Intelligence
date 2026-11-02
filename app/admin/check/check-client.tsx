@@ -172,13 +172,18 @@ export function CheckAdminClient() {
               <tr><td colSpan={8} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
             ) : null}
             {rows.map((cell) => (
-              <tr key={`${cell.code}-${cell.metric}`}>
+              <tr key={`${cell.code}-${cell.period}-${cell.metric}`}>
                 <td style={s.td}>{cell.code}</td>
                 <td style={s.td}>{cell.name || '—'}</td>
                 <td style={s.td}>{cell.period || '—'}</td>
                 <td style={s.td}>{cell.metricLabel}</td>
                 <td style={s.td}>{formatThird(cell)}</td>
-                <td style={s.td}>{formatConverted(cell.metric, cell.dbConverted)}</td>
+                <td style={s.td}>
+                  {formatConverted(cell.metric, cell.dbConverted)}
+                  {cell.note ? (
+                    <div style={{ ...s.muted, fontSize: 11, marginTop: 2 }}>{cell.note}</div>
+                  ) : null}
+                </td>
                 <td style={s.td}>{cell.dbRaw || '—'}</td>
                 <td style={{
                   ...s.td,
@@ -195,7 +200,7 @@ export function CheckAdminClient() {
       </div>
 
       <p style={{ ...s.muted, marginTop: 14 }}>
-        第三方≠官方真值集；已做单位容错（元/千元/万元等折算 · 约 1% 相对容差）。本页仅作核对证据，不宣称准确率。
+        第三方≠官方真值集；已做单位容错（元/千元/万元等折算 · 约 1% 相对容差）。Q3 库内若为单季，营收/净利/EPS 会加同公司 H1 折成累计再比（ROE 不折算）。本页仅作核对证据，不宣称准确率。
       </p>
     </main>
   );

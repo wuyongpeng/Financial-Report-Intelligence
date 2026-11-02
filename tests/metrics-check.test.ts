@@ -3,8 +3,11 @@ import test from 'node:test';
 import {
   buildCheckCells,
   currencyYiCandidates,
+  h1PeriodForQ3,
   pickBestConverted,
+  pickQ3Comparable,
   withinTolerance,
+  type DbMetricRow,
   type ThirdPartyRow,
 } from '../lib/metrics-check';
 
@@ -27,13 +30,57 @@ test('withinTolerance rejects clear mismatches like 茅台营收', () => {
   assert.equal(withinTolerance(16.75, 17.95, 'roe'), false);
 });
 
-test('buildCheckCells matches same code+period only (not latest DB period)', () => {
+test('h1PeriodForQ3 maps year Q3 to H1', () => {
+  assert.equal(h1PeriodForQ3('2026Q3'), '2026H1');
+  assert.equal(h1PeriodForQ3('2026H1'), null);
+});
+
+test('pickQ3Comparable folds 美的 Q3 single-quarter revenue with H1', () => {
+  const q3: DbMetricRow = {
+    code: '000333', period: '2026Q3', metric: 'revenue', value: 107322446000, unit: '元',
+  };
+  const h1: DbMetricRow = {
+    code: '000333', period: '2026H1', metric: 'revenue', value: 261052000000, unit: '元',
+  };
+  const picked = pickQ3Comparable(3690.87, q3, h1, 'revenue');
+  assert.equal(picked.folded, true);
+  assert.equal(picked.ok, true);
+  assert.ok(Math.abs(picked.converted - 3690.87) < 10);
+});
+
+test('pickQ3Comparable does not fold ROE', () => {
+  const q3: DbMetricRow = {
+    code: '000333', period: '2026Q3', metric: 'roe', value: 6.73, unit: '%',
+  };
+  const h1: DbMetricRow = {
+    code: '000333', period: '2026H1', metric: 'roe', value: 11.33, unit: '%',
+  };
+  const picked = pickQ3Comparable(18.06, q3, h1, 'roe');
+  assert.equal(picked.folded, false);
+  assert.equal(picked.ok, false);
+  assert.equal(picked.converted, 6.73);
+});
+
+test('pickQ3Comparable keeps already-cumulative Q3 without double-adding H1', () => {
+  const q3: DbMetricRow = {
+    code: '601888', period: '2026Q3', metric: 'revenue', value: 38821000000, unit: '元',
+  };
+  const h1: DbMetricRow = {
+    code: '601888', period: '2026H1', metric: 'revenue', value: 20000000000, unit: '元',
+  };
+  const picked = pickQ3Comparable(388.21, q3, h1, 'revenue');
+  assert.equal(picked.folded, false);
+  assert.equal(picked.ok, true);
+  assert.ok(Math.abs(picked.converted - 388.21) < 0.02);
+});
+
+test('buildCheckCells matches same code+period; Q3 folds H1 for additive metrics', () => {
   const thirdParty: ThirdPartyRow[] = [
     { code: '000333', name: '美的集团', period: '2026H1', revenueYi: 2610.52, netProfitYi: 264.46, eps: 3.52, roe: 11.33 },
     { code: '000333', name: '美的集团', period: '2026Q3', revenueYi: 3690.87, netProfitYi: 413.93, eps: 5.54, roe: 18.06 },
   ];
   const { cells, summary, periodNote } = buildCheckCells(thirdParty, [
-    // Latest DB is 2026Q3 with different numbers — must NOT be used for H1 row
+    // Q3 single-quarter in DB
     { code: '000333', name: '美的集团', period: '2026Q3', metric: 'revenue', value: 107322446000, unit: '元' },
     { code: '000333', name: '美的集团', period: '2026Q3', metric: 'net_profit', value: 14947334000, unit: '元' },
     { code: '000333', name: '美的集团', period: '2026Q3', metric: 'eps', value: 2.02, unit: '元/股' },
@@ -45,15 +92,30 @@ test('buildCheckCells matches same code+period only (not latest DB period)', () 
     { code: '000333', name: '美的集团', period: '2026H1', metric: 'roe', value: 11.33, unit: '%' },
   ]);
   assert.match(periodNote, /仅对照第三方已有期次/);
+  assert.match(periodNote, /加同公司 H1 折成累计/);
+  assert.match(periodNote, /ROE 不折算/);
   const h1Rev = cells.find((c) => c.code === '000333' && c.period === '2026H1' && c.metric === 'revenue');
   const q3Rev = cells.find((c) => c.code === '000333' && c.period === '2026Q3' && c.metric === 'revenue');
+  const q3Np = cells.find((c) => c.code === '000333' && c.period === '2026Q3' && c.metric === 'net_profit');
+  const q3Eps = cells.find((c) => c.code === '000333' && c.period === '2026Q3' && c.metric === 'eps');
+  const q3Roe = cells.find((c) => c.code === '000333' && c.period === '2026Q3' && c.metric === 'roe');
   assert.equal(h1Rev?.status, 'OK');
   assert.equal(h1Rev?.thirdParty, 2610.52);
-  // Q3 third-party 3690.87 vs DB 1073.22 → BAD (same period, wrong numbers), not mixed with H1
-  assert.equal(q3Rev?.status, 'BAD');
+  assert.equal(q3Rev?.status, 'OK');
+  assert.equal(q3Rev?.note, 'Q3单季已加H1折累计');
   assert.equal(q3Rev?.thirdParty, 3690.87);
-  assert.equal(summary.revenue.ok, 1);
-  assert.equal(summary.revenue.bad, 1);
+  assert.ok(q3Rev?.dbConverted != null && Math.abs(q3Rev.dbConverted - 3690.87) < 10);
+  assert.equal(q3Np?.status, 'OK');
+  assert.equal(q3Np?.note, 'Q3单季已加H1折累计');
+  assert.equal(q3Eps?.status, 'OK');
+  assert.equal(q3Eps?.note, 'Q3单季已加H1折累计');
+  // ROE is not additive — stays BAD vs cumulative third-party
+  assert.equal(q3Roe?.status, 'BAD');
+  assert.equal(q3Roe?.note, null);
+  assert.equal(summary.revenue.ok, 2);
+  assert.equal(summary.revenue.bad, 0);
+  assert.equal(summary.roe.ok, 1); // H1 only
+  assert.equal(summary.roe.bad, 1); // Q3
 });
 
 test('buildCheckCells summary counts OK/BAD/MISS; null third-party metric is MISS', () => {
