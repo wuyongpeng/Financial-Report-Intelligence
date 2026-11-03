@@ -67,14 +67,35 @@ export async function GET(request: Request) {
       .slice(0, 7)
       .map(([label, count]) => ({ label, count }));
 
+    const b1Values: Array<string | null | undefined> = [];
+    for (const b of basics) {
+      if (Array.isArray(b.b1)) {
+        for (const item of b.b1) {
+          if (typeof item === 'string') b1Values.push(item);
+        }
+      } else if (typeof b.b1 === 'string') {
+        b1Values.push(b.b1);
+      }
+    }
+    const b6Values = basics.map((b) => {
+      const b6 = b.b6;
+      if (!b6 || typeof b6 !== 'object' || Array.isArray(b6)) return null;
+      const choice = (b6 as Record<string, unknown>).choice;
+      const product = (b6 as Record<string, unknown>).product;
+      if (choice === '用过') {
+        return typeof product === 'string' && product.trim() ? `用过:${product.trim()}` : '用过';
+      }
+      return typeof choice === 'string' ? choice : null;
+    });
     const summary = {
       responseCount: responses.length,
       deepCount: deeps.length,
+      b1: countMap(b1Values),
       b2: countMap(basics.map((b) => typeof b.b2 === 'string' ? b.b2 : null)),
       b3: countMap(basics.map((b) => typeof b.b3 === 'string' ? b.b3 : null)),
       b4: countMap(basics.map((b) => typeof b.b4 === 'string' ? b.b4 : null)),
       b5: countMap(basics.map((b) => typeof b.b5 === 'string' ? b.b5 : null)),
-      b1: countMap(basics.map((b) => typeof b.b1 === 'string' ? b.b1 : null)),
+      b6: countMap(b6Values),
       d4Top,
     };
 

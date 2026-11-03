@@ -7,11 +7,24 @@ export const SURVEY_NICKNAMES = [
   '老王', '番茄', '可乐', '小土豆', '大橘猫', '桃桃乌', '柠檬精', '芝麻糊', '摸鱼达人',
 ] as const;
 
+/** Q1 平时怎么接触财报（多选） */
 export const B1_OPTIONS = ['几乎不看', '自己翻 PDF', '看研报或新闻摘要', '用过其它工具'] as const;
-export const B2_OPTIONS = ['费劲', '一般', '轻松'] as const;
+/** Q2 打开到看到财报的过程 */
+export const B2_OPTIONS = ['很顺', '一般', '费劲', '没找到想看的公司'] as const;
+/** Q3 左中右三栏布局 */
 export const B3_OPTIONS = ['分不清', '大致懂', '很清楚'] as const;
-export const B4_OPTIONS = ['有帮助', '一般', '点了但没懂', '没注意到'] as const;
-export const B5_OPTIONS = ['很差', '一般', '不错', '很好'] as const;
+/** Q4 体验后对财报是否更清楚 */
+export const B4_OPTIONS = ['清楚很多', '有一些', '没变化', '更糊涂了'] as const;
+/** Q5 回答里的角标 */
+export const B5_OPTIONS = [
+  '点过,有帮助',
+  '点过,一般',
+  '点过,但没看懂跳到了哪里',
+  '看到了,但没点',
+  '没注意到有角标',
+] as const;
+/** Q6 是否用过类似产品 */
+export const B6_CHOICES = ['没有', '用过'] as const;
 
 export const D1_OPTIONS = ['三栏结论', '角标核对', '语音/追问', '检索找公司', '关键数字展示'] as const;
 export const D2_OPTIONS = ['找不到公司', '看不懂结论', '不信数字', '不知问啥', '页面不知道点哪', '其它'] as const;
@@ -28,6 +41,7 @@ export type B2 = (typeof B2_OPTIONS)[number];
 export type B3 = (typeof B3_OPTIONS)[number];
 export type B4 = (typeof B4_OPTIONS)[number];
 export type B5 = (typeof B5_OPTIONS)[number];
+export type B6Choice = (typeof B6_CHOICES)[number];
 export type D1 = (typeof D1_OPTIONS)[number];
 export type D2 = (typeof D2_OPTIONS)[number];
 export type D4 = (typeof D4_OPTIONS)[number];
@@ -37,12 +51,15 @@ export type D8 = (typeof D8_OPTIONS)[number];
 export type D10 = (typeof D10_OPTIONS)[number];
 
 export type SurveyBasic = {
-  b1: B1;
+  /** Q1 多选 */
+  b1: B1[];
   b2: B2;
   b3: B3;
   b4: B4;
   b5: B5;
-  /** Optional free note at end of basic block (shown even when deep is off). */
+  /** Q6 类似产品 */
+  b6: { choice: B6Choice; product?: string };
+  /** Q7 选填 */
   note?: string;
 };
 
@@ -70,6 +87,7 @@ const B2_SET = new Set<string>(B2_OPTIONS);
 const B3_SET = new Set<string>(B3_OPTIONS);
 const B4_SET = new Set<string>(B4_OPTIONS);
 const B5_SET = new Set<string>(B5_OPTIONS);
+const B6_SET = new Set<string>(B6_CHOICES);
 const D1_SET = new Set<string>(D1_OPTIONS);
 const D2_SET = new Set<string>(D2_OPTIONS);
 const D4_SET = new Set<string>(D4_OPTIONS);
@@ -114,12 +132,35 @@ export function parseSurveySubmission(body: Record<string, unknown>): SurveySubm
     throw new ApiError(400, '请完成基础问题');
   }
   const b = basicRaw as Record<string, unknown>;
+
+  if (!Array.isArray(b.b1) || b.b1.length < 1) {
+    throw new ApiError(400, 'B1 请至少选一项');
+  }
+  if (b.b1.length > B1_OPTIONS.length) throw new ApiError(400, 'B1 选项过多');
+  const b1: B1[] = [];
+  for (const item of b.b1) {
+    if (typeof item !== 'string' || !B1_SET.has(item)) throw new ApiError(400, 'B1 选项无效');
+    if (b1.includes(item as B1)) throw new ApiError(400, 'B1 不可重复');
+    b1.push(item as B1);
+  }
+
+  if (b.b6 == null || typeof b.b6 !== 'object' || Array.isArray(b.b6)) {
+    throw new ApiError(400, 'B6 无效');
+  }
+  const b6raw = b.b6 as Record<string, unknown>;
+  const b6Choice = pickOne<B6Choice>(b6raw.choice, 'B6', B6_SET);
+  const product = optionalText(b6raw.product, 80);
+  const b6: SurveyBasic['b6'] = b6Choice === '用过' && product
+    ? { choice: b6Choice, product }
+    : { choice: b6Choice };
+
   const basic: SurveyBasic = {
-    b1: pickOne(b.b1, 'B1', B1_SET),
+    b1,
     b2: pickOne(b.b2, 'B2', B2_SET),
     b3: pickOne(b.b3, 'B3', B3_SET),
     b4: pickOne(b.b4, 'B4', B4_SET),
     b5: pickOne(b.b5, 'B5', B5_SET),
+    b6,
   };
   const basicNote = optionalText(b.note, 200);
   if (basicNote) basic.note = basicNote;
@@ -234,4 +275,29 @@ export function countMap(values: Array<string | null | undefined>) {
     map[v] = (map[v] ?? 0) + 1;
   }
   return map;
+}
+
+/** Admin / UI helper: flatten basic answers for display (compat old string b1). */
+export function formatSurveyBasicLine(basic: Record<string, unknown> | null | undefined): string {
+  if (!basic || typeof basic !== 'object') return '';
+  const bits: string[] = [];
+  const b1 = basic.b1;
+  if (Array.isArray(b1) && b1.length) bits.push(b1.filter((x) => typeof x === 'string').join('/'));
+  else if (typeof b1 === 'string' && b1) bits.push(b1);
+  for (const key of ['b2', 'b3', 'b4', 'b5'] as const) {
+    const v = basic[key];
+    if (typeof v === 'string' && v) bits.push(v);
+  }
+  const b6 = basic.b6;
+  if (b6 && typeof b6 === 'object' && !Array.isArray(b6)) {
+    const choice = (b6 as Record<string, unknown>).choice;
+    const product = (b6 as Record<string, unknown>).product;
+    if (choice === '用过') {
+      bits.push(typeof product === 'string' && product.trim() ? `用过:${product.trim()}` : '用过');
+    } else if (typeof choice === 'string' && choice) {
+      bits.push(choice);
+    }
+  }
+  if (typeof basic.note === 'string' && basic.note.trim()) bits.push(`备注:${basic.note.trim()}`);
+  return bits.join(' · ');
 }

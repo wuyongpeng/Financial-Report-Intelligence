@@ -29,8 +29,41 @@ export async function GET(_request: Request, context: Context) {
         { status: 410, headers: { 'cache-control': 'no-store' } },
       );
     }
+    const db = getDb();
+    const existing = await db<Array<{
+      id: number;
+      nickname: string | null;
+      basic: Record<string, unknown>;
+      deep: Record<string, unknown> | null;
+      created_at: string;
+    }>>`
+      SELECT id, nickname, basic, deep, created_at
+      FROM survey_responses
+      WHERE invite_id = ${invite.id}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    const row = existing[0];
+    if (!row) {
+      return Response.json(
+        { ok: true, active: true, token: invite.token, submitted: false },
+        { headers: { 'cache-control': 'no-store' } },
+      );
+    }
     return Response.json(
-      { ok: true, active: true, token: invite.token },
+      {
+        ok: true,
+        active: true,
+        token: invite.token,
+        submitted: true,
+        submission: {
+          id: row.id,
+          nickname: row.nickname,
+          basic: row.basic,
+          deep: row.deep,
+          createdAt: row.created_at,
+        },
+      },
       { headers: { 'cache-control': 'no-store' } },
     );
   } catch (error) {
@@ -47,6 +80,30 @@ export async function POST(request: Request, context: Context) {
     const body = await readObject(request);
     const parsed = parseSurveySubmission(body);
     const db = getDb();
+
+    const existing = await db<Array<{ id: number }>>`
+      SELECT id FROM survey_responses
+      WHERE invite_id = ${invite.id}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    if (existing[0]) {
+      const [row] = await db<Array<{ id: number; created_at: string }>>`
+        UPDATE survey_responses
+        SET
+          nickname = ${parsed.nickname},
+          basic = ${db.json(parsed.basic)},
+          deep = ${parsed.deep ? db.json(parsed.deep) : null}
+        WHERE id = ${existing[0].id}
+        RETURNING id, created_at
+      `;
+      return Response.json(
+        { ok: true, id: row.id, createdAt: row.created_at, updated: true },
+        { headers: { 'cache-control': 'no-store' } },
+      );
+    }
+
     const [row] = await db<Array<{ id: number; created_at: string }>>`
       INSERT INTO survey_responses (invite_id, nickname, basic, deep)
       VALUES (
@@ -58,7 +115,7 @@ export async function POST(request: Request, context: Context) {
       RETURNING id, created_at
     `;
     return Response.json(
-      { ok: true, id: row.id, createdAt: row.created_at },
+      { ok: true, id: row.id, createdAt: row.created_at, updated: false },
       { headers: { 'cache-control': 'no-store' } },
     );
   } catch (error) {

@@ -8,7 +8,7 @@ import {
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
-import type { SurveyBasic, SurveyDeep } from '@/lib/survey';
+import { formatSurveyBasicLine, type SurveyBasic, type SurveyDeep } from '@/lib/survey';
 
 type Invite = {
   id: number;
@@ -39,6 +39,7 @@ type Summary = {
   b3: Record<string, number>;
   b4: Record<string, number>;
   b5: Record<string, number>;
+  b6: Record<string, number>;
   d4Top: Array<{ label: string; count: number }>;
 };
 
@@ -294,10 +295,11 @@ export function SurveyAdminClient() {
     return [
       { label: '回收份数', value: String(summary.responseCount) },
       { label: '含深入反馈', value: String(summary.deepCount) },
-      { label: '上手（B2）', value: distLine(summary.b2) },
+      { label: '过程（B2）', value: distLine(summary.b2) },
       { label: '三栏（B3）', value: distLine(summary.b3) },
-      { label: '角标（B4）', value: distLine(summary.b4) },
-      { label: '印象（B5）', value: distLine(summary.b5) },
+      { label: '认识（B4）', value: distLine(summary.b4) },
+      { label: '角标（B5）', value: distLine(summary.b5) },
+      { label: '类似产品（B6）', value: distLine(summary.b6) },
     ];
   }, [summary]);
 
@@ -475,7 +477,7 @@ export function SurveyAdminClient() {
                     <th style={s.th}>昵称</th>
                     <th style={s.th}>短码</th>
                     <th style={s.th}>邀请备注</th>
-                    <th style={s.th}>B1–B5</th>
+                    <th style={s.th}>基础题</th>
                     <th style={s.th}>深入</th>
                   </tr>
                 </thead>
@@ -484,8 +486,7 @@ export function SurveyAdminClient() {
                     <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无回收</td></tr>
                   ) : null}
                   {responses.map((item) => {
-                    const b = item.basic;
-                    const basicLine = [b.b1, b.b2, b.b3, b.b4, b.b5, b.note ? `备注:${b.note}` : ''].filter(Boolean).join(' · ');
+                    const basicLine = formatSurveyBasicLine(item.basic as unknown as Record<string, unknown>);
                     return (
                       <tr key={item.id}>
                         <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.createdAt)}</td>
