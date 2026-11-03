@@ -61,6 +61,39 @@ function originBase() {
   return window.location.origin;
 }
 
+function inviteUrl(pathOrToken: string) {
+  const path = pathOrToken.startsWith('/') ? pathOrToken : `/survey/${pathOrToken}`;
+  return `${originBase()}${path}`;
+}
+
+async function copyTextReliable(text: string): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Non-secure contexts (plain http LAN) often reject clipboard API.
+    }
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 function shortDeep(deep: SurveyDeep | null) {
   if (!deep) return '—';
   const bits: string[] = [];
@@ -170,14 +203,14 @@ export function SurveyAdminClient() {
   }, [load, session]);
 
   const copyUrl = useCallback(async (path: string, token: string) => {
-    const url = `${originBase()}${path}`;
-    try {
-      await navigator.clipboard.writeText(url);
+    const url = inviteUrl(path);
+    const ok = await copyTextReliable(url);
+    if (ok) {
       setCopied(token);
       window.setTimeout(() => setCopied((cur) => (cur === token ? '' : cur)), 1600);
-    } catch {
-      setError('复制失败，请手动选中链接');
+      return;
     }
+    setError('复制失败，请手动选中链接');
   }, []);
 
   const cards = useMemo(() => {
@@ -246,15 +279,15 @@ export function SurveyAdminClient() {
                 <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无邀请</td></tr>
               ) : null}
               {invites.map((item) => {
-                const full = `${originBase()}${item.path}`;
+                const full = inviteUrl(item.path);
                 return (
                   <tr key={item.id} style={item.active ? undefined : { opacity: 0.55 }}>
                     <td style={{ ...s.td, whiteSpace: 'nowrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
                       {item.token}
                     </td>
-                    <td style={{ ...s.td, maxWidth: 360 }} title={full}>
-                      <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
-                        {item.path}
+                    <td style={{ ...s.td, maxWidth: 420 }} title={full}>
+                      <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-all' }}>
+                        {full}
                       </span>
                     </td>
                     <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.createdAt)}</td>
