@@ -4,11 +4,11 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 
 const NAV = [
-  { href: '/admin/audit', label: '访问审计' },
-  { href: '/admin/check', label: '指标核对' },
   { href: '/admin/metrics', label: '解析总览' },
+  { href: '/admin/check', label: '指标核对' },
+  { href: '/admin/audit', label: '访问审计' },
   { href: '/admin/survey', label: '用户调研' },
-  { href: '/admin/feedback', label: '意见收集' },
+  { href: '/admin/feedback', label: '反馈收集' },
 ] as const;
 
 export function useAdminSession() {

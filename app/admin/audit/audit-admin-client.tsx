@@ -1,7 +1,12 @@
 'use client';
 
-import Link from 'next/link';
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  AdminHeader,
+  AdminLoginForm,
+  adminStyles as s,
+  useAdminSession,
+} from '../_components/admin-shell';
 
 type AuditEvent = {
   id: number;
@@ -50,60 +55,13 @@ function detailSummary(ev: AuditEvent) {
 }
 
 export function AuditAdminClient() {
-  const [ready, setReady] = useState(false);
-  const [admin, setAdmin] = useState(false);
-  const [loginError, setLoginError] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
-  const [password, setPassword] = useState('');
+  const session = useAdminSession();
   const [eventType, setEventType] = useState('');
   const [companyCode, setCompanyCode] = useState('');
   const [q, setQ] = useState('');
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const refreshSession = useCallback(async () => {
-    const res = await fetch('/api/auth/session', { cache: 'no-store', credentials: 'same-origin' });
-    const body = await res.json().catch(() => ({})) as { admin?: boolean };
-    setAdmin(Boolean(body.admin));
-    setReady(true);
-  }, []);
-
-  useEffect(() => { void refreshSession(); }, [refreshSession]);
-
-  const loginWithPassword = useCallback(async (password: string) => {
-    setLoggingIn(true);
-    setLoginError('');
-    try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      const body = await res.json().catch(() => ({})) as { error?: string };
-      if (!res.ok) {
-        setLoginError(body.error || '登录失败');
-        return false;
-      }
-      setAdmin(true);
-      return true;
-    } catch {
-      setLoginError('登录失败');
-      return false;
-    } finally {
-      setLoggingIn(false);
-    }
-  }, []);
-
-  const submitLogin = useCallback(async () => {
-    if (!password.trim()) {
-      setLoginError('请输入管理员密码');
-      return;
-    }
-    const ok = await loginWithPassword(password);
-    if (ok) setPassword('');
-  }, [loginWithPassword, password]);
 
   const load = useCallback(async (opts?: { append?: boolean; beforeId?: number | null }) => {
     setLoading(true);
@@ -117,8 +75,7 @@ export function AuditAdminClient() {
       if (opts?.beforeId) params.set('beforeId', String(opts.beforeId));
       const res = await fetch(`/api/admin/audit?${params}`, { cache: 'no-store', credentials: 'same-origin' });
       if (res.status === 401) {
-        setAdmin(false);
-        setPassword('');
+        session.setAdmin(false);
         setError('管理员登录已失效，请重新登录');
         return;
       }
@@ -133,131 +90,97 @@ export function AuditAdminClient() {
     } finally {
       setLoading(false);
     }
-  }, [eventType, companyCode, q]);
+  }, [eventType, companyCode, q, session]);
 
   useEffect(() => {
-    if (admin) void load();
-  }, [admin]); // eslint-disable-line react-hooks/exhaustive-deps -- initial load after login
+    if (session.admin) void load();
+  }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps -- initial load after login
 
-  async function logout() {
-    await fetch('/api/admin/login', { method: 'DELETE', credentials: 'same-origin' });
-    setAdmin(false);
-    setEvents([]);
-    setPassword('');
+  if (!session.ready) {
+    return <main style={s.wrap}><p style={{ color: '#6b7a8d' }}>加载中…</p></main>;
   }
 
-  if (!ready) {
-    return <main style={wrap}><p style={{ color: '#6b7a8d' }}>加载中…</p></main>;
-  }
-
-  if (!admin) {
+  if (!session.admin) {
     return (
-      <main style={wrap}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-          <h1 style={{ ...h1, margin: 0 }}>访问审计</h1>
-          <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
-        </div>
-        <p style={{ ...muted, marginTop: 8 }}>需要管理员密码后才能查看访问、提问与反馈记录。</p>
-        {loginError ? <p style={err}>{loginError}</p> : null}
-        <form
-          style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}
-          onSubmit={(e) => { e.preventDefault(); void submitLogin(); }}
-        >
-          <label style={{ ...muted, margin: 0 }} htmlFor="admin-audit-password">管理员密码</label>
-          <input
-            id="admin-audit-password"
-            type="password"
-            name="password"
-            autoComplete="current-password"
-            autoFocus
-            style={input}
-            value={password}
-            disabled={loggingIn}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="请输入密码"
-          />
-          <button type="submit" style={btn} disabled={loggingIn}>
-            {loggingIn ? '登录中…' : '登录'}
-          </button>
-        </form>
-      </main>
+      <AdminLoginForm
+        title="访问审计"
+        hint="需要管理员密码后才能查看访问、提问与反馈记录。"
+        password={session.password}
+        setPassword={session.setPassword}
+        loginError={session.loginError}
+        loggingIn={session.loggingIn}
+        onSubmit={() => { void session.submitLogin(); }}
+      />
     );
   }
 
   const lastId = events.length ? events[events.length - 1].id : null;
 
   return (
-    <main style={wrapWide}>
-      <header style={head}>
-        <div>
-          <h1 style={{ ...h1, margin: 0 }}>访问审计</h1>
-          <p style={{ ...muted, margin: '6px 0 0' }}>/admin/audit · 时间均为 Asia/Shanghai</p>
-          <nav style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }} aria-label="管理页">
-            <a href="/admin/audit" style={{ fontSize: 12, color: '#1f4fad', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #aec4ef', background: '#edf3ff', fontWeight: 600 }}>访问审计</a>
-            <a href="/admin/check" style={{ fontSize: 12, color: '#5b6d86', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff' }}>指标核对</a>
-            <a href="/admin/survey" style={{ fontSize: 12, color: '#5b6d86', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff' }}>用户调研</a>
-            <a href="/admin/feedback" style={{ fontSize: 12, color: '#5b6d86', textDecoration: 'none', padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff' }}>意见收集</a>
-          </nav>
-        </div>
-        <div style={{ display: 'flex', flexShrink: 0, gap: 8, alignItems: 'center' }}>
-          <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
-          <button type="button" style={btnGhost} onClick={() => void logout()}>退出</button>
-        </div>
-      </header>
+    <main style={s.wrapWide}>
+      <AdminHeader
+        title="访问审计"
+        subtitle="/admin/audit · 时间均为 Asia/Shanghai"
+        activeHref="/admin/audit"
+        onLogout={() => {
+          setEvents([]);
+          void session.logout();
+        }}
+      />
 
       <form
-        style={filters}
+        style={s.filters}
         onSubmit={(e) => { e.preventDefault(); void load(); }}
       >
-        <select value={eventType} onChange={(e) => setEventType(e.target.value)} style={input}>
+        <select value={eventType} onChange={(e) => setEventType(e.target.value)} style={s.input}>
           <option value="">全部类型</option>
           <option value="visit">访问</option>
           <option value="ask">提问</option>
           <option value="answer_feedback">反馈</option>
         </select>
         <input
-          style={input}
+          style={s.input}
           placeholder="股票代码"
           value={companyCode}
           onChange={(e) => setCompanyCode(e.target.value)}
         />
         <input
-          style={{ ...input, flex: 1, minWidth: 160 }}
+          style={{ ...s.input, flex: 1, minWidth: 160 }}
           placeholder="搜问题 / IP / UA"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <button type="submit" style={btn} disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+        <button type="submit" style={s.btn} disabled={loading}>{loading ? '查询中…' : '查询'}</button>
       </form>
 
-      {error ? <p style={err}>{error}</p> : null}
+      {error ? <p style={s.err}>{error}</p> : null}
 
-      <div style={tableWrap}>
-        <table style={table}>
+      <div style={s.tableWrap}>
+        <table style={s.table}>
           <thead>
             <tr>
-              <th style={th}>时间</th>
-              <th style={th}>类型</th>
-              <th style={th}>公司</th>
-              <th style={th}>IP</th>
-              <th style={th}>问题 / 内容</th>
-              <th style={th}>详情</th>
-              <th style={th}>浏览器</th>
+              <th style={s.th}>时间</th>
+              <th style={s.th}>类型</th>
+              <th style={s.th}>公司</th>
+              <th style={s.th}>IP</th>
+              <th style={s.th}>问题 / 内容</th>
+              <th style={s.th}>详情</th>
+              <th style={s.th}>浏览器</th>
             </tr>
           </thead>
           <tbody>
             {events.length === 0 && !loading ? (
-              <tr><td colSpan={7} style={{ ...td, color: '#8b97a9' }}>暂无记录</td></tr>
+              <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
             ) : null}
             {events.map((ev) => (
               <tr key={ev.id}>
-                <td style={td}>{fmtTime(ev.created_at)}</td>
-                <td style={td}>{EVENT_LABEL[ev.event_type] ?? ev.event_type}</td>
-                <td style={td}>{ev.company_code || '—'}</td>
-                <td style={td} title={ev.owner_key ?? undefined}>{ev.ip || '—'}</td>
-                <td style={{ ...td, maxWidth: 320 }} title={ev.question ?? undefined}>{short(ev.question, 100)}</td>
-                <td style={{ ...td, maxWidth: 220 }} title={detailSummary(ev)}>{short(detailSummary(ev), 60)}</td>
-                <td style={{ ...td, maxWidth: 220 }} title={ev.user_agent ?? undefined}>{short(ev.user_agent, 48)}</td>
+                <td style={s.td}>{fmtTime(ev.created_at)}</td>
+                <td style={s.td}>{EVENT_LABEL[ev.event_type] ?? ev.event_type}</td>
+                <td style={s.td}>{ev.company_code || '—'}</td>
+                <td style={s.td} title={ev.owner_key ?? undefined}>{ev.ip || '—'}</td>
+                <td style={{ ...s.td, maxWidth: 320 }} title={ev.question ?? undefined}>{short(ev.question, 100)}</td>
+                <td style={{ ...s.td, maxWidth: 220 }} title={detailSummary(ev)}>{short(detailSummary(ev), 60)}</td>
+                <td style={{ ...s.td, maxWidth: 220 }} title={ev.user_agent ?? undefined}>{short(ev.user_agent, 48)}</td>
               </tr>
             ))}
           </tbody>
@@ -265,52 +188,17 @@ export function AuditAdminClient() {
       </div>
 
       <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-        <button type="button" style={btnGhost} disabled={loading} onClick={() => void load()}>刷新</button>
+        <button type="button" style={s.btnGhost} disabled={loading} onClick={() => void load()}>刷新</button>
         <button
           type="button"
-          style={btnGhost}
+          style={s.btnGhost}
           disabled={loading || !lastId}
           onClick={() => void load({ append: true, beforeId: lastId })}
         >
           加载更多
         </button>
-        <span style={{ ...muted, alignSelf: 'center' }}>已显示 {events.length} 条</span>
+        <span style={{ ...s.muted, alignSelf: 'center' }}>已显示 {events.length} 条</span>
       </div>
     </main>
   );
 }
-
-const wrap: CSSProperties = {
-  maxWidth: 480, margin: '48px auto', padding: '0 16px',
-  fontFamily: 'system-ui, -apple-system, sans-serif', color: '#203047',
-};
-const wrapWide: CSSProperties = {
-  maxWidth: 1200, margin: '24px auto 48px', padding: '0 16px',
-  fontFamily: 'system-ui, -apple-system, sans-serif', color: '#203047',
-};
-const h1: CSSProperties = { fontSize: 22, fontWeight: 650, margin: '0 0 8px' };
-const muted: CSSProperties = { fontSize: 13, color: '#6b7a8d', lineHeight: 1.5 };
-const input: CSSProperties = {
-  border: '1px solid #d5dde8', borderRadius: 8, padding: '8px 10px', fontSize: 14, color: '#203047', background: '#fff',
-};
-const btn: CSSProperties = {
-  border: 0, borderRadius: 8, background: '#3064db', color: '#fff', padding: '8px 14px',
-  fontSize: 13, fontWeight: 600, cursor: 'pointer',
-};
-const btnGhost: CSSProperties = {
-  border: '1px solid #d5dde8', borderRadius: 8, background: '#fff', color: '#3d5270',
-  padding: '7px 12px', fontSize: 13, cursor: 'pointer',
-};
-const err: CSSProperties = { color: '#b91c1c', fontSize: 13, margin: '0 0 12px' };
-const head: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 };
-const filters: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 };
-const tableWrap: CSSProperties = { overflow: 'auto', border: '1px solid #e5eaf1', borderRadius: 12, background: '#fff' };
-const table: CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 12 };
-const th: CSSProperties = {
-  textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid #e5eaf1',
-  background: '#f6f8fc', color: '#5b6d86', fontWeight: 600, whiteSpace: 'nowrap',
-};
-const td: CSSProperties = {
-  padding: '9px 12px', borderBottom: '1px solid #eef1f5', verticalAlign: 'top',
-  color: '#3a4d66', overflowWrap: 'anywhere',
-};

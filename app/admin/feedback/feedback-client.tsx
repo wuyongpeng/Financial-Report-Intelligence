@@ -71,7 +71,7 @@ export function FeedbackAdminClient() {
   if (!session.admin) {
     return (
       <AdminLoginForm
-        title="意见收集"
+        title="反馈收集"
         hint="需要管理员密码后才能查看用户反馈。"
         password={session.password}
         setPassword={session.setPassword}
@@ -87,7 +87,7 @@ export function FeedbackAdminClient() {
   return (
     <main style={s.wrapWide}>
       <AdminHeader
-        title="意见收集"
+        title="反馈收集"
         subtitle="/admin/feedback · 时间均为 Asia/Shanghai"
         activeHref="/admin/feedback"
         onLogout={() => { void session.logout(); }}
