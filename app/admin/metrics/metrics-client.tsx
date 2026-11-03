@@ -25,14 +25,28 @@ type MetricsPayload = {
   rows: OverviewRow[];
 };
 
+/** Top summary cards that filter the table. */
+type CardFilter = 'abnormal' | 'missing' | 'absurd_yoy' | null;
+
 export function MetricsAdminClient() {
   const session = useAdminSession();
   const [payload, setPayload] = useState<MetricsPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [onlyAbnormal, setOnlyAbnormal] = useState(false);
+  /** Clickable summary-card filter: null = off; same card again clears. */
+  const [cardFilter, setCardFilter] = useState<CardFilter>(null);
   const [periodFilter, setPeriodFilter] = useState('');
   const [codeQuery, setCodeQuery] = useState('');
+
+  const toggleCardFilter = useCallback((key: Exclude<CardFilter, null>) => {
+    setCardFilter((prev) => {
+      const next = prev === key ? null : key;
+      return next;
+    });
+    // Card filter owns the abnormal view; clear checkbox so UI stays unambiguous.
+    setOnlyAbnormal(false);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,12 +81,16 @@ export function MetricsAdminClient() {
     if (!payload) return [];
     const q = codeQuery.trim();
     return payload.rows.filter((row) => {
-      if (onlyAbnormal && !row.abnormal) return false;
+      if (cardFilter === 'abnormal' && !row.abnormal) return false;
+      if (cardFilter === 'missing' && !row.issues.includes('missing')) return false;
+      if (cardFilter === 'absurd_yoy' && !row.issues.includes('absurd_yoy')) return false;
+      // Checkbox only when no card filter (card filter takes priority).
+      if (!cardFilter && onlyAbnormal && !row.abnormal) return false;
       if (periodFilter && row.period !== periodFilter) return false;
       if (q && !row.code.includes(q) && !(row.name && row.name.includes(q))) return false;
       return true;
     });
-  }, [payload, onlyAbnormal, periodFilter, codeQuery]);
+  }, [payload, onlyAbnormal, cardFilter, periodFilter, codeQuery]);
 
   if (!session.ready) {
     return <main style={s.wrap}><p style={{ color: '#6b7a8d' }}>加载中…</p></main>;
@@ -109,24 +127,31 @@ export function MetricsAdminClient() {
             <p style={s.cardLabel}>公司×期次</p>
             <p style={s.cardValue}>{payload.summary.rows}</p>
           </article>
-          <article style={s.card}>
-            <p style={s.cardLabel}>异常行</p>
-            <p style={{ ...s.cardValue, color: payload.summary.abnormal ? '#b91c1c' : '#15803d' }}>
-              {payload.summary.abnormal}
-            </p>
-          </article>
-          <article style={s.card}>
-            <p style={s.cardLabel}>缺核</p>
-            <p style={s.cardValue}>{payload.summary.missingCore}</p>
-          </article>
+          <SummaryFilterCard
+            label="异常行"
+            value={payload.summary.abnormal}
+            active={cardFilter === 'abnormal'}
+            accent={payload.summary.abnormal ? '#b91c1c' : '#15803d'}
+            onClick={() => toggleCardFilter('abnormal')}
+          />
+          <SummaryFilterCard
+            label="缺核"
+            value={payload.summary.missingCore}
+            active={cardFilter === 'missing'}
+            accent="#b45309"
+            onClick={() => toggleCardFilter('missing')}
+          />
           <article style={s.card}>
             <p style={s.cardLabel}>无页码</p>
             <p style={s.cardValue}>{payload.summary.noPage}</p>
           </article>
-          <article style={s.card}>
-            <p style={s.cardLabel}>同比离谱</p>
-            <p style={s.cardValue}>{payload.summary.absurdYoy}</p>
-          </article>
+          <SummaryFilterCard
+            label="同比离谱"
+            value={payload.summary.absurdYoy}
+            active={cardFilter === 'absurd_yoy'}
+            accent="#b91c1c"
+            onClick={() => toggleCardFilter('absurd_yoy')}
+          />
         </div>
       ) : null}
 
@@ -137,10 +162,14 @@ export function MetricsAdminClient() {
         <label style={{ ...s.muted, display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0 }}>
           <input
             type="checkbox"
-            checked={onlyAbnormal}
-            onChange={(e) => setOnlyAbnormal(e.target.checked)}
+            checked={!cardFilter && onlyAbnormal}
+            disabled={Boolean(cardFilter)}
+            onChange={(e) => {
+              setCardFilter(null);
+              setOnlyAbnormal(e.target.checked);
+            }}
           />
-          仅异常
+          仅异常{cardFilter ? '（已被卡片筛选覆盖）' : ''}
         </label>
         <select
           style={s.input}
@@ -219,6 +248,48 @@ export function MetricsAdminClient() {
         悬停明细仍在详情页卡片上。本页只读，不改库。
       </p>
     </main>
+  );
+}
+
+
+function SummaryFilterCard({
+  label,
+  value,
+  active,
+  accent,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  active: boolean;
+  accent: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={active ? `取消筛选：${label}` : `筛选：${label}`}
+      style={{
+        ...s.card,
+        textAlign: 'left',
+        cursor: 'pointer',
+        width: '100%',
+        font: 'inherit',
+        border: active ? `2px solid ${accent}` : '1px solid #e5eaf1',
+        background: active ? '#fff7ed' : '#fff',
+        boxShadow: active ? `0 0 0 3px ${accent}22` : 'none',
+      }}
+    >
+      <p style={{ ...s.cardLabel, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+        <span>{label}</span>
+        <span style={{ color: active ? accent : '#94a3b8', fontWeight: 650 }}>
+          {active ? '筛选中 · 再点取消' : '点击筛选'}
+        </span>
+      </p>
+      <p style={{ ...s.cardValue, color: accent }}>{value}</p>
+    </button>
   );
 }
 
