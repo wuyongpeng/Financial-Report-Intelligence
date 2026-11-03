@@ -28,6 +28,8 @@ export type OverviewIssue = 'missing' | 'no_page' | 'absurd_yoy';
 export type OverviewDbMetric = {
   code: string;
   name?: string | null;
+  /** announcements.title — full report name for spotting wrong grabs. */
+  title?: string | null;
   period: string;
   metric: HeadlineMetricName;
   value: number;
@@ -51,6 +53,8 @@ export type OverviewMetricCell = {
 export type OverviewRow = {
   code: string;
   name: string;
+  /** announcements.title (may be empty if JOIN missed). */
+  title: string;
   period: string;
   href: string;
   metrics: Record<HeadlineMetricName, OverviewMetricCell>;
@@ -131,7 +135,7 @@ export function buildOverviewRows(dbRows: OverviewDbMetric[]): {
   summary: OverviewSummary;
 } {
   type Key = string;
-  const byKey = new Map<Key, { code: string; name: string; period: string; metrics: Map<HeadlineMetricName, OverviewDbMetric> }>();
+  const byKey = new Map<Key, { code: string; name: string; title: string; period: string; metrics: Map<HeadlineMetricName, OverviewDbMetric> }>();
 
   for (const row of dbRows) {
     if (!OVERVIEW_METRICS.includes(row.metric)) continue;
@@ -142,12 +146,14 @@ export function buildOverviewRows(dbRows: OverviewDbMetric[]): {
       bucket = {
         code: row.code,
         name: row.name?.trim() || '',
+        title: row.title?.trim() || '',
         period: row.period,
         metrics: new Map(),
       };
       byKey.set(key, bucket);
     }
     if (row.name?.trim()) bucket.name = row.name.trim();
+    if (row.title?.trim() && !bucket.title) bucket.title = row.title.trim();
     // Prefer first row; callers should DISTINCT ON already.
     if (!bucket.metrics.has(row.metric)) bucket.metrics.set(row.metric, row);
   }
@@ -176,6 +182,7 @@ export function buildOverviewRows(dbRows: OverviewDbMetric[]): {
     rows.push({
       code: bucket.code,
       name: bucket.name,
+      title: bucket.title,
       period: bucket.period,
       href: `/${bucket.code}?period=${encodeURIComponent(bucket.period)}`,
       metrics,

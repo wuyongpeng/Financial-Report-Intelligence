@@ -58,7 +58,9 @@ test('buildMetricCell missing metric → 缺核', () => {
 test('buildOverviewRows groups four cores and flags incomplete', () => {
   const rows: OverviewDbMetric[] = [
     {
-      code: '000333', name: '美的集团', period: '2026H1', metric: 'revenue',
+      code: '000333', name: '美的集团',
+      title: '美的集团股份有限公司2026年半年度报告',
+      period: '2026H1', metric: 'revenue',
       value: 261_052_000_000, unit: '元', source_page: 1, prior_value: null, yoy_pct: 10,
     },
     {
@@ -74,6 +76,7 @@ test('buildOverviewRows groups four cores and flags incomplete', () => {
   const { rows: out, summary } = buildOverviewRows(rows);
   assert.equal(out.length, 1);
   assert.equal(out[0].href, '/000333?period=2026H1');
+  assert.equal(out[0].title, '美的集团股份有限公司2026年半年度报告');
   assert.equal(out[0].abnormal, true);
   assert.ok(out[0].issues.includes('missing'));
   assert.equal(summary.missingCore, 1);

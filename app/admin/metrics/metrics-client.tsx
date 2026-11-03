@@ -203,6 +203,7 @@ export function MetricsAdminClient() {
               <th style={s.th}>代码</th>
               <th style={s.th}>公司</th>
               <th style={s.th}>期次</th>
+              <th style={s.th}>报告全称</th>
               {OVERVIEW_METRICS.map((m) => (
                 <th key={m} style={s.th}>{OVERVIEW_METRIC_LABEL[m]}</th>
               ))}
@@ -211,7 +212,7 @@ export function MetricsAdminClient() {
           </thead>
           <tbody>
             {!loading && rows.length === 0 ? (
-              <tr><td colSpan={8} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
+              <tr><td colSpan={9} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
             ) : null}
             {rows.map((row) => (
               <tr key={`${row.code}-${row.period}`}>
@@ -225,6 +226,9 @@ export function MetricsAdminClient() {
                 </td>
                 <td style={s.td}>
                   <Link href={row.href} style={{ ...linkStyle, color: '#3a4d66' }}>{row.period}</Link>
+                </td>
+                <td style={{ ...s.td, maxWidth: 220 }}>
+                  <TitleCell title={row.title} />
                 </td>
                 {OVERVIEW_METRICS.map((m) => (
                   <td key={m} style={s.td}>
@@ -288,6 +292,26 @@ function SummaryFilterCard({
       <p style={s.cardLabel}>{label}</p>
       <p style={{ ...s.cardValue, color: accent }}>{value}</p>
     </button>
+  );
+}
+
+const TITLE_TRUNCATE = 32;
+
+function truncateTitle(title: string, max = TITLE_TRUNCATE): string {
+  const t = title.trim();
+  if (!t) return '';
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}…`;
+}
+
+function TitleCell({ title }: { title: string }) {
+  const full = title?.trim() || '';
+  if (!full) return <span style={{ color: '#8b97a9' }}>—</span>;
+  const short = truncateTitle(full);
+  return (
+    <span title={full} style={{ color: '#3a4d66', fontSize: 12, lineHeight: 1.35 }}>
+      {short}
+    </span>
   );
 }
 

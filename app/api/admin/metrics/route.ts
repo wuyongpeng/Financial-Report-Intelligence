@@ -14,6 +14,7 @@ export const dynamic = 'force-dynamic';
 type RawMetricRow = {
   code: string;
   name: string | null;
+  title: string | null;
   period: string;
   metric: string;
   value: number;
@@ -32,10 +33,11 @@ export async function GET(request: Request) {
 
     const raw = await db<RawMetricRow[]>`
       SELECT DISTINCT ON (m.code, m.period, m.metric)
-        m.code, c.name, m.period, m.metric, m.value, m.unit,
+        m.code, c.name, a.title, m.period, m.metric, m.value, m.unit,
         m.source_page, m.prior_value, m.yoy_pct
       FROM financial_metrics m
       LEFT JOIN companies c ON c.code = m.code
+      LEFT JOIN announcements a ON a.id = m.announcement_id
       WHERE m.metric IN ${db(OVERVIEW_METRICS)}
       ORDER BY m.code, m.period, m.metric, m.confidence DESC NULLS LAST, m.created_at DESC NULLS LAST
     `;
@@ -46,6 +48,7 @@ export async function GET(request: Request) {
       normalized.push({
         code: row.code,
         name: row.name,
+        title: row.title,
         period: row.period,
         metric: row.metric as HeadlineMetricName,
         value: Number(row.value),
