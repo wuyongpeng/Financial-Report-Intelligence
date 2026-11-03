@@ -165,12 +165,22 @@ export function AdminHeader({
   );
 }
 
+
+export function AdminMain({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+  return (
+    <main className="admin-page" style={{ ...wrapWide, ...style }}>
+      {children}
+    </main>
+  );
+}
+
 const wrap: CSSProperties = {
   maxWidth: 480, margin: '48px auto', padding: '0 16px',
   fontFamily: 'system-ui, -apple-system, sans-serif', color: '#203047',
 };
 const wrapWide: CSSProperties = {
-  maxWidth: 1200, margin: '24px auto 48px', padding: '0 16px',
+  maxWidth: 1400, width: '100%', margin: '24px auto 48px', padding: '0 16px',
+  boxSizing: 'border-box',
   fontFamily: 'system-ui, -apple-system, sans-serif', color: '#203047',
 };
 const h1: CSSProperties = { fontSize: 22, fontWeight: 650, margin: '0 0 8px' };

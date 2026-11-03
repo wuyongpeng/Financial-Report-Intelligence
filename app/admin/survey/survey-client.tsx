@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import {
   AdminHeader,
   AdminLoginForm,
+  AdminMain,
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
@@ -45,7 +46,7 @@ export function SurveyAdminClient() {
   }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!session.ready) {
-    return <main style={s.wrap}><p style={{ color: '#6b7a8d' }}>加载中…</p></main>;
+    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
   }
 
   if (!session.admin) {
@@ -63,7 +64,7 @@ export function SurveyAdminClient() {
   }
 
   return (
-    <main style={s.wrapWide}>
+    <AdminMain>
       <AdminHeader
         title="用户调研"
         subtitle="/admin/survey · 来自 docs/用户调研.md"
@@ -87,6 +88,6 @@ export function SurveyAdminClient() {
       <p style={{ ...s.muted, marginTop: 14 }}>
         仅展示已记录发现与方法；不虚构外部 POC / 准确率问卷结论。
       </p>
-    </main>
+    </AdminMain>
   );
 }

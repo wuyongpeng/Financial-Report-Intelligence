@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import {
   AdminHeader,
   AdminLoginForm,
+  AdminMain,
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
@@ -93,7 +94,7 @@ export function MetricsAdminClient() {
   }, [payload, onlyAbnormal, cardFilter, periodFilter, codeQuery]);
 
   if (!session.ready) {
-    return <main style={s.wrap}><p style={{ color: '#6b7a8d' }}>加载中…</p></main>;
+    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
   }
 
   if (!session.admin) {
@@ -111,7 +112,7 @@ export function MetricsAdminClient() {
   }
 
   return (
-    <main style={{ ...s.wrapWide, maxWidth: 1400 }}>
+    <AdminMain>
       <AdminHeader
         title="解析指标总览"
         subtitle={payload?.note ?? '/admin/metrics'}
@@ -169,7 +170,7 @@ export function MetricsAdminClient() {
               setOnlyAbnormal(e.target.checked);
             }}
           />
-          仅异常{cardFilter ? '（已被卡片筛选覆盖）' : ''}
+          仅异常
         </label>
         <select
           style={s.input}
@@ -222,7 +223,9 @@ export function MetricsAdminClient() {
                     {row.name || '—'}
                   </Link>
                 </td>
-                <td style={s.td}>{row.period}</td>
+                <td style={s.td}>
+                  <Link href={row.href} style={{ ...linkStyle, color: '#3a4d66' }}>{row.period}</Link>
+                </td>
                 {OVERVIEW_METRICS.map((m) => (
                   <td key={m} style={s.td}>
                     <MetricCellView metric={m} row={row} />
@@ -247,7 +250,7 @@ export function MetricsAdminClient() {
         展示口径与详情页一致：金额按元÷1e8 显示「亿」，ROE 带 %，同比优先披露 yoy_pct / prior。
         悬停明细仍在详情页卡片上。本页只读，不改库。
       </p>
-    </main>
+    </AdminMain>
   );
 }
 
@@ -270,7 +273,7 @@ function SummaryFilterCard({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      title={active ? `取消筛选：${label}` : `筛选：${label}`}
+      aria-label={label}
       style={{
         ...s.card,
         textAlign: 'left',
@@ -282,12 +285,7 @@ function SummaryFilterCard({
         boxShadow: active ? `0 0 0 3px ${accent}22` : 'none',
       }}
     >
-      <p style={{ ...s.cardLabel, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-        <span>{label}</span>
-        <span style={{ color: active ? accent : '#94a3b8', fontWeight: 650 }}>
-          {active ? '筛选中 · 再点取消' : '点击筛选'}
-        </span>
-      </p>
+      <p style={s.cardLabel}>{label}</p>
       <p style={{ ...s.cardValue, color: accent }}>{value}</p>
     </button>
   );

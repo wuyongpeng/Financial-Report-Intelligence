@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   AdminHeader,
   AdminLoginForm,
+  AdminMain,
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
@@ -97,7 +98,7 @@ export function AuditAdminClient() {
   }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps -- initial load after login
 
   if (!session.ready) {
-    return <main style={s.wrap}><p style={{ color: '#6b7a8d' }}>加载中…</p></main>;
+    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
   }
 
   if (!session.admin) {
@@ -117,7 +118,7 @@ export function AuditAdminClient() {
   const lastId = events.length ? events[events.length - 1].id : null;
 
   return (
-    <main style={s.wrapWide}>
+    <AdminMain>
       <AdminHeader
         title="访问审计"
         subtitle="/admin/audit · 时间均为 Asia/Shanghai"
@@ -199,6 +200,6 @@ export function AuditAdminClient() {
         </button>
         <span style={{ ...s.muted, alignSelf: 'center' }}>已显示 {events.length} 条</span>
       </div>
-    </main>
+    </AdminMain>
   );
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AdminHeader,
   AdminLoginForm,
+  AdminMain,
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
@@ -70,7 +71,7 @@ export function CheckAdminClient() {
   }, [payload, onlyMismatch, metricFilter, codeQuery]);
 
   if (!session.ready) {
-    return <main style={s.wrap}><p style={{ color: '#6b7a8d' }}>加载中…</p></main>;
+    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
   }
 
   if (!session.admin) {
@@ -88,7 +89,7 @@ export function CheckAdminClient() {
   }
 
   return (
-    <main style={s.wrapWide}>
+    <AdminMain>
       <AdminHeader
         title="核心指标核对 · 第三方对照"
         subtitle={payload?.periodNote ?? '/admin/check'}
@@ -202,7 +203,7 @@ export function CheckAdminClient() {
       <p style={{ ...s.muted, marginTop: 14 }}>
         第三方≠官方真值集；已做单位容错（元/千元/万元等折算 · 约 1% 相对容差）。Q3 库内若为单季，营收/净利/EPS 会加同公司 H1 折成累计再比（ROE 不折算）。本页仅作核对证据，不宣称准确率。
       </p>
-    </main>
+    </AdminMain>
   );
 }
 
