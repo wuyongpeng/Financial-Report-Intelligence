@@ -44,6 +44,7 @@ type Summary = {
 };
 
 type TabKey = 'invites' | 'results';
+type FeedbackFilter = 'all' | 'done' | 'pending';
 
 function fmtTime(iso: string) {
   const d = new Date(iso);
@@ -131,6 +132,7 @@ export function SurveyAdminClient() {
   const [createNote, setCreateNote] = useState('');
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState('');
+  const [inviteFeedbackFilter, setInviteFeedbackFilter] = useState<FeedbackFilter>('all');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -277,7 +279,7 @@ export function SurveyAdminClient() {
   const cards = useMemo(() => {
     if (!summary) return [];
     return [
-      { label: '回收份数', value: String(summary.responseCount) },
+      { label: '已反馈', value: String(summary.responseCount) },
       { label: '含深入反馈', value: String(summary.deepCount) },
       { label: '过程（B2）', value: distLine(summary.b2) },
       { label: '三栏（B3）', value: distLine(summary.b3) },
@@ -286,6 +288,12 @@ export function SurveyAdminClient() {
       { label: '类似产品（B6）', value: distLine(summary.b6) },
     ];
   }, [summary]);
+
+  const filteredInvites = useMemo(() => {
+    if (inviteFeedbackFilter === 'done') return invites.filter((item) => item.responseCount > 0);
+    if (inviteFeedbackFilter === 'pending') return invites.filter((item) => item.responseCount <= 0);
+    return invites;
+  }, [invites, inviteFeedbackFilter]);
 
   if (!session.ready) {
     return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
@@ -341,6 +349,22 @@ export function SurveyAdminClient() {
               生成邀请链接
             </button>
           </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            {([
+              ['all', '全部'],
+              ['done', '已反馈'],
+              ['pending', '未反馈'],
+            ] as Array<[FeedbackFilter, string]>).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                style={tabBtn(inviteFeedbackFilter === key)}
+                onClick={() => setInviteFeedbackFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div style={s.tableWrap}>
             <table style={s.table}>
               <thead>
@@ -349,7 +373,7 @@ export function SurveyAdminClient() {
                   <th style={s.th}>链接</th>
                   <th style={s.th}>备注</th>
                   <th style={s.th}>创建时间</th>
-                  <th style={s.th}>回收</th>
+                  <th style={s.th}>反馈</th>
                   <th style={s.th}>状态</th>
                   <th style={s.th}>操作</th>
                 </tr>
@@ -358,7 +382,10 @@ export function SurveyAdminClient() {
                 {!loading && invites.length === 0 ? (
                   <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无邀请</td></tr>
                 ) : null}
-                {invites.map((item) => {
+                {!loading && invites.length > 0 && filteredInvites.length === 0 ? (
+                  <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无匹配</td></tr>
+                ) : null}
+                {filteredInvites.map((item) => {
                   const full = inviteUrl(item.path);
                   const draft = noteDrafts[item.token] ?? '';
                   const dirty = draft.trim() !== (item.note ?? '').trim();
@@ -403,7 +430,7 @@ export function SurveyAdminClient() {
                         </div>
                       </td>
                       <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.createdAt)}</td>
-                      <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.responseCount}</td>
+                      <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.responseCount > 0 ? '已反馈' : '未反馈'}</td>
                       <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.active ? '有效' : '已作废'}</td>
                       <td style={{ ...s.td, whiteSpace: 'nowrap' }}>
                         <button
@@ -471,13 +498,14 @@ export function SurveyAdminClient() {
                     <th style={s.th}>昵称</th>
                     <th style={s.th}>短码</th>
                     <th style={s.th}>邀请备注</th>
+                    <th style={s.th}>反馈</th>
                     <th style={s.th}>基础题</th>
                     <th style={s.th}>深入</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!loading && responses.length === 0 ? (
-                    <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无回收</td></tr>
+                    <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
                   ) : null}
                   {responses.map((item) => {
                     const basicLine = formatSurveyBasicLine(item.basic as unknown as Record<string, unknown>);
@@ -491,6 +519,7 @@ export function SurveyAdminClient() {
                         <td style={{ ...s.td, maxWidth: 180 }} title={item.inviteNote || undefined}>
                           {item.inviteNote || '—'}
                         </td>
+                        <td style={{ ...s.td, whiteSpace: 'nowrap' }}>已反馈</td>
                         <td style={{ ...s.td, maxWidth: 420 }} title={basicLine}>{basicLine || '—'}</td>
                         <td style={{ ...s.td, maxWidth: 420, whiteSpace: 'pre-wrap' } as CSSProperties}>
                           {formatSurveyDeepLine(item.deep) || '—'}
