@@ -29,12 +29,14 @@ test('parseSurveySubmission accepts basic-only', () => {
       b2: '轻松',
       b3: '大致懂',
       b4: '有帮助',
-      b5: '会',
+      b5: '很好',
+      note: ' 想看看行业对比 ',
     },
     deepEnabled: false,
   });
   assert.equal(ok.nickname, '悟空');
   assert.equal(ok.basic.b2, '轻松');
+  assert.equal(ok.basic.note, '想看看行业对比');
   assert.equal(ok.deep, null);
 });
 
@@ -45,26 +47,32 @@ test('parseSurveySubmission allows partial deep', () => {
       b2: '一般',
       b3: '很清楚',
       b4: '没注意到',
-      b5: '不确定',
+      b5: '一般',
     },
     deepEnabled: true,
     deep: {
       d1: ['三栏结论', '角标核对'],
       d3: 4,
       d5: ' 挺清楚 ',
+      d6: '刚好',
+      d9: 5,
+      d10: { choice: '季报速读' },
     },
   });
   assert.deepEqual(ok.deep?.d1, ['三栏结论', '角标核对']);
   assert.equal(ok.deep?.d3, 4);
   assert.equal(ok.deep?.d5, '挺清楚');
   assert.equal(ok.deep?.d2, undefined);
+  assert.equal(ok.deep?.d6, '刚好');
+  assert.equal(ok.deep?.d9, 5);
+  assert.equal(ok.deep?.d10?.choice, '季报速读');
 });
 
 test('parseSurveySubmission rejects invalid D4 overselect', () => {
   assert.throws(
     () => parseSurveySubmission({
       basic: {
-        b1: '几乎不看', b2: '费劲', b3: '分不清', b4: '一般', b5: '不会',
+        b1: '几乎不看', b2: '费劲', b3: '分不清', b4: '一般', b5: '很差',
       },
       deepEnabled: true,
       deep: {
@@ -80,6 +88,11 @@ test('randomSurveyNickname returns pool value', () => {
   assert.ok(randomSurveyNickname(0).length > 0);
 });
 
+test('SURVEY_NICKNAMES has about 30 names', async () => {
+  const { SURVEY_NICKNAMES } = await import('../lib/survey');
+  assert.equal(SURVEY_NICKNAMES.length, 30);
+});
+
 test('POST /api/survey/[token] rejects bad token before DB', async () => {
   const res = await postSurvey(
     new Request('http://localhost/api/survey/bad*token', {
@@ -87,7 +100,7 @@ test('POST /api/survey/[token] rejects bad token before DB', async () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         basic: {
-          b1: '几乎不看', b2: '费劲', b3: '分不清', b4: '一般', b5: '不会',
+          b1: '几乎不看', b2: '费劲', b3: '分不清', b4: '一般', b5: '很差',
         },
       }),
     }),

@@ -102,6 +102,11 @@ function shortDeep(deep: SurveyDeep | null) {
   if (typeof deep.d3 === 'number') bits.push(`信任:${deep.d3}`);
   if (deep.d4?.choices?.length) bits.push(`再来:${deep.d4.choices.join('/')}`);
   if (deep.d5) bits.push(deep.d5);
+  if (deep.d6) bits.push(`密度:${deep.d6}`);
+  if (deep.d7) bits.push(`耗时:${deep.d7}`);
+  if (deep.d8?.length) bits.push(`加强:${deep.d8.join('/')}`);
+  if (typeof deep.d9 === 'number') bits.push(`推荐:${deep.d9}`);
+  if (deep.d10?.choice) bits.push(`场景:${deep.d10.choice}${deep.d10.note ? `(${deep.d10.note})` : ''}`);
   return bits.length ? bits.join(' · ') : '—';
 }
 
@@ -221,7 +226,7 @@ export function SurveyAdminClient() {
       { label: '上手（B2）', value: distLine(summary.b2) },
       { label: '三栏（B3）', value: distLine(summary.b3) },
       { label: '角标（B4）', value: distLine(summary.b4) },
-      { label: '还会来（B5）', value: distLine(summary.b5) },
+      { label: '印象（B5）', value: distLine(summary.b5) },
     ];
   }, [summary]);
 
@@ -366,7 +371,7 @@ export function SurveyAdminClient() {
               ) : null}
               {responses.map((item) => {
                 const b = item.basic;
-                const basicLine = [b.b1, b.b2, b.b3, b.b4, b.b5].filter(Boolean).join(' · ');
+                const basicLine = [b.b1, b.b2, b.b3, b.b4, b.b5, b.note ? `备注:${b.note}` : ''].filter(Boolean).join(' · ');
                 return (
                   <tr key={item.id}>
                     <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.createdAt)}</td>

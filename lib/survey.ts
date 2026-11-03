@@ -4,20 +4,25 @@ export const SURVEY_TOKEN_RE = /^[A-Za-z0-9_-]{8,32}$/;
 
 export const SURVEY_NICKNAMES = [
   '张三', '悟空', '熊二', '阿福', '小林', '老王', '小美', '大壮', '花生', '阿哲',
-  '小鱼', '阿强', '豆豆', '晓晓', '老周',
+  '小鱼', '阿强', '豆豆', '晓晓', '老周', '奶茶', '橙子', '星星', '阿狸', '木木',
+  '小鹿', '布丁', '番茄', '可乐', '阿茶', '雾雾', '月半', '青柠', '土豆', '芝麻',
 ] as const;
 
 export const B1_OPTIONS = ['几乎不看', '自己翻 PDF', '看研报或新闻摘要', '用过其它工具'] as const;
 export const B2_OPTIONS = ['费劲', '一般', '轻松'] as const;
 export const B3_OPTIONS = ['分不清', '大致懂', '很清楚'] as const;
 export const B4_OPTIONS = ['有帮助', '一般', '点了但没懂', '没注意到'] as const;
-export const B5_OPTIONS = ['不会', '不确定', '会'] as const;
+export const B5_OPTIONS = ['很差', '一般', '不错', '很好'] as const;
 
 export const D1_OPTIONS = ['三栏结论', '角标核对', '语音/追问', '检索找公司', '关键数字展示'] as const;
 export const D2_OPTIONS = ['找不到公司', '看不懂结论', '不信数字', '不知问啥', '页面不知道点哪', '其它'] as const;
 export const D4_OPTIONS = [
   '更多公司', '数据更准', '教会我怎么问', '手机更好用', '能分享给同事', '少些 AI 腔', '其它短填',
 ] as const;
+export const D6_OPTIONS = ['太密', '刚好', '太空', '看情景'] as const;
+export const D7_OPTIONS = ['不到1分钟', '1–3分钟', '更久', '没找到'] as const;
+export const D8_OPTIONS = ['对照原文', '行业对比', '历史趋势', '风险提示', '导出分享', '其它'] as const;
+export const D10_OPTIONS = ['季报速读', '同行对比', '追问数字', '给同事讲清楚', '其它'] as const;
 
 export type B1 = (typeof B1_OPTIONS)[number];
 export type B2 = (typeof B2_OPTIONS)[number];
@@ -27,6 +32,10 @@ export type B5 = (typeof B5_OPTIONS)[number];
 export type D1 = (typeof D1_OPTIONS)[number];
 export type D2 = (typeof D2_OPTIONS)[number];
 export type D4 = (typeof D4_OPTIONS)[number];
+export type D6 = (typeof D6_OPTIONS)[number];
+export type D7 = (typeof D7_OPTIONS)[number];
+export type D8 = (typeof D8_OPTIONS)[number];
+export type D10 = (typeof D10_OPTIONS)[number];
 
 export type SurveyBasic = {
   b1: B1;
@@ -34,6 +43,8 @@ export type SurveyBasic = {
   b3: B3;
   b4: B4;
   b5: B5;
+  /** Optional free note at end of basic block (shown even when deep is off). */
+  note?: string;
 };
 
 export type SurveyDeep = {
@@ -42,6 +53,11 @@ export type SurveyDeep = {
   d3?: number;
   d4?: { choices: D4[]; other?: string };
   d5?: string;
+  d6?: D6;
+  d7?: D7;
+  d8?: D8[];
+  d9?: number;
+  d10?: { choice: D10; note?: string };
 };
 
 export type SurveySubmission = {
@@ -58,6 +74,10 @@ const B5_SET = new Set<string>(B5_OPTIONS);
 const D1_SET = new Set<string>(D1_OPTIONS);
 const D2_SET = new Set<string>(D2_OPTIONS);
 const D4_SET = new Set<string>(D4_OPTIONS);
+const D6_SET = new Set<string>(D6_OPTIONS);
+const D7_SET = new Set<string>(D7_OPTIONS);
+const D8_SET = new Set<string>(D8_OPTIONS);
+const D10_SET = new Set<string>(D10_OPTIONS);
 
 export function isValidSurveyToken(token: string) {
   return SURVEY_TOKEN_RE.test(token);
@@ -102,6 +122,8 @@ export function parseSurveySubmission(body: Record<string, unknown>): SurveySubm
     b4: pickOne(b.b4, 'B4', B4_SET),
     b5: pickOne(b.b5, 'B5', B5_SET),
   };
+  const basicNote = optionalText(b.note, 200);
+  if (basicNote) basic.note = basicNote;
 
   const deepEnabled = Boolean(body.deepEnabled);
   if (!deepEnabled) {
@@ -163,6 +185,40 @@ export function parseSurveySubmission(body: Record<string, unknown>): SurveySubm
 
   const d5 = optionalText(d.d5, 500);
   if (d5) deep.d5 = d5;
+
+  if (d.d6 != null) {
+    deep.d6 = pickOne<D6>(d.d6, 'D6', D6_SET);
+  }
+
+  if (d.d7 != null) {
+    deep.d7 = pickOne<D7>(d.d7, 'D7', D7_SET);
+  }
+
+  if (d.d8 != null) {
+    if (!Array.isArray(d.d8)) throw new ApiError(400, 'D8 格式无效');
+    if (d.d8.length > 3) throw new ApiError(400, 'D8 最多选 3 项');
+    const choices: D8[] = [];
+    for (const item of d.d8) {
+      if (typeof item !== 'string' || !D8_SET.has(item)) throw new ApiError(400, 'D8 选项无效');
+      if (choices.includes(item as D8)) throw new ApiError(400, 'D8 不可重复');
+      choices.push(item as D8);
+    }
+    if (choices.length) deep.d8 = choices;
+  }
+
+  if (d.d9 != null) {
+    const n = typeof d.d9 === 'number' ? d.d9 : Number(d.d9);
+    if (!Number.isInteger(n) || n < 1 || n > 5) throw new ApiError(400, 'D9 须为 1–5');
+    deep.d9 = n;
+  }
+
+  if (d.d10 != null) {
+    if (typeof d.d10 !== 'object' || Array.isArray(d.d10)) throw new ApiError(400, 'D10 格式无效');
+    const d10 = d.d10 as Record<string, unknown>;
+    const choice = pickOne<D10>(d10.choice, 'D10', D10_SET);
+    const note = optionalText(d10.note, 200);
+    deep.d10 = note ? { choice, note } : { choice };
+  }
 
   return { nickname, basic, deep };
 }

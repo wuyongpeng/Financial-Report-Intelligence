@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { Icon } from '@/app/ui-icons';
 import {
   B1_OPTIONS,
   B2_OPTIONS,
@@ -11,6 +12,10 @@ import {
   D1_OPTIONS,
   D2_OPTIONS,
   D4_OPTIONS,
+  D6_OPTIONS,
+  D7_OPTIONS,
+  D8_OPTIONS,
+  D10_OPTIONS,
   isValidSurveyToken,
   randomSurveyNickname,
   type B1,
@@ -21,10 +26,14 @@ import {
   type D1,
   type D2,
   type D4,
+  type D6,
+  type D7,
+  type D8,
+  type D10,
 } from '@/lib/survey';
 
 const wrap: CSSProperties = {
-  maxWidth: 560, margin: '36px auto 64px', padding: '0 16px',
+  maxWidth: 920, margin: '28px auto 64px', padding: '0 24px',
   fontFamily: 'system-ui, -apple-system, sans-serif', color: '#203047',
 };
 const muted: CSSProperties = { fontSize: 13, color: '#6b7a8d', lineHeight: 1.55, margin: 0 };
@@ -58,7 +67,11 @@ const input: CSSProperties = {
   color: '#203047', background: '#fff', width: '100%', boxSizing: 'border-box',
 };
 const label: CSSProperties = { fontSize: 13, color: '#516379', margin: '0 0 8px', fontWeight: 600 };
-const qBlock: CSSProperties = { marginBottom: 18 };
+const qBlock: CSSProperties = { marginBottom: 14 };
+const deepGrid: CSSProperties = {
+  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 28px', alignItems: 'start',
+};
+const deepFull: CSSProperties = { gridColumn: '1 / -1' };
 
 function ChipGroup<T extends string>({
   options, value, onChange, disabled,
@@ -108,6 +121,7 @@ export function SurveyForm({ token }: { token: string }) {
   const [b3, setB3] = useState<B3 | ''>('');
   const [b4, setB4] = useState<B4 | ''>('');
   const [b5, setB5] = useState<B5 | ''>('');
+  const [basicNote, setBasicNote] = useState('');
 
   const [deepEnabled, setDeepEnabled] = useState(false);
   const [d1, setD1] = useState<D1[]>([]);
@@ -118,6 +132,13 @@ export function SurveyForm({ token }: { token: string }) {
   const [d4, setD4] = useState<D4[]>([]);
   const [d4Other, setD4Other] = useState('');
   const [d5, setD5] = useState('');
+  const [d6, setD6] = useState<D6 | ''>('');
+  const [d7, setD7] = useState<D7 | ''>('');
+  const [d8, setD8] = useState<D8[]>([]);
+  const [d9, setD9] = useState(3);
+  const [d9Touched, setD9Touched] = useState(false);
+  const [d10, setD10] = useState<D10 | ''>('');
+  const [d10Note, setD10Note] = useState('');
 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -174,6 +195,14 @@ export function SurveyForm({ token }: { token: string }) {
     });
   }
 
+  function toggleD8(opt: D8) {
+    setD8((prev) => {
+      if (prev.includes(opt)) return prev.filter((x) => x !== opt);
+      if (prev.length >= 3) return prev;
+      return [...prev, opt];
+    });
+  }
+
   async function submit() {
     if (!basicReady) {
       setError('请先完成基础 5 题');
@@ -193,6 +222,11 @@ export function SurveyForm({ token }: { token: string }) {
           },
         } : {}),
         ...(d5.trim() ? { d5: d5.trim() } : {}),
+        ...(d6 ? { d6 } : {}),
+        ...(d7 ? { d7 } : {}),
+        ...(d8.length ? { d8 } : {}),
+        ...(d9Touched ? { d9 } : {}),
+        ...(d10 ? { d10: { choice: d10, ...(d10Note.trim() ? { note: d10Note.trim() } : {}) } } : {}),
       } : undefined;
 
       const res = await fetch(`/api/survey/${encodeURIComponent(token)}`, {
@@ -200,7 +234,10 @@ export function SurveyForm({ token }: { token: string }) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           nickname: nickname.trim() || undefined,
-          basic: { b1, b2, b3, b4, b5 },
+          basic: {
+            b1, b2, b3, b4, b5,
+            ...(basicNote.trim() ? { note: basicNote.trim() } : {}),
+          },
           deepEnabled,
           ...(deepEnabled ? { deep } : {}),
         }),
@@ -244,53 +281,62 @@ export function SurveyForm({ token }: { token: string }) {
   return (
     <main style={wrap}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <Link href="/" target="_blank" rel="noreferrer" style={btnGhost}>打开 Eva 体验</Link>
+        <Link href="/" target="_blank" rel="noreferrer" style={btnGhost}>打开 Eva</Link>
       </div>
 
-      <h1 style={h1}>Eva 体验调研</h1>
-      <p style={muted}>
-        Eva · 极简、易懂、可核对。希望用几分钟确认：主路径好不好上手、结论敢不敢信。
-      </p>
-      <p style={{ ...muted, marginTop: 8 }}>
-        建议先点上方打开首页体验，再回到本页填写。约 2 分钟；深入反馈可关可开。
-      </p>
+      <h1 style={h1}>Eva 体验-文件调研</h1>
+      <p style={muted}>先体验再填。本次问卷大约耗时 1 分钟；深入反馈选填。</p>
 
-      <h2 style={h2}>你是谁（选填）</h2>
+      <h2 style={h2}>怎么称呼</h2>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input
           style={{ ...input, flex: 1 }}
           value={nickname}
           maxLength={32}
           disabled={sending}
-          placeholder="昵称，可不填"
+          placeholder="选填"
           onChange={(e) => setNickname(e.target.value)}
         />
         <button
           type="button"
-          style={btnGhost}
+          style={{ ...btnGhost, padding: '8px 10px', display: 'inline-flex', alignItems: 'center' }}
           disabled={sending}
+          aria-label="随机昵称"
+          title="随机昵称"
           onClick={() => setNickname(randomSurveyNickname())}
         >
-          随机一个
+          <Icon name="refresh" size={14} />
         </button>
       </div>
 
       <h2 style={h2}>基础问题</h2>
-      <Question title="打开页面前，你平时怎么接触财报？" required>
-        <ChipGroup options={B1_OPTIONS} value={b1} onChange={setB1} disabled={sending} />
-      </Question>
-      <Question title="从进站到打开一份公司，费劲吗？" required>
-        <ChipGroup options={B2_OPTIONS} value={b2} onChange={setB2} disabled={sending} />
-      </Question>
-      <Question title="「事实 / 结论 / 追问」三栏，分得清吗？" required>
-        <ChipGroup options={B3_OPTIONS} value={b3} onChange={setB3} disabled={sending} />
-      </Question>
-      <Question title="点过角标回原文核对吗？感觉如何？" required>
-        <ChipGroup options={B4_OPTIONS} value={b4} onChange={setB4} disabled={sending} />
-      </Question>
-      <Question title="若下次再看财报，还会打开 Eva 吗？" required>
-        <ChipGroup options={B5_OPTIONS} value={b5} onChange={setB5} disabled={sending} />
-      </Question>
+      <div style={deepGrid}>
+        <Question title="打开页面前，你平时怎么接触财报？" required>
+          <ChipGroup options={B1_OPTIONS} value={b1} onChange={setB1} disabled={sending} />
+        </Question>
+        <Question title="从进站到打开一份公司，费劲吗？" required>
+          <ChipGroup options={B2_OPTIONS} value={b2} onChange={setB2} disabled={sending} />
+        </Question>
+        <Question title="「事实 / 结论 / 追问」三栏，分得清吗？" required>
+          <ChipGroup options={B3_OPTIONS} value={b3} onChange={setB3} disabled={sending} />
+        </Question>
+        <Question title="点过角标回原文核对吗？感觉如何？" required>
+          <ChipGroup options={B4_OPTIONS} value={b4} onChange={setB4} disabled={sending} />
+        </Question>
+        <Question title="整体印象？" required>
+          <ChipGroup options={B5_OPTIONS} value={b5} onChange={setB5} disabled={sending} />
+        </Question>
+        <Question title="选题没提到的问题 / 想法">
+          <input
+            style={input}
+            value={basicNote}
+            disabled={sending}
+            maxLength={200}
+            placeholder="选填，一句话即可"
+            onChange={(e) => setBasicNote(e.target.value)}
+          />
+        </Question>
+      </div>
 
       <div style={{
         border: '1px solid #e5eaf1', borderRadius: 12, background: '#f8fafc',
@@ -298,10 +344,7 @@ export function SurveyForm({ token }: { token: string }) {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
       }}
       >
-        <div>
-          <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#203047' }}>愿意再花约 2 分钟做深入反馈</p>
-          <p style={{ ...muted, marginTop: 4 }}>默认关闭；打开后可不答完。</p>
-        </div>
+        <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#203047' }}>继续深入反馈</p>
         <button
           type="button"
           role="switch"
@@ -324,111 +367,171 @@ export function SurveyForm({ token }: { token: string }) {
 
       {deepEnabled ? (
         <section style={{ marginTop: 8 }}>
-          <h2 style={h2}>深入反馈</h2>
-          <Question title="对你最有价值的一块？（点击排出前三）">
-            <p style={{ ...muted, marginBottom: 8 }}>{d1Hint}</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {D1_OPTIONS.map((opt) => {
-                const rank = d1.indexOf(opt);
-                return (
-                  <button
-                    key={opt}
-                    type="button"
-                    disabled={sending || (rank < 0 && d1.length >= 3)}
-                    style={rank >= 0 ? cardOptOn : cardOpt}
-                    onClick={() => toggleD1(opt)}
-                  >
-                    {rank >= 0 ? `${rank + 1}. ${opt}` : opt}
-                  </button>
-                );
-              })}
+          <h2 style={h2}>深入反馈（全部选填，可只答部分）</h2>
+          <div style={deepGrid}>
+            <div style={deepFull}>
+              <Question title="对你最有价值的一块？（点选排出前三）">
+                <p style={{ ...muted, marginBottom: 8 }}>{d1Hint}</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {D1_OPTIONS.map((opt) => {
+                    const rank = d1.indexOf(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        disabled={sending || (rank < 0 && d1.length >= 3)}
+                        style={rank >= 0 ? chipOn : chip}
+                        onClick={() => toggleD1(opt)}
+                      >
+                        {rank >= 0 ? `${rank + 1}. ${opt}` : opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Question>
             </div>
-          </Question>
 
-          <Question title="最卡住的一步是？">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {D2_OPTIONS.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  disabled={sending}
-                  style={d2 === opt ? cardOptOn : cardOpt}
-                  onClick={() => setD2(opt)}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-            <input
-              style={{ ...input, marginTop: 8 }}
-              value={d2Note}
-              disabled={sending}
-              maxLength={200}
-              placeholder="可选：补一句具体卡点"
-              onChange={(e) => setD2Note(e.target.value)}
-            />
-          </Question>
-
-          <Question title="「敢不敢信」打几分？">
-            <div style={{ display: 'flex', justifyContent: 'space-between', ...muted, marginBottom: 6 }}>
-              <span>完全不信</span>
-              <span style={{ fontWeight: 650, color: '#1f4fad' }}>{d3}</span>
-              <span>可以当核对入口</span>
-            </div>
-            <input
-              type="range"
-              min={1}
-              max={5}
-              step={1}
-              value={d3}
-              disabled={sending}
-              style={{ width: '100%' }}
-              onChange={(e) => {
-                setD3(Number(e.target.value));
-                setD3Touched(true);
-              }}
-            />
-          </Question>
-
-          <Question title="怎样会更愿意再用？（最多 3 项）">
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {D4_OPTIONS.map((opt) => {
-                const on = d4.includes(opt);
-                return (
-                  <button
-                    key={opt}
-                    type="button"
-                    disabled={sending || (!on && d4.length >= 3)}
-                    style={on ? chipOn : chip}
-                    onClick={() => toggleD4(opt)}
-                  >
-                    {opt}
-                  </button>
-                );
-              })}
-            </div>
-            {(d4.includes('其它短填') || d4Other) ? (
+            <Question title="最卡住的一步？">
+              <ChipGroup options={D2_OPTIONS} value={d2} onChange={setD2} disabled={sending} />
               <input
                 style={{ ...input, marginTop: 8 }}
-                value={d4Other}
+                value={d2Note}
                 disabled={sending}
                 maxLength={200}
-                placeholder="其它：写一句"
-                onChange={(e) => setD4Other(e.target.value)}
+                placeholder="可选：补一句具体卡点"
+                onChange={(e) => setD2Note(e.target.value)}
               />
-            ) : null}
-          </Question>
+            </Question>
 
-          <Question title="用一句话形容这次体验，或留下最想改的一点">
-            <textarea
-              style={{ ...input, minHeight: 84, resize: 'vertical' }}
-              value={d5}
-              disabled={sending}
-              maxLength={500}
-              placeholder="选填"
-              onChange={(e) => setD5(e.target.value)}
-            />
-          </Question>
+            <Question title="「敢不敢信」打几分？">
+              <div style={{ display: 'flex', justifyContent: 'space-between', ...muted, marginBottom: 6 }}>
+                <span>完全不信</span>
+                <span style={{ fontWeight: 650, color: '#1f4fad' }}>{d3}</span>
+                <span>可当核对入口</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={5}
+                step={1}
+                value={d3}
+                disabled={sending}
+                style={{ width: '100%' }}
+                onChange={(e) => {
+                  setD3(Number(e.target.value));
+                  setD3Touched(true);
+                }}
+              />
+            </Question>
+
+            <div style={deepFull}>
+              <Question title="怎样会更愿意再用？（最多 3 项）">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {D4_OPTIONS.map((opt) => {
+                    const on = d4.includes(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        disabled={sending || (!on && d4.length >= 3)}
+                        style={on ? chipOn : chip}
+                        onClick={() => toggleD4(opt)}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+                {(d4.includes('其它短填') || d4Other) ? (
+                  <input
+                    style={{ ...input, marginTop: 8 }}
+                    value={d4Other}
+                    disabled={sending}
+                    maxLength={200}
+                    placeholder="其它：写一句"
+                    onChange={(e) => setD4Other(e.target.value)}
+                  />
+                ) : null}
+              </Question>
+            </div>
+
+            <div style={deepFull}>
+              <Question title="用一句话形容这次体验，或留下最想改的一点">
+                <textarea
+                  style={{ ...input, minHeight: 64, resize: 'vertical' }}
+                  value={d5}
+                  disabled={sending}
+                  maxLength={500}
+                  placeholder="选填"
+                  onChange={(e) => setD5(e.target.value)}
+                />
+              </Question>
+            </div>
+
+            <Question title="信息密度感觉？">
+              <ChipGroup options={D6_OPTIONS} value={d6} onChange={setD6} disabled={sending} />
+            </Question>
+
+            <Question title="首次找到结论大概要多久？">
+              <ChipGroup options={D7_OPTIONS} value={d7} onChange={setD7} disabled={sending} />
+            </Question>
+
+            <div style={deepFull}>
+              <Question title="最想优先加强？（最多 3 项）">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {D8_OPTIONS.map((opt) => {
+                    const on = d8.includes(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        disabled={sending || (!on && d8.length >= 3)}
+                        style={on ? chipOn : chip}
+                        onClick={() => toggleD8(opt)}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Question>
+            </div>
+
+            <Question title="会推荐同事试用吗？">
+              <div style={{ display: 'flex', justifyContent: 'space-between', ...muted, marginBottom: 6 }}>
+                <span>不会</span>
+                <span style={{ fontWeight: 650, color: '#1f4fad' }}>{d9}</span>
+                <span>会强烈推荐</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={5}
+                step={1}
+                value={d9}
+                disabled={sending}
+                style={{ width: '100%' }}
+                onChange={(e) => {
+                  setD9(Number(e.target.value));
+                  setD9Touched(true);
+                }}
+              />
+            </Question>
+
+            <Question title="下次最想先试的场景？">
+              <ChipGroup options={D10_OPTIONS} value={d10} onChange={setD10} disabled={sending} />
+              {(d10 === '其它' || d10Note) ? (
+                <input
+                  style={{ ...input, marginTop: 8 }}
+                  value={d10Note}
+                  disabled={sending}
+                  maxLength={200}
+                  placeholder="其它：写一句"
+                  onChange={(e) => setD10Note(e.target.value)}
+                />
+              ) : null}
+            </Question>
+          </div>
         </section>
       ) : null}
 
