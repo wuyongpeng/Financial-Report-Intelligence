@@ -392,6 +392,91 @@ test('keeps disclosed YoY when a later statement row repeats the same amount wit
   assert.equal(profit?.priorValue, 5_057_571_000);
 });
 
+
+test('stitches PDF line-broken amounts (Inspur-style wrap)', () => {
+  // 浪潮 000977: "40,476,58\\n5,676.17" and "683,401,8\\n93.00"
+  const page = [
+    '主要会计数据',
+    '营业收入',
+    '（元）',
+    '40,476,58',
+    '5,676.17',
+    '41,062,20',
+    '7,706.33 -1.55%',
+    '归属于上市公司股东的净利润',
+    '（元）',
+    '683,401,8',
+    '93.00',
+    '697,255,6',
+    '48.40 -1.34%',
+    '基本每股收益（元/股） 0.46',
+    '加权平均净资产收益率 3.25%',
+  ].join('\n');
+  const metrics = parseCoreMetricPages([page]);
+  assert.equal(metrics.find((item) => item.metric === 'revenue')?.value, 40_476_585_676.17);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 683_401_893);
+});
+
+test('stitches amount when next line starts with a thousands comma', () => {
+  const page = [
+    '主要会计数据 单位：元',
+    '营业收入',
+    '25,936,555,',
+    '155.04',
+    '28,644,269,964.50 -9.76%',
+    '归属于上市公司股东的净利润 1,781,199,495.31',
+    '基本每股收益 0.45',
+    '加权平均净资产收益率 4.10%',
+  ].join('\n');
+  const metrics = parseCoreMetricPages([page]);
+  assert.equal(metrics.find((item) => item.metric === 'revenue')?.value, 25_936_555_155.04);
+});
+
+test('BOC-style 单位：百万元人民币 is not overridden by （人民币元）', () => {
+  const metrics = parseCoreMetricPages([
+    [
+      '主要会计数据 单位：百万元人民币（另有说明者除外）',
+      '营业收入 169,462 4.48 526,365 7.16',
+      '归属于母公司所有者的净利润 63,888 6.36 187,482 5.53',
+      '基本和稀释每股收益（人民币元） 0.19 3.98 0.55 0.27',
+      '加权平均净资产收益率（%，年化） 8.90 上升 0.18 个百分点',
+    ].join(' '),
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'revenue')?.value, 169_462_000_000);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 63_888_000_000);
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 0.19);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 8.9);
+});
+
+test('CCB-style 基本和稀释每股收益 alias', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：人民币百万元 营业收入 202,410 12.81% 归属于本行股东的净利润 104,662 9.84% 基本和稀释每股收益（人民币元） 0.38 8.57% 年化加权平均净资产收益率(%) 11.18',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 0.38);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 104_662_000_000);
+});
+
+test('ZTE-style 归属于上市公司普通股股东的净利润', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：人民币千元 营业收入 62,487,098 归属于上市公司普通股股东的净利润 5,057,571 基本每股收益 1.06 加权平均净资产收益率 6.85%',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'net_profit')?.value, 5_057_571_000);
+});
+
+test('Vanke-style 净资产收益率（加权平均）', () => {
+  const metrics = parseCoreMetricPages([
+    '主要财务指标 基本每股收益 (1.0075) 净资产收益率（全面摊薄） -6.24% 净资产收益率（加权平均） -6.07% -4.00% 下降 2.16 个百分点',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, -6.07);
+});
+
+test('Shaanxi Coal-style 加权平均净资产收益（%） without 率', () => {
+  const metrics = parseCoreMetricPages([
+    '主要财务指标 加权平均净资产收益（%） 5.72 5.60 5.25 0.48 13.74 16.92 16.57 减少 2.82 个百分点',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 5.72);
+});
+
 test('large PDFs skip in-memory pdf.js and use external text extract', async () => {
   assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES), false);
   assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES + 1), true);

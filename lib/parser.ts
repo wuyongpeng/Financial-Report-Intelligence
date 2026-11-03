@@ -46,9 +46,22 @@ type Candidate = ParsedMetric & { score: number };
 
 const LABELS: MetricDefinition[] = [
   { metric: 'revenue', labels: ['营业总收入', '营业收入'], unit: '元', minAbs: 1000, maxAbs: 1e15 },
-  { metric: 'net_profit', labels: ['归属于上市公司股东的净利润', '归属于母公司股东的净利润', '归属于本行股东的净利润', '归属于本公司股东的净利润'], unit: '元', minAbs: 1, maxAbs: 1e15 },
-  { metric: 'eps', labels: ['基本每股收益'], unit: '元/股', minAbs: 0, maxAbs: 1000 },
-  { metric: 'roe', labels: ['归属于本行普通股股东的加权平均净资产收益率', '归属于本公司普通股股东的加权平均净资产收益率', '加权平均净资产收益率'], unit: '%', minAbs: 0, maxAbs: 1000 },
+  { metric: 'net_profit', labels: [
+    '归属于上市公司普通股股东的净利润',
+    '归属于上市公司股东的净利润',
+    '归属于母公司所有者的净利润',
+    '归属于母公司股东的净利润',
+    '归属于本行股东的净利润',
+    '归属于本公司股东的净利润',
+  ], unit: '元', minAbs: 1, maxAbs: 1e15 },
+  { metric: 'eps', labels: ['基本每股收益', '基本和稀释每股收益'], unit: '元/股', minAbs: 0, maxAbs: 1000 },
+  { metric: 'roe', labels: [
+    '归属于本行普通股股东的加权平均净资产收益率',
+    '归属于本公司普通股股东的加权平均净资产收益率',
+    '加权平均净资产收益率',
+    '加权平均净资产收益',
+    '净资产收益率（加权平均）',
+  ], unit: '%', minAbs: 0, maxAbs: 1000 },
   { metric: 'total_assets', labels: ['资产总计', '资产总额', '总资产'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
   { metric: 'total_liabilities', labels: ['负债合计', '负债总额'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
   // Operating cash flow is legitimately negative, so no lower bound on magnitude.
@@ -56,11 +69,14 @@ const LABELS: MetricDefinition[] = [
   { metric: 'operating_cost', labels: ['营业成本'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
   { metric: 'non_recurring_pnl', labels: ['非经常性损益合计', '非经常性损益净额', '非经常性损益'], unit: '元', minAbs: 0, maxAbs: 1e15 },
   { metric: 'profit_ex_non_recurring', labels: [
+    '扣除非经常性损益后归属于母公司所有者的净利润',
     '扣除非经常性损益后归属于母公司股东的净利润',
+    '扣除非经常性损益后归属于上市公司普通股股东的净利润',
     '扣除非经常性损益后归属于上市公司股东的净利润',
     '扣除非经常性损益后归属于本公司股东的净利润',
     '扣除非经常性损益后归属于本行股东的净利润',
     '扣除非经常性损益后的净利润',
+    '归属于上市公司普通股股东的扣除非经常性损益的净利润',
     '归属于上市公司股东的扣除非经常性损益的净利润',
     '归属于母公司股东的扣除非经常性损益的净利润',
     '归属于本行股东的扣除非经常性损益的净利润',
@@ -80,10 +96,11 @@ const LABELS: MetricDefinition[] = [
 ];
 
 function pageCurrencyUnit(text: string) {
-  // 千元 must precede 元 in every alternation — A-share summaries often use 人民币千元.
-  return text.match(/(?:单位\s*[：:]\s*)?人民币\s*(亿元|百万元|万元|千元|元)/)?.[1]
-    ?? text.match(/单位\s*[：:]\s*(亿元|百万元|万元|千元|元)/)?.[1]
-    ?? text.match(/[（(]\s*人民币\s*(亿元|百万元|万元|千元|元)/)?.[1]
+  // Prefer explicit 单位：… (incl. 单位：百万元人民币). Do NOT let EPS cell notes
+  // like （人民币元） override a table-level 百万元/千元.
+  return text.match(/单位\s*[：:]\s*(?:人民币\s*)?(亿元|百万元|万元|千元|元)/)?.[1]
+    ?? text.match(/[（(]\s*人民币\s*(亿元|百万元|万元|千元)\s*(?:列示|除外)?/)?.[1]
+    ?? text.match(/人民币\s*(亿元|百万元|万元|千元)(?!\s*元)/)?.[1]
     ?? '';
 }
 
@@ -133,8 +150,23 @@ function scaleCurrency(value: number, unit: string) {
   return Math.round(scaled * 100) / 100;
 }
 
+/**
+ * PDF text layers often wrap mid-amount: "40,476,58\n5,676.17" → 40,476,585,676.17.
+ * Only join when a thousands-comma context makes a wrap unambiguous.
+ */
+function stitchBrokenAmounts(text: string) {
+  return text
+    .replace(/(\d),?\r?\n\s*,(\d)/g, '$1,$2')
+    .replace(/(\d),\r?\n\s*(\d)/g, '$1,$2')
+    .replace(/(,\d{1,2})\r?\n\s*(\d)/g, '$1$2')
+    .replace(/(^|[\s（(])-\r?\n\s*(?=\d)/gm, '$1-');
+}
+
 function normalizePageText(text: string) {
-  return text.replace(/\s+/g, ' ').replace(/([\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])/g, '$1').trim();
+  return stitchBrokenAmounts(text)
+    .replace(/\s+/g, ' ')
+    .replace(/([\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])/g, '$1')
+    .trim();
 }
 
 function parseSignedNumber(raw: string, openParen?: string, closeParen?: string) {
@@ -401,6 +433,8 @@ function isCleanLabelHit(page: string, position: number, label: string, metric: 
     const before = page.slice(Math.max(0, position - 28), position);
     if (/扣除非经常性损益后的?$/.test(before)) return false;
     if (/扣非后$/.test(before)) return false;
+    // Short alias「加权平均净资产收益」must not steal the hit inside「…收益率」.
+    if (label === '加权平均净资产收益' && page[position + label.length] === '率') return false;
     return true;
   }
   return true;

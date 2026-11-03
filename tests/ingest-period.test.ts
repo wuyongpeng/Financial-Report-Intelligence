@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { asIsoDate, buildCoveredPeriodKeys, canonicalPeriodFromTitle, classifyReportTitle, isFullFinancialReport, pendingDownloadSkipReason, periodFromTitle, yearFromTitleOrDate } from '../lib/ingest-period';
+import { asIsoDate, buildCoveredPeriodKeys, canonicalPeriodFromTitle, classifyReportTitle, isFullFinancialReport, pendingDownloadSkipReason, periodFromTitle, titleMatchesCompanyIssuer, yearFromTitleOrDate } from '../lib/ingest-period';
 
 test('asIsoDate accepts Date and string', () => {
   assert.equal(asIsoDate('2026-06-30T00:00:00.000Z').slice(0, 10), '2026-06-30');
@@ -97,4 +97,27 @@ test('convertible-bond and offering titles are not full financial reports', () =
   assert.equal(classifyReportTitle('立讯精密工业股份有限公司2026年第三季度报告'), 'quarterly');
   assert.equal(canonicalPeriodFromTitle('立讯精密工业股份有限公司2026年第三季度报告', '2026-10-30'), '2026Q3');
   assert.equal(isFullFinancialReport('立讯精密2025年年度报告'), true);
+});
+
+test('titleMatchesCompanyIssuer rejects subsidiary report hung on parent code', () => {
+  assert.equal(
+    titleMatchesCompanyIssuer('中国平安', '中国平安：平安银行股份有限公司2026年第三季度报告'),
+    false,
+  );
+  assert.equal(
+    titleMatchesCompanyIssuer('平安银行', '平安银行：平安银行股份有限公司2026年第三季度报告'),
+    true,
+  );
+  assert.equal(
+    titleMatchesCompanyIssuer('中国平安', '中国平安：中国平安保险股份有限公司2026年第三季度报告'),
+    true,
+  );
+  assert.equal(
+    titleMatchesCompanyIssuer('美的集团', '美的集团2026年第三季度报告'),
+    true,
+  );
+  assert.equal(
+    titleMatchesCompanyIssuer('招商银行', '招商银行：招商银行股份有限公司2026年第三季度报告'),
+    true,
+  );
 });

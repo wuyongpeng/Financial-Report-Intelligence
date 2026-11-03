@@ -37,6 +37,25 @@ export function classifyReportTitle(title: string): FilingReportType {
   return 'other';
 }
 
+/**
+ * When the title is「本公司名：另一家股份有限公司…报告」, the PDF is that issuer\'s filing
+ * (e.g. 中国平安：平安银行股份有限公司2026年第三季度报告). Used as a minimal ingest guard.
+ */
+export function titleMatchesCompanyIssuer(companyName: string, title: string) {
+  const t = compactTitle(title);
+  const m = t.match(/：([^：]+?股份有限公司)/);
+  if (!m) return true;
+  const issuer = m[1];
+  const name = compactTitle(companyName);
+  if (!name) return true;
+  const issuerCore = issuer.replace(/股份有限公司$/, '');
+  const nameCore = name.replace(/股份有限公司|集团有限公司|有限公司|集团|控股$/, '');
+  if (!nameCore) return true;
+  if (issuer.includes(nameCore) || name.includes(issuerCore)) return true;
+  if (issuerCore.includes(nameCore) || nameCore.includes(issuerCore)) return true;
+  return false;
+}
+
 /** True for the actual 年报/中报/季报 PDF, not 说明会 / 经营数据 / 摘要 / 业绩预告. */
 export function isFullFinancialReport(title: string) {
   const t = compactTitle(title);

@@ -1,5 +1,5 @@
 import type { Announcement } from './types';
-import { classifyReportTitle, isFullFinancialReport } from './ingest-period';
+import { classifyReportTitle, isFullFinancialReport, titleMatchesCompanyIssuer } from './ingest-period';
 import { ssePdfUrlFromPath } from './pdf-download';
 
 export type SourcePage = { items: Announcement[]; rawCount: number };
@@ -101,7 +101,7 @@ export async function fetchCninfo(days = 2, page = 1, pageSize = 200): Promise<S
       pdfUrl: `https://static.cninfo.com.cn/${String(item.adjunctUrl ?? '').replace(/^\//, '')}`,
       reportType: classify(title),
     };
-  }).filter((item) => item.sourceId && item.code && isFullFinancialReport(item.title));
+  }).filter((item) => item.sourceId && item.code && isFullFinancialReport(item.title) && titleMatchesCompanyIssuer(item.name, item.title));
   return { items, rawCount: raw.length };
 }
 
@@ -131,7 +131,7 @@ export async function fetchSse(days = 2, page = 1, pageSize = 200, stockCode?: s
       publishedAt: new Date(`${String(item.SSEDATE ?? dateOnly())}T00:00:00+08:00`).toISOString(),
       pdfUrl: ssePdfUrlFromPath(path), reportType: classify(title),
     };
-  }).filter((item) => item.code && item.pdfUrl && isFullFinancialReport(item.title));
+  }).filter((item) => item.code && item.pdfUrl && isFullFinancialReport(item.title) && titleMatchesCompanyIssuer(item.name, item.title));
   return { items, rawCount: raw.length };
 }
 
@@ -197,7 +197,7 @@ export async function fetchSzse(days = 2, page = 1, pageSize = 200, stockCode?: 
       publishedAt: new Date(`${String(item.publishTime ?? '').replace(' ', 'T')}+08:00`).toISOString(),
       pdfUrl: path.startsWith('http') ? path : `https://disc.static.szse.cn/download${path}`, reportType: classify(title),
     };
-  }).filter((item) => item.sourceId && item.code && item.pdfUrl && isFullFinancialReport(item.title));
+  }).filter((item) => item.sourceId && item.code && item.pdfUrl && isFullFinancialReport(item.title) && titleMatchesCompanyIssuer(item.name, item.title));
   return { items, rawCount: raw.length || Number(payload.announceCount ?? 0) || items.length };
 }
 
@@ -232,7 +232,7 @@ export async function fetchBse(days = 2, page = 1, pageSize = 50): Promise<Sourc
         pdfUrl: path.startsWith('http') ? path : `https://www.bse.cn${path}`,
         reportType: classify(title),
       };
-    }).filter((item) => item.code && item.pdfUrl && isFullFinancialReport(item.title));
+    }).filter((item) => item.code && item.pdfUrl && isFullFinancialReport(item.title) && titleMatchesCompanyIssuer(item.name, item.title));
     return { items, rawCount: raw.length };
   } catch {
     return { items: [], rawCount: 0 };
@@ -356,7 +356,7 @@ function cninfoAnnouncementFromRaw(raw: Record<string, unknown>, fallback: { cod
     pdfUrl: `https://static.cninfo.com.cn/${String(raw.adjunctUrl ?? '').replace(/^\//, '')}`,
     reportType: classify(title),
   };
-  if (!item.sourceId || !item.code || !item.pdfUrl.includes('cninfo') || !isFullFinancialReport(item.title)) return null;
+  if (!item.sourceId || !item.code || !item.pdfUrl.includes('cninfo') || !isFullFinancialReport(item.title) || !titleMatchesCompanyIssuer(item.name, item.title)) return null;
   return item;
 }
 
