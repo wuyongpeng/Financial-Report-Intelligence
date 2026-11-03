@@ -3,6 +3,7 @@ import test from 'node:test';
 import { ApiError } from '../lib/api';
 import {
   formatSurveyBasicLine,
+  formatSurveyDeepLine,
   isValidSurveyToken,
   parseSurveySubmission,
   randomSurveyNickname,
@@ -145,9 +146,14 @@ test('formatSurveyBasicLine handles new and legacy shapes', () => {
     b6: { choice: '用过', product: 'X' },
     note: '补充',
   });
-  assert.match(neu, /几乎不看\/自己翻 PDF/);
-  assert.match(neu, /用过:X/);
-  assert.match(neu, /备注:补充/);
+  assert.match(neu, /接触：几乎不看、自己翻 PDF/);
+  assert.match(neu, /体验感：很顺/);
+  assert.match(neu, /三栏：大致懂/);
+  assert.match(neu, /角标：点过,有帮助/);
+  assert.match(neu, /印象：有一些/);
+  assert.match(neu, /类似：用过·X/);
+  assert.match(neu, /想法：补充/);
+  assert.ok(neu.indexOf('角标：') < neu.indexOf('印象：'));
 
   const legacy = formatSurveyBasicLine({
     b1: '几乎不看',
@@ -156,8 +162,35 @@ test('formatSurveyBasicLine handles new and legacy shapes', () => {
     b4: '有帮助',
     b5: '很好',
   });
-  assert.match(legacy, /几乎不看/);
-  assert.match(legacy, /轻松/);
+  assert.match(legacy, /接触：几乎不看/);
+  assert.match(legacy, /体验感：轻松/);
+  assert.match(legacy, /印象：有帮助/);
+});
+
+test('formatSurveyDeepLine prefixes short answers', () => {
+  const line = formatSurveyDeepLine({
+    d1: ['三栏结论', '角标核对'],
+    d2: { choice: '其它', note: '卡在搜索' },
+    d3: 4,
+    d4: { choices: ['更多公司'], other: '要导出' },
+    d5: '挺清楚',
+    d6: '刚好',
+    d7: '1–3分钟',
+    d8: ['对照原文'],
+    d9: 5,
+    d10: { choice: '其它', note: '内部培训' },
+  });
+  assert.match(line, /价值：三栏结论>角标核对/);
+  assert.match(line, /卡住：其它（卡在搜索）/);
+  assert.match(line, /信任：4/);
+  assert.match(line, /再来：更多公司·其它:要导出/);
+  assert.match(line, /一句话：挺清楚/);
+  assert.match(line, /密度：刚好/);
+  assert.match(line, /耗时：1–3分钟/);
+  assert.match(line, /加强：对照原文/);
+  assert.match(line, /推荐：5/);
+  assert.match(line, /场景：其它（内部培训）/);
+  assert.equal(formatSurveyDeepLine(null), '');
 });
 
 test('POST /api/survey/[token] rejects bad token before DB', async () => {

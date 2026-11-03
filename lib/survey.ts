@@ -277,27 +277,67 @@ export function countMap(values: Array<string | null | undefined>) {
   return map;
 }
 
-/** Admin / UI helper: flatten basic answers for display (compat old string b1). */
+/** Admin / UI helper: structured basic summary (compat old string b1). */
 export function formatSurveyBasicLine(basic: Record<string, unknown> | null | undefined): string {
   if (!basic || typeof basic !== 'object') return '';
   const bits: string[] = [];
+
   const b1 = basic.b1;
-  if (Array.isArray(b1) && b1.length) bits.push(b1.filter((x) => typeof x === 'string').join('/'));
-  else if (typeof b1 === 'string' && b1) bits.push(b1);
-  for (const key of ['b2', 'b3', 'b4', 'b5'] as const) {
-    const v = basic[key];
-    if (typeof v === 'string' && v) bits.push(v);
+  let contact = '';
+  if (Array.isArray(b1) && b1.length) {
+    contact = b1.filter((x): x is string => typeof x === 'string' && !!x).join('、');
+  } else if (typeof b1 === 'string' && b1) {
+    contact = b1;
   }
+  if (contact) bits.push(`接触：${contact}`);
+
+  if (typeof basic.b2 === 'string' && basic.b2) bits.push(`体验感：${basic.b2}`);
+  if (typeof basic.b3 === 'string' && basic.b3) bits.push(`三栏：${basic.b3}`);
+  if (typeof basic.b5 === 'string' && basic.b5) bits.push(`角标：${basic.b5}`);
+  if (typeof basic.b4 === 'string' && basic.b4) bits.push(`印象：${basic.b4}`);
+
   const b6 = basic.b6;
   if (b6 && typeof b6 === 'object' && !Array.isArray(b6)) {
     const choice = (b6 as Record<string, unknown>).choice;
     const product = (b6 as Record<string, unknown>).product;
     if (choice === '用过') {
-      bits.push(typeof product === 'string' && product.trim() ? `用过:${product.trim()}` : '用过');
+      const name = typeof product === 'string' && product.trim() ? product.trim() : '';
+      bits.push(name ? `类似：用过·${name}` : '类似：用过');
     } else if (typeof choice === 'string' && choice) {
-      bits.push(choice);
+      bits.push(`类似：${choice}`);
     }
   }
-  if (typeof basic.note === 'string' && basic.note.trim()) bits.push(`备注:${basic.note.trim()}`);
-  return bits.join(' · ');
+
+  if (typeof basic.note === 'string' && basic.note.trim()) {
+    bits.push(`想法：${basic.note.trim()}`);
+  }
+  return bits.join('; ');
+}
+
+/** Admin / UI helper: structured deep summary with readable prefixes. */
+export function formatSurveyDeepLine(deep: SurveyDeep | Record<string, unknown> | null | undefined): string {
+  if (!deep || typeof deep !== 'object') return '';
+  const d = deep as SurveyDeep;
+  const bits: string[] = [];
+  if (d.d1?.length) bits.push(`价值：${d.d1.join('>')}`);
+  if (d.d2?.choice) {
+    bits.push(`卡住：${d.d2.choice}${d.d2.note ? `（${d.d2.note}）` : ''}`);
+  }
+  if (typeof d.d3 === 'number') bits.push(`信任：${d.d3}`);
+  if (d.d4 && (d.d4.choices?.length || d.d4.other)) {
+    const body = [
+      ...(d.d4.choices?.length ? [d.d4.choices.join('/')] : []),
+      ...(d.d4.other ? [`其它:${d.d4.other}`] : []),
+    ].join('·');
+    bits.push(`再来：${body}`);
+  }
+  if (d.d5) bits.push(`一句话：${d.d5}`);
+  if (d.d6) bits.push(`密度：${d.d6}`);
+  if (d.d7) bits.push(`耗时：${d.d7}`);
+  if (d.d8?.length) bits.push(`加强：${d.d8.join('/')}`);
+  if (typeof d.d9 === 'number') bits.push(`推荐：${d.d9}`);
+  if (d.d10?.choice) {
+    bits.push(`场景：${d.d10.choice}${d.d10.note ? `（${d.d10.note}）` : ''}`);
+  }
+  return bits.join('; ');
 }

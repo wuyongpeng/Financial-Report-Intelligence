@@ -8,7 +8,7 @@ import {
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
-import { formatSurveyBasicLine, type SurveyBasic, type SurveyDeep } from '@/lib/survey';
+import { formatSurveyBasicLine, formatSurveyDeepLine, type SurveyBasic, type SurveyDeep } from '@/lib/survey';
 
 type Invite = {
   id: number;
@@ -96,22 +96,6 @@ async function copyTextReliable(text: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function shortDeep(deep: SurveyDeep | null) {
-  if (!deep) return '—';
-  const bits: string[] = [];
-  if (deep.d1?.length) bits.push(`价值:${deep.d1.join('>')}`);
-  if (deep.d2?.choice) bits.push(`卡住:${deep.d2.choice}${deep.d2.note ? `(${deep.d2.note})` : ''}`);
-  if (typeof deep.d3 === 'number') bits.push(`信任:${deep.d3}`);
-  if (deep.d4?.choices?.length) bits.push(`再来:${deep.d4.choices.join('/')}`);
-  if (deep.d5) bits.push(deep.d5);
-  if (deep.d6) bits.push(`密度:${deep.d6}`);
-  if (deep.d7) bits.push(`耗时:${deep.d7}`);
-  if (deep.d8?.length) bits.push(`加强:${deep.d8.join('/')}`);
-  if (typeof deep.d9 === 'number') bits.push(`推荐:${deep.d9}`);
-  if (deep.d10?.choice) bits.push(`场景:${deep.d10.choice}${deep.d10.note ? `(${deep.d10.note})` : ''}`);
-  return bits.length ? bits.join(' · ') : '—';
 }
 
 const tabBtn = (active: boolean): CSSProperties => ({
@@ -350,7 +334,7 @@ export function SurveyAdminClient() {
               style={{ ...s.input, minWidth: 200, flex: '1 1 220px', maxWidth: 360 }}
               value={createNote}
               maxLength={120}
-              placeholder="备注（发给谁，可选）"
+              placeholder="备注（可选）"
               onChange={(e) => setCreateNote(e.target.value)}
             />
             <button type="button" style={s.btn} disabled={busy || loading} onClick={() => void createInvite()}>
@@ -384,9 +368,19 @@ export function SurveyAdminClient() {
                         {item.token}
                       </td>
                       <td style={{ ...s.td, maxWidth: 360 }} title={full}>
-                        <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-all' }}>
+                        <a
+                          href={full}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                            wordBreak: 'break-all',
+                            color: '#1f4fad',
+                            textDecoration: 'underline',
+                          }}
+                        >
                           {full}
-                        </span>
+                        </a>
                       </td>
                       <td style={{ ...s.td, minWidth: 200 }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -394,7 +388,7 @@ export function SurveyAdminClient() {
                             style={noteInput}
                             value={draft}
                             maxLength={120}
-                            placeholder="发给谁"
+                            placeholder="备注"
                             disabled={busy || savingNote === item.token}
                             onChange={(e) => setNoteDrafts((cur) => ({ ...cur, [item.token]: e.target.value }))}
                           />
@@ -499,7 +493,7 @@ export function SurveyAdminClient() {
                         </td>
                         <td style={{ ...s.td, maxWidth: 420 }} title={basicLine}>{basicLine || '—'}</td>
                         <td style={{ ...s.td, maxWidth: 420, whiteSpace: 'pre-wrap' } as CSSProperties}>
-                          {shortDeep(item.deep)}
+                          {formatSurveyDeepLine(item.deep) || '—'}
                         </td>
                       </tr>
                     );
