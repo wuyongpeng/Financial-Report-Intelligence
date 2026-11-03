@@ -24,6 +24,7 @@ type ResponseRow = {
   id: number;
   invite_id: number;
   token: string;
+  invite_note: string | null;
   nickname: string | null;
   basic: Record<string, unknown>;
   deep: Record<string, unknown> | null;
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
       LIMIT 200
     `;
     const responses = await db<ResponseRow[]>`
-      SELECT r.id, r.invite_id, i.token, r.nickname, r.basic, r.deep, r.created_at
+      SELECT r.id, r.invite_id, i.token, i.note AS invite_note, r.nickname, r.basic, r.deep, r.created_at
       FROM survey_responses r
       JOIN survey_invites i ON i.id = r.invite_id
       ORDER BY r.created_at DESC
@@ -92,6 +93,7 @@ export async function GET(request: Request) {
         id: row.id,
         inviteId: row.invite_id,
         token: row.token,
+        inviteNote: row.invite_note,
         nickname: row.nickname,
         basic: row.basic,
         deep: row.deep,
@@ -166,17 +168,50 @@ export async function PATCH(request: Request) {
     const body = await readObject(request);
     const token = typeof body.token === 'string' ? body.token.trim() : '';
     if (!isValidSurveyToken(token)) throw new ApiError(400, 'token 无效');
-    if (typeof body.active !== 'boolean') throw new ApiError(400, 'active 须为布尔值');
+
+    const hasActive = typeof body.active === 'boolean';
+    const hasNote = Object.prototype.hasOwnProperty.call(body, 'note');
+    if (!hasActive && !hasNote) throw new ApiError(400, '缺少更新字段');
+
+    let note: string | null | undefined;
+    if (hasNote) {
+      if (body.note === null) {
+        note = null;
+      } else if (typeof body.note === 'string') {
+        const trimmed = body.note.trim();
+        if (trimmed.length > 120) throw new ApiError(400, '备注最多 120 字');
+        note = trimmed || null;
+      } else {
+        throw new ApiError(400, 'note 须为字符串');
+      }
+    }
 
     const db = getDb();
-    const rows = await db<Array<{
+    let rows: Array<{
       id: number; token: string; note: string | null; active: boolean; created_at: string;
-    }>>`
-      UPDATE survey_invites
-      SET active = ${body.active}
-      WHERE token = ${token}
-      RETURNING id, token, note, active, created_at
-    `;
+    }>;
+    if (hasActive && hasNote) {
+      rows = await db`
+        UPDATE survey_invites
+        SET active = ${body.active as boolean}, note = ${note as string | null}
+        WHERE token = ${token}
+        RETURNING id, token, note, active, created_at
+      `;
+    } else if (hasActive) {
+      rows = await db`
+        UPDATE survey_invites
+        SET active = ${body.active as boolean}
+        WHERE token = ${token}
+        RETURNING id, token, note, active, created_at
+      `;
+    } else {
+      rows = await db`
+        UPDATE survey_invites
+        SET note = ${note as string | null}
+        WHERE token = ${token}
+        RETURNING id, token, note, active, created_at
+      `;
+    }
     if (!rows.length) throw new ApiError(404, '邀请不存在');
     const row = rows[0]!;
     return Response.json({

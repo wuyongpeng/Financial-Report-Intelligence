@@ -24,6 +24,7 @@ type ResponseItem = {
   id: number;
   inviteId: number;
   token: string;
+  inviteNote: string | null;
   nickname: string | null;
   basic: SurveyBasic;
   deep: SurveyDeep | null;
@@ -40,6 +41,8 @@ type Summary = {
   b5: Record<string, number>;
   d4Top: Array<{ label: string; count: number }>;
 };
+
+type TabKey = 'invites' | 'results';
 
 function fmtTime(iso: string) {
   const d = new Date(iso);
@@ -110,8 +113,29 @@ function shortDeep(deep: SurveyDeep | null) {
   return bits.length ? bits.join(' · ') : '—';
 }
 
+const tabBtn = (active: boolean): CSSProperties => ({
+  fontSize: 13,
+  color: active ? '#1f4fad' : '#5b6d86',
+  background: active ? '#edf3ff' : '#fff',
+  border: active ? '1px solid #aec4ef' : '1px solid #d5dde8',
+  borderRadius: 999,
+  padding: '6px 14px',
+  fontWeight: active ? 600 : 500,
+  cursor: 'pointer',
+});
+
+const noteInput: CSSProperties = {
+  ...s.input,
+  fontSize: 12,
+  padding: '5px 8px',
+  minWidth: 120,
+  maxWidth: 220,
+  width: '100%',
+};
+
 export function SurveyAdminClient() {
   const session = useAdminSession();
+  const [tab, setTab] = useState<TabKey>('invites');
   const [invites, setInvites] = useState<Invite[]>([]);
   const [responses, setResponses] = useState<ResponseItem[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -119,6 +143,9 @@ export function SurveyAdminClient() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [createNote, setCreateNote] = useState('');
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [savingNote, setSavingNote] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -142,6 +169,15 @@ export function SurveyAdminClient() {
       setInvites(body.invites);
       setResponses(body.responses);
       setSummary(body.summary);
+      setNoteDrafts((prev) => {
+        const next: Record<string, string> = {};
+        for (const item of body.invites) {
+          next[item.token] = Object.prototype.hasOwnProperty.call(prev, item.token)
+            ? prev[item.token]!
+            : (item.note ?? '');
+        }
+        return next;
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -157,11 +193,12 @@ export function SurveyAdminClient() {
     setBusy(true);
     setError('');
     try {
+      const note = createNote.trim();
       const res = await fetch('/api/admin/survey', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(note ? { note } : {}),
       });
       if (res.status === 401) {
         session.setAdmin(false);
@@ -172,13 +209,14 @@ export function SurveyAdminClient() {
         const body = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(body.error || '生成失败');
       }
+      setCreateNote('');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败');
     } finally {
       setBusy(false);
     }
-  }, [load, session]);
+  }, [createNote, load, session]);
 
   const setActive = useCallback(async (token: string, active: boolean) => {
     setBusy(true);
@@ -206,6 +244,39 @@ export function SurveyAdminClient() {
       setBusy(false);
     }
   }, [load, session]);
+
+  const saveNote = useCallback(async (token: string) => {
+    const note = (noteDrafts[token] ?? '').trim();
+    setSavingNote(token);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/survey', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token, note }),
+      });
+      if (res.status === 401) {
+        session.setAdmin(false);
+        setError('管理员登录已失效，请重新登录');
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error || '保存备注失败');
+      }
+      const body = await res.json() as { invite?: Invite };
+      const saved = body.invite?.note ?? null;
+      setInvites((cur) => cur.map((item) => (
+        item.token === token ? { ...item, note: saved } : item
+      )));
+      setNoteDrafts((cur) => ({ ...cur, [token]: saved ?? '' }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存备注失败');
+    } finally {
+      setSavingNote('');
+    }
+  }, [noteDrafts, session]);
 
   const copyUrl = useCallback(async (path: string, token: string) => {
     const url = inviteUrl(path);
@@ -258,139 +329,187 @@ export function SurveyAdminClient() {
       />
       {error ? <p style={s.err}>{error}</p> : null}
 
-      <section style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-          <button type="button" style={s.btn} disabled={busy || loading} onClick={() => void createInvite()}>
-            生成邀请链接
-          </button>
-          <button type="button" style={s.btnGhost} disabled={loading || busy} onClick={() => void load()}>
-            刷新
-          </button>
-        </div>
-        <div style={s.tableWrap}>
-          <table style={s.table}>
-            <thead>
-              <tr>
-                <th style={s.th}>短码</th>
-                <th style={s.th}>链接</th>
-                <th style={s.th}>创建时间</th>
-                <th style={s.th}>回收</th>
-                <th style={s.th}>状态</th>
-                <th style={s.th}>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!loading && invites.length === 0 ? (
-                <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无邀请</td></tr>
-              ) : null}
-              {invites.map((item) => {
-                const full = inviteUrl(item.path);
-                return (
-                  <tr key={item.id} style={item.active ? undefined : { opacity: 0.55 }}>
-                    <td style={{ ...s.td, whiteSpace: 'nowrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
-                      {item.token}
-                    </td>
-                    <td style={{ ...s.td, maxWidth: 420 }} title={full}>
-                      <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-all' }}>
-                        {full}
-                      </span>
-                    </td>
-                    <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.createdAt)}</td>
-                    <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.responseCount}</td>
-                    <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.active ? '有效' : '已作废'}</td>
-                    <td style={{ ...s.td, whiteSpace: 'nowrap' }}>
-                      <button
-                        type="button"
-                        style={{ ...s.btnGhost, padding: '4px 8px', marginRight: 6 }}
-                        disabled={busy}
-                        onClick={() => void copyUrl(item.path, item.token)}
-                      >
-                        {copied === item.token ? '已复制' : '复制'}
-                      </button>
-                      {item.active ? (
-                        <button
-                          type="button"
-                          style={{ ...s.btnGhost, padding: '4px 8px' }}
-                          disabled={busy}
-                          onClick={() => void setActive(item.token, false)}
-                        >
-                          作废
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          style={{ ...s.btnGhost, padding: '4px 8px' }}
-                          disabled={busy}
-                          onClick={() => void setActive(item.token, true)}
-                        >
-                          恢复
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        <button type="button" style={tabBtn(tab === 'invites')} onClick={() => setTab('invites')}>
+          邀请链接
+        </button>
+        <button type="button" style={tabBtn(tab === 'results')} onClick={() => setTab('results')}>
+          调研结果
+        </button>
+        <button type="button" style={{ ...s.btnGhost, marginLeft: 'auto' }} disabled={loading || busy} onClick={() => void load()}>
+          刷新
+        </button>
+      </div>
 
-      <section style={{ marginBottom: 18 }}>
-        <div style={s.cardRow}>
-          {cards.map((card) => (
-            <div key={card.label} style={s.card}>
-              <p style={s.cardLabel}>{card.label}</p>
-              <p style={{ ...s.cardValue, fontSize: card.value.length > 18 ? 13 : 18, lineHeight: 1.35 }}>
-                {card.value}
-              </p>
+      {tab === 'invites' ? (
+        <section>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <input
+              style={{ ...s.input, minWidth: 200, flex: '1 1 220px', maxWidth: 360 }}
+              value={createNote}
+              maxLength={120}
+              placeholder="备注（发给谁，可选）"
+              onChange={(e) => setCreateNote(e.target.value)}
+            />
+            <button type="button" style={s.btn} disabled={busy || loading} onClick={() => void createInvite()}>
+              生成邀请链接
+            </button>
+          </div>
+          <div style={s.tableWrap}>
+            <table style={s.table}>
+              <thead>
+                <tr>
+                  <th style={s.th}>短码</th>
+                  <th style={s.th}>链接</th>
+                  <th style={s.th}>备注</th>
+                  <th style={s.th}>创建时间</th>
+                  <th style={s.th}>回收</th>
+                  <th style={s.th}>状态</th>
+                  <th style={s.th}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!loading && invites.length === 0 ? (
+                  <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无邀请</td></tr>
+                ) : null}
+                {invites.map((item) => {
+                  const full = inviteUrl(item.path);
+                  const draft = noteDrafts[item.token] ?? '';
+                  const dirty = draft.trim() !== (item.note ?? '').trim();
+                  return (
+                    <tr key={item.id} style={item.active ? undefined : { opacity: 0.55 }}>
+                      <td style={{ ...s.td, whiteSpace: 'nowrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                        {item.token}
+                      </td>
+                      <td style={{ ...s.td, maxWidth: 360 }} title={full}>
+                        <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-all' }}>
+                          {full}
+                        </span>
+                      </td>
+                      <td style={{ ...s.td, minWidth: 200 }}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <input
+                            style={noteInput}
+                            value={draft}
+                            maxLength={120}
+                            placeholder="发给谁"
+                            disabled={busy || savingNote === item.token}
+                            onChange={(e) => setNoteDrafts((cur) => ({ ...cur, [item.token]: e.target.value }))}
+                          />
+                          <button
+                            type="button"
+                            style={{ ...s.btnGhost, padding: '4px 8px', flexShrink: 0 }}
+                            disabled={busy || savingNote === item.token || !dirty}
+                            onClick={() => void saveNote(item.token)}
+                          >
+                            {savingNote === item.token ? '保存中' : '保存'}
+                          </button>
+                        </div>
+                      </td>
+                      <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.createdAt)}</td>
+                      <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.responseCount}</td>
+                      <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.active ? '有效' : '已作废'}</td>
+                      <td style={{ ...s.td, whiteSpace: 'nowrap' }}>
+                        <button
+                          type="button"
+                          style={{ ...s.btnGhost, padding: '4px 8px', marginRight: 6 }}
+                          disabled={busy}
+                          onClick={() => void copyUrl(item.path, item.token)}
+                        >
+                          {copied === item.token ? '已复制' : '复制'}
+                        </button>
+                        {item.active ? (
+                          <button
+                            type="button"
+                            style={{ ...s.btnGhost, padding: '4px 8px' }}
+                            disabled={busy}
+                            onClick={() => void setActive(item.token, false)}
+                          >
+                            作废
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            style={{ ...s.btnGhost, padding: '4px 8px' }}
+                            disabled={busy}
+                            onClick={() => void setActive(item.token, true)}
+                          >
+                            恢复
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {loading ? <p style={{ ...s.muted, marginTop: 10 }}>加载中…</p> : null}
+        </section>
+      ) : (
+        <>
+          <section style={{ marginBottom: 18 }}>
+            <div style={s.cardRow}>
+              {cards.map((card) => (
+                <div key={card.label} style={s.card}>
+                  <p style={s.cardLabel}>{card.label}</p>
+                  <p style={{ ...s.cardValue, fontSize: card.value.length > 18 ? 13 : 18, lineHeight: 1.35 }}>
+                    {card.value}
+                  </p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        {summary?.d4Top?.length ? (
-          <p style={{ ...s.muted, margin: '0 0 8px' }}>
-            深入·更愿意再用 Top：{summary.d4Top.map((x) => `${x.label} ${x.count}`).join(' · ')}
-          </p>
-        ) : null}
-      </section>
+            {summary?.d4Top?.length ? (
+              <p style={{ ...s.muted, margin: '0 0 8px' }}>
+                深入·更愿意再用 Top：{summary.d4Top.map((x) => `${x.label} ${x.count}`).join(' · ')}
+              </p>
+            ) : null}
+          </section>
 
-      <section>
-        <div style={s.tableWrap}>
-          <table style={s.table}>
-            <thead>
-              <tr>
-                <th style={s.th}>时间</th>
-                <th style={s.th}>昵称</th>
-                <th style={s.th}>短码</th>
-                <th style={s.th}>B1–B5</th>
-                <th style={s.th}>深入</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!loading && responses.length === 0 ? (
-                <tr><td colSpan={5} style={{ ...s.td, color: '#8b97a9' }}>暂无回收</td></tr>
-              ) : null}
-              {responses.map((item) => {
-                const b = item.basic;
-                const basicLine = [b.b1, b.b2, b.b3, b.b4, b.b5, b.note ? `备注:${b.note}` : ''].filter(Boolean).join(' · ');
-                return (
-                  <tr key={item.id}>
-                    <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.createdAt)}</td>
-                    <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.nickname || '—'}</td>
-                    <td style={{ ...s.td, whiteSpace: 'nowrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
-                      {item.token}
-                    </td>
-                    <td style={{ ...s.td, maxWidth: 420 }} title={basicLine}>{basicLine || '—'}</td>
-                    <td style={{ ...s.td, maxWidth: 420, whiteSpace: 'pre-wrap' } as CSSProperties}>
-                      {shortDeep(item.deep)}
-                    </td>
+          <section>
+            <div style={s.tableWrap}>
+              <table style={s.table}>
+                <thead>
+                  <tr>
+                    <th style={s.th}>时间</th>
+                    <th style={s.th}>昵称</th>
+                    <th style={s.th}>短码</th>
+                    <th style={s.th}>邀请备注</th>
+                    <th style={s.th}>B1–B5</th>
+                    <th style={s.th}>深入</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {loading ? <p style={{ ...s.muted, marginTop: 10 }}>加载中…</p> : null}
-      </section>
+                </thead>
+                <tbody>
+                  {!loading && responses.length === 0 ? (
+                    <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无回收</td></tr>
+                  ) : null}
+                  {responses.map((item) => {
+                    const b = item.basic;
+                    const basicLine = [b.b1, b.b2, b.b3, b.b4, b.b5, b.note ? `备注:${b.note}` : ''].filter(Boolean).join(' · ');
+                    return (
+                      <tr key={item.id}>
+                        <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.createdAt)}</td>
+                        <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.nickname || '—'}</td>
+                        <td style={{ ...s.td, whiteSpace: 'nowrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                          {item.token}
+                        </td>
+                        <td style={{ ...s.td, maxWidth: 180 }} title={item.inviteNote || undefined}>
+                          {item.inviteNote || '—'}
+                        </td>
+                        <td style={{ ...s.td, maxWidth: 420 }} title={basicLine}>{basicLine || '—'}</td>
+                        <td style={{ ...s.td, maxWidth: 420, whiteSpace: 'pre-wrap' } as CSSProperties}>
+                          {shortDeep(item.deep)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {loading ? <p style={{ ...s.muted, marginTop: 10 }}>加载中…</p> : null}
+          </section>
+        </>
+      )}
     </AdminMain>
   );
 }
