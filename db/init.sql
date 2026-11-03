@@ -128,3 +128,23 @@ CREATE TABLE IF NOT EXISTS client_audit_events (
 CREATE INDEX IF NOT EXISTS client_audit_events_created_idx ON client_audit_events (created_at DESC);
 CREATE INDEX IF NOT EXISTS client_audit_events_owner_idx ON client_audit_events (owner_key, created_at DESC);
 CREATE INDEX IF NOT EXISTS client_audit_events_type_idx ON client_audit_events (event_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS survey_invites (
+  id BIGSERIAL PRIMARY KEY,
+  token TEXT NOT NULL UNIQUE,
+  note TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS survey_invites_created_idx ON survey_invites (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS survey_responses (
+  id BIGSERIAL PRIMARY KEY,
+  invite_id BIGINT NOT NULL REFERENCES survey_invites(id) ON DELETE CASCADE,
+  nickname TEXT,
+  basic JSONB NOT NULL,
+  deep JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS survey_responses_invite_idx ON survey_responses (invite_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS survey_responses_created_idx ON survey_responses (created_at DESC);

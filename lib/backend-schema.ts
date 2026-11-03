@@ -93,5 +93,23 @@ async function migrate() {
     await tx`ALTER TABLE user_feedback ADD COLUMN IF NOT EXISTS category TEXT`;
     await tx`UPDATE user_feedback SET category = '其它' WHERE category IS NULL OR category = ''`;
     await tx`CREATE INDEX IF NOT EXISTS user_feedback_created_idx ON user_feedback (created_at DESC)`;
+    await tx`CREATE TABLE IF NOT EXISTS survey_invites (
+      id BIGSERIAL PRIMARY KEY,
+      token TEXT NOT NULL UNIQUE,
+      note TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS survey_invites_created_idx ON survey_invites (created_at DESC)`;
+    await tx`CREATE TABLE IF NOT EXISTS survey_responses (
+      id BIGSERIAL PRIMARY KEY,
+      invite_id BIGINT NOT NULL REFERENCES survey_invites(id) ON DELETE CASCADE,
+      nickname TEXT,
+      basic JSONB NOT NULL,
+      deep JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS survey_responses_invite_idx ON survey_responses (invite_id, created_at DESC)`;
+    await tx`CREATE INDEX IF NOT EXISTS survey_responses_created_idx ON survey_responses (created_at DESC)`;
   });
 }
