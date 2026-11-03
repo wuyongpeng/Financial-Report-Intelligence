@@ -134,6 +134,29 @@ test('captures disclosed prior and YoY from 主要会计数据 three-column rows
   assert.equal(cash?.yoyPct, -109.74);
 });
 
+test('Maotai-style Q3 row: bare YoY% then YTD must not become amount prior', () => {
+  // 贵州茅台三季报：本报告期 | 比上年同期增减变动幅度(%) | 年初至报告期末 | …
+  // Cells often omit the % sign on the YoY column (3.78 not 3.78%).
+  // Bug: 3.78 was stored as prior_value → UI computed 同比 +527792210484%.
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 项目 本报告期 本报告期比上年同期增减变动幅度(%) 年初至报告期末 年初至报告期末比上年同期增减变动幅度(%) 营业收入 40,267,482,684.56 3.08 130,970,743,649.04 1.96 归属于上市公司股东的净利润 19,950,545,560.09 3.78 64,467,425,981.95 -0.25 基本每股收益（元/股） 15.96 3.78 51.53 -0.25 加权平均净资产收益率（%） 7.64 0.12 个百分点',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 40_267_482_684.56);
+  assert.equal(revenue?.yoyPct, 3.08);
+  assert.equal(revenue?.priorValue, undefined);
+
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 19_950_545_560.09);
+  assert.equal(profit?.yoyPct, 3.78);
+  assert.equal(profit?.priorValue, undefined);
+
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 15.96);
+  assert.equal(eps?.yoyPct, 3.78);
+  assert.equal(eps?.priorValue, undefined);
+});
+
 test('CATL-style row: current then YoY% (no prior amount) must not split 58.58%', () => {
   // 宁德时代季报摘要：本报告期 | 本报告期比上年同期增减 | 年初至报告期末 | …
   // Bug: regex backtracked "58.58%" into prior=58.5 (+千元→58500≈0亿) and yoy=8%.

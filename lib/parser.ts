@@ -157,7 +157,24 @@ function parseYoyPercentToken(text: string) {
   return parsed === null ? null : { value: parsed, length: match[0].length };
 }
 
-function parseTrailingPriorAndYoy(rest: string) {
+/** Maotai/Q3 summary: 本报告期 | 增减%(often bare) | 年初至报告期末 | … */
+function looksLikeBareYoyThenYtd(currentRaw: number, bare: number, next: number) {
+  const absCurrent = Math.abs(currentRaw);
+  const absBare = Math.abs(bare);
+  const absNext = Math.abs(next);
+  if (!(absBare < 1000)) return false;
+  // Large / currency rows: bare % is tiny vs current; next cell is YTD-sized amount.
+  if (absCurrent >= 1000) {
+    if (absBare >= absCurrent * 0.01) return false;
+    if (absNext < 1000) return false;
+    if (absNext >= absCurrent * 0.5) return true;
+    return absNext > absBare * 100 && absNext >= absCurrent * 0.1;
+  }
+  // EPS-scale current: YTD cumulative ≥ current, bare looks like a percent.
+  return absNext >= absCurrent && absBare <= 500 && absNext > absBare * 2;
+}
+
+function parseTrailingPriorAndYoy(rest: string, currentRaw?: number) {
   let priorValue: number | undefined;
   let yoyPct: number | undefined;
   let cursor = rest;
@@ -166,6 +183,27 @@ function parseTrailingPriorAndYoy(rest: string) {
   const immediateYoy = parseYoyPercentToken(cursor);
   if (immediateYoy) {
     return { priorValue: undefined, yoyPct: immediateYoy.value };
+  }
+  // Maotai-style: YoY column is a bare number (header already says 增减幅度%), then YTD amount.
+  // Must NOT treat that bare percent as an amount prior (net_profit minAbs=1 used to keep 3.78).
+  if (currentRaw !== undefined && Number.isFinite(currentRaw)) {
+    const bareMatch = cursor.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)/);
+    if (bareMatch) {
+      const bare = parseSignedNumber(bareMatch[2], bareMatch[1], bareMatch[3]);
+      if (bare !== null && Math.abs(bare) < 1000) {
+        const afterBare = cursor.slice(bareMatch[0].length);
+        // Classic 本期 | 上年同期 | 同比% — next token is percent, keep prior path.
+        if (!parseYoyPercentToken(afterBare)) {
+          const nextMatch = afterBare.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?/);
+          if (nextMatch) {
+            const next = parseSignedNumber(nextMatch[2], nextMatch[1], nextMatch[3]);
+            if (next !== null && looksLikeBareYoyThenYtd(currentRaw, bare, next)) {
+              return { priorValue: undefined, yoyPct: bare };
+            }
+          }
+        }
+      }
+    }
   }
   // Prior amount: refuse prefixes of a percent token (58.5 from 58.58%).
   const priorMatch = cursor.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)/);
@@ -260,6 +298,7 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
   if (!valueMatch) return null;
   let value = parseSignedNumber(valueMatch[2], valueMatch[1], valueMatch[3]);
   if (value === null) return null;
+  const currentRaw = value;
   const detectedUnit = valueMatch[4] ?? '';
   const tableUnit = fallbackCurrencyUnit || pageCurrencyUnit(pageText) || '';
   const scaleUnit = currencyMetrics.has(definition.metric)
@@ -278,7 +317,8 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
   if (Math.abs(value) < definition.minAbs || Math.abs(value) > definition.maxAbs) return null;
 
   const afterFirst = nearby.slice(valueMatch.index! + valueMatch[0].length);
-  const trailing = parseTrailingPriorAndYoy(afterFirst);
+  // Pass unscaled current so Maotai bare YoY vs YTD heuristics compare PDF cells.
+  const trailing = parseTrailingPriorAndYoy(afterFirst, currentRaw);
   let priorValue = trailing.priorValue;
   const yoyPct = trailing.yoyPct;
   if (priorValue !== undefined) {

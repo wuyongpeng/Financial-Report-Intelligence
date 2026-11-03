@@ -658,7 +658,13 @@ export function resolveYoy(
     );
     return { ...built, source: 'disclosed' };
   }
-  if (hasDPrior) {
+  // Guard: bare YoY% mis-read as prior leaves a tiny amount vs yuan-scale current
+  // and produces astronomical computed %. Ignore that prior; fall through.
+  const absurdDisclosedPrior = hasDPrior
+    && Math.abs(current) >= 1e6
+    && Math.abs(dPrior as number) > 0
+    && Math.abs(dPrior as number) < Math.abs(current) * 1e-6;
+  if (hasDPrior && !absurdDisclosedPrior) {
     const yoy = describeYoy(current, dPrior as number);
     return yoy ? { ...yoy, source: 'disclosed' } : undefined;
   }

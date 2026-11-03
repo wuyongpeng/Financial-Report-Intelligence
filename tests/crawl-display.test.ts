@@ -230,6 +230,16 @@ test('describeYoy: both negative uses abs prior — 减亏 / 增亏', () => {
   assert.equal(yoyTone(widened), 'down');
 });
 
+test('resolveYoy ignores absurd tiny disclosed prior vs yuan-scale current', () => {
+  // Parser bug leftover: bare YoY 3.78 stored as prior_value against 199亿 profit.
+  const yoy = resolveYoy(19_950_545_560.09, {
+    disclosedPrior: 3.78,
+    crossReportPrior: 19_200_000_000,
+  })!;
+  assert.equal(yoy.source, 'computed');
+  assert.ok(Math.abs((yoy.pct ?? 0) - ((19_950_545_560.09 - 19_200_000_000) / 19_200_000_000) * 100) < 0.01);
+});
+
 test('resolveYoy prefers disclosed YoY percent over cross-report prior', () => {
   const yoy = resolveYoy(100, {
     disclosedYoyPct: -45.57,
