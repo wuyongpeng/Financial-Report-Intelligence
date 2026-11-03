@@ -454,9 +454,11 @@ export function SurveyForm({ token }: { token: string }) {
       <p style={muted}>Hi, 欢迎体验财报智能分析助手Eva,帮你快速读懂 A 股财报</p>
 
       <section style={stepCard}>
-        <p style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 650 }}>第 1 步 · 体验Eva</p>
+        <p style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 650 }}>第 1 步 · 体验 Eva</p>
+        <p style={{ ...muted, marginBottom: 8 }}>Eva是一个财报智能分析助手。</p>
+        <p style={{ ...muted, marginBottom: 8 }}>试试没有任何提示的前提下，能不能快速上手。</p>
         <p style={{ ...muted, marginBottom: 14 }}>
-          挑一家你关心的公司,看看财报,提一个问题,再点一下回答里的角标试试
+          没看懂产品意图、体验流程卡顿、排版不协调、字体太小颜色别扭等，都是产品优化方向。体验完回到这里,花2分钟告诉我。
         </p>
         <Link href="/" target="_blank" rel="noreferrer" style={{ ...btn, textDecoration: 'none', display: 'inline-block' }}>
           打开 Eva
@@ -473,7 +475,7 @@ export function SurveyForm({ token }: { token: string }) {
           </Question>
         </div>
 
-        <Question title="2. 从打开 Eva 到看到一家公司的财报,过程如何?" required>
+        <Question title="2. 整体体验过程是否顺利?" required>
           <ChipGroup options={B2_OPTIONS} value={b2} onChange={setB2} disabled={sending} />
         </Question>
 

@@ -281,7 +281,7 @@ export function SurveyAdminClient() {
     return [
       { label: '已反馈', value: String(summary.responseCount) },
       { label: '含深入反馈', value: String(summary.deepCount) },
-      { label: '过程（B2）', value: distLine(summary.b2) },
+      { label: '体验（B2）', value: distLine(summary.b2) },
       { label: '三栏（B3）', value: distLine(summary.b3) },
       { label: '认识（B4）', value: distLine(summary.b4) },
       { label: '角标（B5）', value: distLine(summary.b5) },
