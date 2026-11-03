@@ -339,7 +339,7 @@ export function SurveyAdminClient() {
         <section>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
             <input
-              style={{ ...s.input, minWidth: 200, flex: '1 1 220px', maxWidth: 360 }}
+              style={{ ...s.input, width: 160, flex: '0 0 auto' }}
               value={createNote}
               maxLength={120}
               placeholder="备注（可选）"
@@ -348,22 +348,22 @@ export function SurveyAdminClient() {
             <button type="button" style={s.btn} disabled={busy || loading} onClick={() => void createInvite()}>
               生成邀请链接
             </button>
-          </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-            {([
-              ['all', '全部'],
-              ['done', '已反馈'],
-              ['pending', '未反馈'],
-            ] as Array<[FeedbackFilter, string]>).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                style={tabBtn(inviteFeedbackFilter === key)}
-                onClick={() => setInviteFeedbackFilter(key)}
-              >
-                {label}
-              </button>
-            ))}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto', flexWrap: 'wrap' }}>
+              {([
+                ['all', '全部'],
+                ['done', '已反馈'],
+                ['pending', '未反馈'],
+              ] as Array<[FeedbackFilter, string]>).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  style={tabBtn(inviteFeedbackFilter === key)}
+                  onClick={() => setInviteFeedbackFilter(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div style={s.tableWrap}>
             <table style={s.table}>
@@ -474,9 +474,15 @@ export function SurveyAdminClient() {
           <section style={{ marginBottom: 18 }}>
             <div style={s.cardRow}>
               {cards.map((card) => (
-                <div key={card.label} style={s.card}>
-                  <p style={s.cardLabel}>{card.label}</p>
-                  <p style={{ ...s.cardValue, fontSize: card.value.length > 18 ? 13 : 18, lineHeight: 1.35 }}>
+                <div key={card.label} style={{ ...s.card, padding: '10px 12px' }}>
+                  <p style={{ ...s.cardLabel, fontSize: 11 }}>{card.label}</p>
+                  <p style={{
+                    ...s.cardValue,
+                    margin: '4px 0 0',
+                    fontSize: card.value.length > 18 ? 12 : 15,
+                    fontWeight: 600,
+                    lineHeight: 1.35,
+                  }}>
                     {card.value}
                   </p>
                 </div>
