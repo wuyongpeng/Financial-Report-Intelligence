@@ -162,16 +162,25 @@ function looksLikeBareYoyThenYtd(currentRaw: number, bare: number, next: number)
   const absCurrent = Math.abs(currentRaw);
   const absBare = Math.abs(bare);
   const absNext = Math.abs(next);
+  // YoY column stays within ±1000; refuse amount-sized tokens.
   if (!(absBare < 1000)) return false;
-  // Large / currency rows: bare % is tiny vs current; next cell is YTD-sized amount.
   if (absCurrent >= 1000) {
-    if (absBare >= absCurrent * 0.01) return false;
+    // Next cell should look like YTD / cumulative (≥ ~half of period amount).
     if (absNext < 1000) return false;
-    if (absNext >= absCurrent * 0.5) return true;
-    return absNext > absBare * 100 && absNext >= absCurrent * 0.1;
+    if (absNext < absCurrent * 0.5) return false;
+    // Bare is a percent, not a prior amount. Do NOT require bare ≪ 1% of current:
+    // 百万元 rows with double-digit YoY (e.g. 2,167 | -29.67 | 6,739) must still match.
+    if (absBare >= absCurrent * 0.5) return false;
+    return true;
   }
-  // EPS-scale current: YTD cumulative ≥ current, bare looks like a percent.
-  return absNext >= absCurrent && absBare <= 500 && absNext > absBare * 2;
+  // EPS-scale: 本期 | 同比% | 年初至期末(≥本期) | …
+  if (!(absNext >= absCurrent && absBare <= 500)) return false;
+  // Percent column often exceeds YTD absolute (0.60 | 15.13 | 1.76); prior EPS rarely does.
+  if (absBare > absNext) return true;
+  // CMB-style Q3: 1.59 | 3.25 | 4.57 | 3.16 — YTD ≈ 2–4× quarterly, bare is %.
+  const ytdRatio = absNext / absCurrent;
+  if (ytdRatio >= 1.5 && ytdRatio <= 5 && absBare <= 100) return true;
+  return absNext > absBare * 2;
 }
 
 function parseTrailingPriorAndYoy(rest: string, currentRaw?: number) {
@@ -222,7 +231,12 @@ function parseTrailingPriorAndYoy(rest: string, currentRaw?: number) {
 function candidateAfterLabel(pageText: string, label: string, definition: MetricDefinition, fallbackCurrencyUnit = '') {
   const index = pageText.indexOf(label);
   if (index < 0) return null;
-  let nearby = pageText.slice(index + label.length, index + label.length + 220).replace(/[,，]/g, '').replace(/（/g, '(').replace(/）/g, ')');
+  let nearby = pageText.slice(index + label.length, index + label.length + 220)
+    .replace(/[,，]/g, '')
+    .replace(/（/g, '(').replace(/）/g, ')')
+    // Fullwidth percent / decimal from some PDF text layers (3.8％ / 3．8%).
+    .replace(/％/g, '%')
+    .replace(/．/g, '.');
   // Skip period stubs (e.g. 2026 年 7-9 月) so the first number is not a calendar year.
   nearby = nearby.replace(/^(?:\s*(?:20\d{2}|19\d{2})\s*年(?:\s*\d{1,2}\s*[-–—至到]\s*\d{1,2}\s*月)?)+/, ' ');
   const labelUnit = currencyMetrics.has(definition.metric) ? labelCurrencyUnit(nearby) : '';
@@ -251,14 +265,32 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
       if (Math.abs(value) < definition.minAbs || Math.abs(value) > definition.maxAbs) return null;
       // ROE tables list 本期 then 上年同期 (same unit). A following bare/percent
       // number is prior level — not 同比增减 — unless a third % column appears.
+      // Q3 summary ROE: 本期 | 增减百分点 | 年初至期末 | … (陕西煤业 5.80 0.07 16.70 2.95)
+      const ppThenYtd = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?/);
+      if (ppThenYtd) {
+        const mid = parseSignedNumber(ppThenYtd[2], ppThenYtd[1], ppThenYtd[3]);
+        const ytd = parseSignedNumber(ppThenYtd[5], ppThenYtd[4], ppThenYtd[6]);
+        if (
+          mid !== null && ytd !== null
+          && Math.abs(ytd) >= Math.abs(value) * 0.5
+          && Math.abs(mid) < Math.abs(value)
+          && Math.abs(mid) <= 50
+        ) {
+          return { value, detectedUnit: '%', priorValue: undefined, yoyPct: undefined };
+        }
+      }
       const priorLevel = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?/);
       let priorValue: number | undefined;
       let yoyPct: number | undefined;
       if (priorLevel) {
         const parsed = parseSignedNumber(priorLevel[2], priorLevel[1], priorLevel[3]);
-        if (parsed !== null && Math.abs(parsed) <= definition.maxAbs) {
+        const rest = after.slice(priorLevel[0].length);
+        // Only when 百分点 hugs this token (「-0.18 个百分点」) is it a pp delta —
+        // not prior ROE. Muxi-style「-2.62 增加7.15个百分点」keeps -2.62 as prior level.
+        if (/^\s*个百分点/.test(rest)) {
+          // leave prior / yoy empty
+        } else if (parsed !== null && Math.abs(parsed) <= definition.maxAbs) {
           priorValue = parsed;
-          const rest = after.slice(priorLevel[0].length);
           // 「增加7.15个百分点」is a YoY description, not a % token — leave yoyPct empty.
           if (!/(?:百分点|同比|增减|较上年)/.test(rest.slice(0, 24))) {
             const yoy = parseYoyPercentToken(rest);

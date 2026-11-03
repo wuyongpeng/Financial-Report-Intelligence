@@ -230,6 +230,26 @@ test('describeYoy: both negative uses abs prior — 减亏 / 增亏', () => {
   assert.equal(yoyTone(widened), 'down');
 });
 
+
+test('resolveYoy ignores unit-scaled percent-as-prior (Ping An 3×百万元)', () => {
+  // Live bug: 3.8% → prior_value=3e6 against 324.83亿 current → +1082666%.
+  const yoy = resolveYoy(32_483_000_000, {
+    disclosedPrior: 3_000_000,
+    crossReportPrior: 31_283_000_000,
+  })!;
+  assert.equal(yoy.source, 'computed');
+  assert.ok(Math.abs((yoy.pct ?? 0) - ((32_483_000_000 - 31_283_000_000) / 31_283_000_000) * 100) < 0.05);
+});
+
+test('resolveYoy keeps real hypergrowth disclosed prior (ratio ≥ 1%)', () => {
+  // 寒武纪-style: prior is a real small base, not a mis-scaled percent.
+  const current = 2_881_000_000;
+  const prior = 64_500_000; // ~ratio 0.022 → YoY ~4367%
+  const yoy = resolveYoy(current, { disclosedPrior: prior })!;
+  assert.equal(yoy.source, 'disclosed');
+  assert.ok((yoy.pct ?? 0) > 500);
+});
+
 test('resolveYoy ignores absurd tiny disclosed prior vs yuan-scale current', () => {
   // Parser bug leftover: bare YoY 3.78 stored as prior_value against 199亿 profit.
   const yoy = resolveYoy(19_950_545_560.09, {

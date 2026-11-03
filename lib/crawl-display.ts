@@ -658,15 +658,20 @@ export function resolveYoy(
     );
     return { ...built, source: 'disclosed' };
   }
-  // Guard: bare YoY% mis-read as prior leaves a tiny amount vs yuan-scale current
-  // and produces astronomical computed %. Ignore that prior; fall through.
-  const absurdDisclosedPrior = hasDPrior
-    && Math.abs(current) >= 1e6
-    && Math.abs(dPrior as number) > 0
-    && Math.abs(dPrior as number) < Math.abs(current) * 1e-6;
-  if (hasDPrior && !absurdDisclosedPrior) {
+  // Guard: YoY% (optionally unit-scaled) mis-read as prior → astronomical %.
+  // Same 500% bar as /admin/metrics; also require prior ≪ current so true
+  // hypergrowth (寒武纪等) with a real tiny base still keeps disclosed prior.
+  if (hasDPrior) {
     const yoy = describeYoy(current, dPrior as number);
-    return yoy ? { ...yoy, source: 'disclosed' } : undefined;
+    const pct = yoy && !yoy.naPercent && yoy.pct !== undefined ? yoy.pct : null;
+    const ratio = Math.abs(current) > 0 ? Math.abs(dPrior as number) / Math.abs(current) : 1;
+    const absurdDisclosedPrior = pct != null
+      && Math.abs(pct) >= 500
+      && (ratio < 0.01 || Math.abs(dPrior as number) < Math.abs(current) * 1e-6);
+    if (yoy && !absurdDisclosedPrior) {
+      return { ...yoy, source: 'disclosed' };
+    }
+    // fall through to cross-report prior
   }
   if (hasCPrior) {
     const yoy = describeYoy(current, cPrior as number);

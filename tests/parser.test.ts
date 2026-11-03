@@ -276,6 +276,87 @@ test('ZTE 2026H1 summary keeps 千元 scale and disclosed YoY for 归母净利�
   assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 3.65);
 });
 
+
+test('Ping An / CMB Q3: 本期|同比%|YTD keeps disclosed YoY, not percent-as-prior', () => {
+  const metrics = parseCoreMetricPages([
+    '（货币单位：人民币百万元）项 目 2026 年 7-9 月 同比增减 2026 年 1-9 月 同比增减 营业收入 32,483 3.8% 103,100 2.4% 归属于本行股东的净利润 13,490 0.2% 39,186 2.2% 基本/稀释每股收益（元/股） 0.70 1.4% 1.94 3.7% 加权平均净资产收益率（未年化） 2.85% -0.18 个百分点 8.07% -0.21 个百分点',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 32_483_000_000);
+  assert.equal(revenue?.yoyPct, 3.8);
+  assert.equal(revenue?.priorValue, undefined);
+
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 13_490_000_000);
+  assert.equal(profit?.yoyPct, 0.2);
+  assert.equal(profit?.priorValue, undefined);
+
+  const roe = metrics.find((item) => item.metric === 'roe');
+  assert.equal(roe?.value, 2.85);
+  assert.equal(roe?.priorValue, undefined);
+});
+
+test('Baosteel Q3 bare signed YoY% then YTD is not scaled prior', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：人民币百万元 营业收入 84,916 4.75 245,648 5.68 归属于上市公司股东的净利润 2,167 -29.67 6,739 -15.33 基本每股收益（元/股） 0.10 -28.57 0.31 -16.22',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.yoyPct, 4.75);
+  assert.equal(revenue?.priorValue, undefined);
+
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 2_167_000_000);
+  assert.equal(profit?.yoyPct, -29.67);
+  assert.equal(profit?.priorValue, undefined);
+
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 0.1);
+  assert.equal(eps?.yoyPct, -28.57);
+  assert.equal(eps?.priorValue, undefined);
+});
+
+test('Shaanxi coal EPS: bare YoY then YTD EPS, not prior=15.13', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：人民币万元 营业收入 4,387,179.48 9.40 12,276,630.88 3.97 归属于上市公司股东的净利润 579,262.21 14.15 1,706,504.42 34.23 基本每股收益（元/股） 0.60 15.13 1.76 34.23',
+  ]);
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 0.6);
+  assert.equal(eps?.yoyPct, 15.13);
+  assert.equal(eps?.priorValue, undefined);
+
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.yoyPct, 9.4);
+});
+
+
+test('CMB Q3 EPS: bare YoY then YTD EPS (1.59 3.25 4.57)', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 归属于本行普通股股东的基本每股收益（人民币元） 1.59 3.25 4.57 3.16',
+  ]);
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 1.59);
+  assert.equal(eps?.yoyPct, 3.25);
+  assert.equal(eps?.priorValue, undefined);
+});
+
+test('Shaanxi coal ROE: pp-change then YTD is not prior=0.07', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 加权平均净资产收益率（%） 5.80 0.07 16.70 2.95',
+  ]);
+  const roe = metrics.find((item) => item.metric === 'roe');
+  assert.equal(roe?.value, 5.8);
+  assert.equal(roe?.priorValue, undefined);
+});
+
+test('fullwidth percent ％ is treated as YoY token', () => {
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 单位：人民币百万元 营业收入 32,483 3.8％ 103,100 2.4％',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.yoyPct, 3.8);
+  assert.equal(revenue?.priorValue, undefined);
+});
+
 test('Muxi-style ROE: label unit （%） with bare period number, not later YoY %', () => {
   // 沐曦股份 688802 2026H1: 加权平均净资产收益率（%）4.53，后文营收同比 44.67% 不得误抽。
   const metrics = parseCoreMetricPages([
