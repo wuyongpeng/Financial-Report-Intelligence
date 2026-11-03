@@ -139,7 +139,8 @@ export function AdminHeader({
   return (
     <header style={head}>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <h1 style={{ ...h1, margin: 0 }}>{title}</h1>
+        <p style={brand}>Eva 运营管理</p>
+        <h1 style={{ ...h1, margin: '4px 0 0' }}>{title}</h1>
         {subtitle ? <p style={{ ...muted, margin: '6px 0 0' }}>{subtitle}</p> : null}
         <nav style={nav} aria-label="管理页">
           {NAV.map((item) => (
@@ -208,6 +209,9 @@ const th: CSSProperties = {
 const td: CSSProperties = {
   padding: '9px 12px', borderBottom: '1px solid #eef1f5', verticalAlign: 'top',
   color: '#3a4d66', overflowWrap: 'anywhere',
+};
+const brand: CSSProperties = {
+  margin: 0, fontSize: 12, fontWeight: 600, letterSpacing: '0.02em', color: '#6b7a8d',
 };
 const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 };
 const navLink: CSSProperties = {
