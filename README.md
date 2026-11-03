@@ -16,13 +16,14 @@
 - 解析：PDF 文本/表格解析后以规则提取营收、归母净利润、EPS、ROE，数值、字段名和页码存库。
 - 存储：`db` 服务的数据在 `data/postgres`，PDF 在 `data/reports`，app/worker 共享运行时状态在 `data/runtime`（挂到容器 `/app/.data`）。后续把这两个适配层换为公司 PostgreSQL/S3 即可，不影响页面和采集流程。
 
-产品与评测文档见 `/docs`（手动访问；首页无入口），对外五篇：
+产品与评测文档见 `/docs`（手动访问；首页无入口），对外四篇：
 
 - [产品介绍](docs/产品介绍.md)
+- [设计理念](docs/设计理念.md)
 - [财报分析说明](docs/财报分析说明.md)（含指标联动 v1；扩展目录见 `docs/_archive/`）
-- [功能评测](docs/功能评测.md)
-- [用户调研](docs/用户调研.md)
 - [技术架构](docs/技术架构.md)
+
+`docs/功能评测.md`、`docs/用户调研.md` 仍保留在仓库，但不进入 `/docs` 公开目录。
 
 历史与内部材料归档在 [docs/_archive/](docs/_archive/)，不进入对外列表。
 
