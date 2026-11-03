@@ -436,7 +436,7 @@ export function SurveyForm({ token }: { token: string }) {
     return (
       <main style={{ ...wrap, textAlign: 'center', paddingTop: 72 }}>
         <h1 style={{ ...h1, marginBottom: 28 }}>提交成功，感谢参与!</h1>
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button type="button" style={btnGhost} onClick={() => setView('form')}>
             查看问卷
           </button>
