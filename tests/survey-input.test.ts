@@ -88,9 +88,9 @@ test('randomSurveyNickname returns pool value', () => {
   assert.ok(randomSurveyNickname(0).length > 0);
 });
 
-test('SURVEY_NICKNAMES has about 30 names', async () => {
+test('SURVEY_NICKNAMES has 19 names', async () => {
   const { SURVEY_NICKNAMES } = await import('../lib/survey');
-  assert.equal(SURVEY_NICKNAMES.length, 30);
+  assert.equal(SURVEY_NICKNAMES.length, 19);
 });
 
 test('POST /api/survey/[token] rejects bad token before DB', async () => {
