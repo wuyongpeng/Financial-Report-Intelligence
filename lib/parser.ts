@@ -250,6 +250,20 @@ function parseTrailingPriorAndYoy(rest: string, currentRaw?: number) {
       }
     }
   }
+  // Restated prior: 上年同期下分「调整前」「调整后」, then 同比增减%.
+  // Taking only the first prior leaves the duplicate column in the way of YoY
+  // (新易盛 2025Q3 归母净利 prior 对但丢 205.38%), and for EPS/ROE the first
+  // column is 调整前 while disclosed YoY uses 调整后 (1.1 vs 0.79).
+  const dualPrior = cursor.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)/);
+  if (dualPrior) {
+    const pre = parseSignedNumber(dualPrior[2], dualPrior[1], dualPrior[3]);
+    const post = parseSignedNumber(dualPrior[5], dualPrior[4], dualPrior[6]);
+    const afterDual = cursor.slice(dualPrior[0].length);
+    const yoyAfterDual = parseYoyPercentToken(afterDual);
+    if (pre !== null && post !== null && yoyAfterDual) {
+      return { priorValue: post, yoyPct: yoyAfterDual.value };
+    }
+  }
   // Prior amount: refuse prefixes of a percent token (58.5 from 58.58%).
   const priorMatch = cursor.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)/);
   if (priorMatch) {
@@ -314,6 +328,24 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
           && Math.abs(mid) <= 50
         ) {
           return { value, detectedUnit: '%', priorValue: undefined, yoyPct: undefined };
+        }
+      }
+      // Restated ROE: 本期 | 调整前 | 调整后 | 增减(百分点). Prefer 调整后 when
+      // the third token matches |本期−调整后| (新易盛 20.81 | 12.45 | 6.81 | 14.00).
+      const dualRoe = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?/);
+      if (dualRoe) {
+        const pre = parseSignedNumber(dualRoe[2], dualRoe[1], dualRoe[3]);
+        const post = parseSignedNumber(dualRoe[5], dualRoe[4], dualRoe[6]);
+        const delta = parseSignedNumber(dualRoe[8], dualRoe[7], dualRoe[9]);
+        if (
+          pre !== null && post !== null && delta !== null
+          && Math.abs(pre) <= definition.maxAbs
+          && Math.abs(post) <= definition.maxAbs
+        ) {
+          const pp = Math.abs(value - post);
+          if (Math.abs(pp - Math.abs(delta)) <= 0.05 + pp * 0.001 && Math.abs(delta) <= 80) {
+            return { value, detectedUnit: '%', priorValue: post, yoyPct: undefined };
+          }
         }
       }
       const priorLevel = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?/);

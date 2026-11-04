@@ -134,6 +134,38 @@ test('captures disclosed prior and YoY from 主要会计数据 three-column rows
   assert.equal(cash?.yoyPct, -109.74);
 });
 
+test('Xinyisheng-style restated prior: prefer 调整后 and keep disclosed YoY%', () => {
+  // 新易盛 2025Q3 主要会计数据：上年同期下分「调整前」「调整后」，同比按调整后。
+  // Bug: first prior column ate YoY (归母净利丢 205.38%)；EPS/ROE 取了调整前 (1.1 / 12.45)。
+  const metrics = parseCoreMetricPages([
+    '主要会计数据和财务指标 公司是否需追溯调整或重述以前年度会计数据 是 本报告期 上年同期 本报告期比上年同期增减 年初至报告期末 上年同期 年初至报告期末比上年同期增减 调整前 调整后 调整后 调整前 调整后 调整后 '
+    + '营业收入（元） 6,067,620,945.86 2,402,761,037.13 2,402,761,037.13 152.53% 16,504,791,211.36 5,130,435,808.52 5,130,435,808.52 221.70% '
+    + '归属于上市公司股东的净利润（元） 2,384,798,239.47 780,930,777.06 780,930,777.06 205.38% 6,327,092,507.84 1,646,072,871.21 1,646,072,871.21 284.37% '
+    + '归属于上市公司股东的扣除非经常性损益的净利润（元） 2,367,461,846.13 779,361,105.73 779,361,105.73 203.77% 6,301,361,138.70 1,644,089,751.00 1,644,089,751.00 283.27% '
+    + '基本每股收益（元/股） 2.4 1.1 0.79 203.80% 6.37 2.33 1.66 283.73% '
+    + '加权平均净资产收益率 20.81% 12.45% 6.81% 14.00% 55.20% 26.29% 14.36% 40.84%',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 6_067_620_945.86);
+  assert.equal(revenue?.priorValue, 2_402_761_037.13);
+  assert.equal(revenue?.yoyPct, 152.53);
+
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 2_384_798_239.47);
+  assert.equal(profit?.priorValue, 780_930_777.06);
+  assert.equal(profit?.yoyPct, 205.38);
+
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 2.4);
+  assert.equal(eps?.priorValue, 0.79);
+  assert.equal(eps?.yoyPct, 203.80);
+
+  const roe = metrics.find((item) => item.metric === 'roe');
+  assert.equal(roe?.value, 20.81);
+  assert.equal(roe?.priorValue, 6.81);
+  assert.equal(roe?.yoyPct, undefined);
+});
+
 test('Maotai-style Q3 row: bare YoY% then YTD must not become amount prior', () => {
   // 贵州茅台三季报：本报告期 | 比上年同期增减变动幅度(%) | 年初至报告期末 | …
   // Cells often omit the % sign on the YoY column (3.78 not 3.78%).
