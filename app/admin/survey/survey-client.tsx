@@ -101,13 +101,29 @@ async function copyTextReliable(text: string): Promise<boolean> {
   }
 }
 
-const tabBtn = (active: boolean): CSSProperties => ({
-  fontSize: 13,
+/** 子功能 Tab：下划线轻量样式，与顶栏 pill 导航区分 */
+const pageTab = (active: boolean): CSSProperties => ({
+  fontSize: 14,
   color: active ? '#1f4fad' : '#5b6d86',
-  background: active ? '#edf3ff' : '#fff',
-  border: active ? '1px solid #aec4ef' : '1px solid #d5dde8',
-  borderRadius: 999,
-  padding: '6px 14px',
+  background: 'transparent',
+  border: 'none',
+  borderBottom: active ? '2px solid #1f4fad' : '2px solid transparent',
+  borderRadius: 0,
+  padding: '8px 2px',
+  marginRight: 16,
+  fontWeight: active ? 600 : 500,
+  cursor: 'pointer',
+  lineHeight: 1.2,
+});
+
+/** 表内筛选 chip，仍用小 pill，但尺寸弱于顶栏导航 */
+const filterChip = (active: boolean): CSSProperties => ({
+  fontSize: 12,
+  color: active ? '#1f4fad' : '#5b6d86',
+  background: active ? '#f3f7ff' : 'transparent',
+  border: active ? '1px solid #c5d6f5' : '1px solid #e2e8f0',
+  borderRadius: 6,
+  padding: '4px 10px',
   fontWeight: active ? 600 : 500,
   cursor: 'pointer',
 });
@@ -131,7 +147,7 @@ export function SurveyAdminClient() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
-  const [createNote, setCreateNote] = useState('');
+  const [inviteSearch, setInviteSearch] = useState('');
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState('');
   const [inviteFeedbackFilter, setInviteFeedbackFilter] = useState<FeedbackFilter>('all');
@@ -182,12 +198,11 @@ export function SurveyAdminClient() {
     setBusy(true);
     setError('');
     try {
-      const note = createNote.trim();
       const res = await fetch('/api/admin/survey', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(note ? { note } : {}),
+        body: JSON.stringify({}),
       });
       if (res.status === 401) {
         session.setAdmin(false);
@@ -198,14 +213,13 @@ export function SurveyAdminClient() {
         const body = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(body.error || '生成失败');
       }
-      setCreateNote('');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败');
     } finally {
       setBusy(false);
     }
-  }, [createNote, load, session]);
+  }, [load, session]);
 
   const setActive = useCallback(async (token: string, active: boolean) => {
     setBusy(true);
@@ -292,10 +306,20 @@ export function SurveyAdminClient() {
   }, [summary]);
 
   const filteredInvites = useMemo(() => {
-    if (inviteFeedbackFilter === 'done') return invites.filter((item) => item.responseCount > 0);
-    if (inviteFeedbackFilter === 'pending') return invites.filter((item) => item.responseCount <= 0);
-    return invites;
-  }, [invites, inviteFeedbackFilter]);
+    const q = inviteSearch.trim().toLowerCase();
+    return invites.filter((item) => {
+      if (inviteFeedbackFilter === 'done' && item.responseCount <= 0) return false;
+      if (inviteFeedbackFilter === 'pending' && item.responseCount > 0) return false;
+      if (!q) return true;
+      const hay = [
+        item.token,
+        item.path,
+        item.note ?? '',
+        inviteUrl(item.path),
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [invites, inviteFeedbackFilter, inviteSearch]);
 
   if (!session.ready) {
     return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
@@ -324,17 +348,30 @@ export function SurveyAdminClient() {
       />
       {error ? <p style={s.err}>{error}</p> : null}
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-        <button type="button" style={tabBtn(tab === 'invites')} onClick={() => setTab('invites')}>
-          邀请链接
-        </button>
-        <button type="button" style={tabBtn(tab === 'results')} onClick={() => setTab('results')}>
-          调研结果
-        </button>
-        <button type="button" style={{ ...s.btnGhost, marginLeft: 'auto' }} disabled={loading || busy} onClick={() => void load()}>
-          刷新
-        </button>
-        <AdminHelpTip text="邀请链接与回收问卷；时间均为 Asia/Shanghai" />
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-between',
+        gap: 12,
+        marginBottom: 14,
+        borderBottom: '1px solid #e5eaf1',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', minWidth: 0 }}>
+          <button type="button" style={pageTab(tab === 'invites')} onClick={() => setTab('invites')}>
+            邀请链接
+          </button>
+          <button type="button" style={pageTab(tab === 'results')} onClick={() => setTab('results')}>
+            调研结果
+          </button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 8, flexShrink: 0 }}>
+          {tab === 'results' ? (
+            <button type="button" style={s.btnGhost} disabled={loading || busy} onClick={() => void load()}>
+              刷新
+            </button>
+          ) : null}
+          <AdminHelpTip text="邀请链接与回收问卷；时间均为 Asia/Shanghai" />
+        </div>
       </div>
 
       <AiSummarizePanel
@@ -345,17 +382,10 @@ export function SurveyAdminClient() {
       {tab === 'invites' ? (
         <section>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-            <input
-              style={{ ...s.input, width: 160, flex: '0 0 auto' }}
-              value={createNote}
-              maxLength={120}
-              placeholder="备注（可选）"
-              onChange={(e) => setCreateNote(e.target.value)}
-            />
             <button type="button" style={s.btn} disabled={busy || loading} onClick={() => void createInvite()}>
               生成邀请链接
             </button>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               {([
                 ['all', '全部'],
                 ['done', '已反馈'],
@@ -364,13 +394,28 @@ export function SurveyAdminClient() {
                 <button
                   key={key}
                   type="button"
-                  style={tabBtn(inviteFeedbackFilter === key)}
+                  style={filterChip(inviteFeedbackFilter === key)}
                   onClick={() => setInviteFeedbackFilter(key)}
                 >
                   {label}
                 </button>
               ))}
             </div>
+            <input
+              style={{ ...s.input, width: 180, flex: '0 1 220px', fontSize: 12, padding: '5px 8px' }}
+              value={inviteSearch}
+              maxLength={80}
+              placeholder="快速检索"
+              onChange={(e) => setInviteSearch(e.target.value)}
+            />
+            <button
+              type="button"
+              style={{ ...s.btnGhost, marginLeft: 'auto' }}
+              disabled={loading || busy}
+              onClick={() => void load()}
+            >
+              刷新
+            </button>
           </div>
           <div style={s.tableWrap}>
             <table style={s.table}>
