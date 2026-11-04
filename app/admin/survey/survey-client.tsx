@@ -337,6 +337,11 @@ export function SurveyAdminClient() {
         <AdminHelpTip text="邀请链接与回收问卷；时间均为 Asia/Shanghai" />
       </div>
 
+      <AiSummarizePanel
+        scope="survey"
+        onSessionExpired={() => session.setAdmin(false)}
+      />
+
       {tab === 'invites' ? (
         <section>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
@@ -473,11 +478,6 @@ export function SurveyAdminClient() {
         </section>
       ) : (
         <>
-          <AiSummarizePanel
-            scope="survey"
-            active={tab === 'results'}
-            onSessionExpired={() => session.setAdmin(false)}
-          />
           <section style={{ marginBottom: 18 }}>
             <div style={s.cardRow}>
               {cards.map((card) => (
