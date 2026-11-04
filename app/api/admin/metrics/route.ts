@@ -15,6 +15,7 @@ type RawMetricRow = {
   code: string;
   name: string | null;
   title: string | null;
+  announcement_id: string | null;
   period: string;
   metric: string;
   value: number;
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
 
     const raw = await db<RawMetricRow[]>`
       SELECT DISTINCT ON (m.code, m.period, m.metric)
-        m.code, c.name, a.title, m.period, m.metric, m.value, m.unit,
+        m.code, c.name, a.title, m.announcement_id, m.period, m.metric, m.value, m.unit,
         m.source_page, m.prior_value, m.yoy_pct
       FROM financial_metrics m
       LEFT JOIN companies c ON c.code = m.code
@@ -42,6 +43,11 @@ export async function GET(request: Request) {
       ORDER BY m.code, m.period, m.metric, m.confidence DESC NULLS LAST, m.created_at DESC NULLS LAST
     `;
 
+    const ackedRows = await db<Array<{ announcement_id: string }>>`
+      SELECT announcement_id FROM metrics_overview_acks
+    `;
+    const ackedAnnouncementIds = ackedRows.map((r) => r.announcement_id);
+
     const normalized: OverviewDbMetric[] = [];
     for (const row of raw) {
       if (!OVERVIEW_METRICS.includes(row.metric as HeadlineMetricName)) continue;
@@ -49,6 +55,7 @@ export async function GET(request: Request) {
         code: row.code,
         name: row.name,
         title: row.title,
+        announcement_id: row.announcement_id,
         period: row.period,
         metric: row.metric as HeadlineMetricName,
         value: Number(row.value),
@@ -59,12 +66,12 @@ export async function GET(request: Request) {
       });
     }
 
-    const { rows, summary } = buildOverviewRows(normalized);
+    const { rows, summary } = buildOverviewRows(normalized, { ackedAnnouncementIds });
     const periods = [...new Set(rows.map((r) => r.period))]
       .sort((a, b) => b.localeCompare(a));
 
     return Response.json({
-      note: '一眼看四核展示效果（值·同比·页码）。异常：缺核 / 无页码 / |同比|≥500%。点行进详情。',
+      note: '一眼看四核展示效果（值·同比·页码）。异常：缺核 / 无页码 / |同比|≥500%。错抓可删；真暴增可审核通过。',
       summary,
       periods,
       rows,

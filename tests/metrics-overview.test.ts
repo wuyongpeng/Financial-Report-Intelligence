@@ -60,6 +60,7 @@ test('buildOverviewRows groups four cores and flags incomplete', () => {
     {
       code: '000333', name: '美的集团',
       title: '美的集团股份有限公司2026年半年度报告',
+      announcement_id: 'ann-midea-h1',
       period: '2026H1', metric: 'revenue',
       value: 261_052_000_000, unit: '元', source_page: 1, prior_value: null, yoy_pct: 10,
     },
@@ -77,6 +78,8 @@ test('buildOverviewRows groups four cores and flags incomplete', () => {
   assert.equal(out.length, 1);
   assert.equal(out[0].href, '/000333?period=2026H1');
   assert.equal(out[0].title, '美的集团股份有限公司2026年半年度报告');
+  assert.equal(out[0].announcementId, 'ann-midea-h1');
+  assert.equal(out[0].acked, false);
   assert.equal(out[0].abnormal, true);
   assert.ok(out[0].issues.includes('missing'));
   assert.equal(summary.missingCore, 1);
@@ -105,4 +108,55 @@ test('buildOverviewRows marks disclosed absurd yoy', () => {
   assert.equal(rows[0].abnormal, true);
   assert.ok(rows[0].issues.includes('absurd_yoy'));
   assert.ok(rows[0].metrics.net_profit.issues.includes('absurd_yoy'));
+});
+
+test('buildOverviewRows keeps announcementId for discard of wrong grab', () => {
+  const { rows } = buildOverviewRows([
+    {
+      code: '000792',
+      name: '盐湖股份',
+      title: '青海盐湖工业股份有限公司2026年前三季度业绩预告',
+      announcement_id: 'ann-yanhu-preview',
+      period: '2026Q3',
+      metric: 'net_profit',
+      value: 1, unit: '元', source_page: null, prior_value: null, yoy_pct: null,
+    },
+  ]);
+  assert.equal(rows[0].announcementId, 'ann-yanhu-preview');
+  assert.equal(rows[0].title.includes('业绩预告'), true);
+  assert.equal(rows[0].abnormal, true);
+});
+
+test('acked true surge drops from abnormal summary (天齐)', () => {
+  const dbRows: OverviewDbMetric[] = [
+    {
+      code: '002466', name: '天齐锂业', announcement_id: 'ann-tianqi-q3',
+      period: '2026Q3', metric: 'revenue',
+      value: 1e9, unit: '元', source_page: 1, prior_value: null, yoy_pct: 10,
+    },
+    {
+      code: '002466', name: '天齐锂业', announcement_id: 'ann-tianqi-q3',
+      period: '2026Q3', metric: 'net_profit',
+      value: 1e8, unit: '元', source_page: 1, prior_value: null, yoy_pct: 1324,
+    },
+    {
+      code: '002466', name: '天齐锂业', announcement_id: 'ann-tianqi-q3',
+      period: '2026Q3', metric: 'eps',
+      value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 10,
+    },
+    {
+      code: '002466', name: '天齐锂业', announcement_id: 'ann-tianqi-q3',
+      period: '2026Q3', metric: 'roe',
+      value: 5, unit: '%', source_page: 1, prior_value: null, yoy_pct: 10,
+    },
+  ];
+  const before = buildOverviewRows(dbRows);
+  assert.equal(before.rows[0].abnormal, true);
+  assert.equal(before.summary.absurdYoy, 1);
+
+  const after = buildOverviewRows(dbRows, { ackedAnnouncementIds: ['ann-tianqi-q3'] });
+  assert.equal(after.rows[0].acked, true);
+  assert.equal(after.rows[0].abnormal, false);
+  assert.equal(after.summary.abnormal, 0);
+  assert.equal(after.summary.absurdYoy, 0);
 });

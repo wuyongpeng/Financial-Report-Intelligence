@@ -197,6 +197,14 @@ const btnGhost: CSSProperties = {
   border: '1px solid #d5dde8', borderRadius: 8, background: '#fff', color: '#3d5270',
   padding: '7px 12px', fontSize: 13, cursor: 'pointer',
 };
+const btnDanger: CSSProperties = {
+  border: '1px solid #fecaca', borderRadius: 8, background: '#fff', color: '#b91c1c',
+  padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+};
+const btnAck: CSSProperties = {
+  border: '1px solid #bbf7d0', borderRadius: 8, background: '#fff', color: '#15803d',
+  padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+};
 const err: CSSProperties = { color: '#b91c1c', fontSize: 13, margin: '0 0 12px' };
 const head: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 };
 const filters: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center' };
@@ -238,6 +246,8 @@ export const adminStyles = {
   input,
   btn,
   btnGhost,
+  btnDanger,
+  btnAck,
   err,
   head,
   filters,

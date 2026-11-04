@@ -30,6 +30,8 @@ export type OverviewDbMetric = {
   name?: string | null;
   /** announcements.title — full report name for spotting wrong grabs. */
   title?: string | null;
+  /** financial_metrics.announcement_id — for discard of wrong grabs. */
+  announcement_id?: string | null;
   period: string;
   metric: HeadlineMetricName;
   value: number;
@@ -56,10 +58,15 @@ export type OverviewRow = {
   /** announcements.title (may be empty if JOIN missed). */
   title: string;
   period: string;
+  /** Soft-discard / ack target; null if JOIN/metric had no announcement_id. */
+  announcementId: string | null;
   href: string;
   metrics: Record<HeadlineMetricName, OverviewMetricCell>;
   issues: OverviewIssue[];
+  /** True when issues exist and row is not manually acked (true surge). */
   abnormal: boolean;
+  /** Human-acked true surge / acceptable anomaly; hidden from异常筛选. */
+  acked: boolean;
 };
 
 export type OverviewSummary = {
@@ -130,12 +137,27 @@ export function overviewPeriodRank(token: string): number {
   return year * 10 + quarter;
 }
 
-export function buildOverviewRows(dbRows: OverviewDbMetric[]): {
+export function buildOverviewRows(
+  dbRows: OverviewDbMetric[],
+  options?: { ackedAnnouncementIds?: Iterable<string> },
+): {
   rows: OverviewRow[];
   summary: OverviewSummary;
 } {
+  const ackedIds = new Set(
+    [...(options?.ackedAnnouncementIds ?? [])]
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
   type Key = string;
-  const byKey = new Map<Key, { code: string; name: string; title: string; period: string; metrics: Map<HeadlineMetricName, OverviewDbMetric> }>();
+  const byKey = new Map<Key, {
+    code: string;
+    name: string;
+    title: string;
+    period: string;
+    announcementId: string | null;
+    metrics: Map<HeadlineMetricName, OverviewDbMetric>;
+  }>();
 
   for (const row of dbRows) {
     if (!OVERVIEW_METRICS.includes(row.metric)) continue;
@@ -148,12 +170,16 @@ export function buildOverviewRows(dbRows: OverviewDbMetric[]): {
         name: row.name?.trim() || '',
         title: row.title?.trim() || '',
         period: row.period,
+        announcementId: row.announcement_id?.trim() || null,
         metrics: new Map(),
       };
       byKey.set(key, bucket);
     }
     if (row.name?.trim()) bucket.name = row.name.trim();
     if (row.title?.trim() && !bucket.title) bucket.title = row.title.trim();
+    if (!bucket.announcementId && row.announcement_id?.trim()) {
+      bucket.announcementId = row.announcement_id.trim();
+    }
     // Prefer first row; callers should DISTINCT ON already.
     if (!bucket.metrics.has(row.metric)) bucket.metrics.set(row.metric, row);
   }
@@ -173,21 +199,25 @@ export function buildOverviewRows(dbRows: OverviewDbMetric[]): {
       for (const issue of cell.issues) issueSet.add(issue);
     }
     const issues = [...issueSet];
-    const isAbnormal = issues.length > 0;
+    const acked = Boolean(bucket.announcementId && ackedIds.has(bucket.announcementId));
+    // Acked = human accepted (e.g. true surge); drop from异常 counts/filters.
+    const isAbnormal = issues.length > 0 && !acked;
     if (isAbnormal) abnormal += 1;
-    if (issues.includes('missing')) missingCore += 1;
-    if (issues.includes('no_page')) noPage += 1;
-    if (issues.includes('absurd_yoy')) absurdYoy += 1;
+    if (isAbnormal && issues.includes('missing')) missingCore += 1;
+    if (isAbnormal && issues.includes('no_page')) noPage += 1;
+    if (isAbnormal && issues.includes('absurd_yoy')) absurdYoy += 1;
 
     rows.push({
       code: bucket.code,
       name: bucket.name,
       title: bucket.title,
       period: bucket.period,
+      announcementId: bucket.announcementId,
       href: `/${bucket.code}?period=${encodeURIComponent(bucket.period)}`,
       metrics,
       issues,
       abnormal: isAbnormal,
+      acked,
     });
   }
 

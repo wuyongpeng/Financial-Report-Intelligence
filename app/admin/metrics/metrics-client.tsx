@@ -9,6 +9,7 @@ import {
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
+import { DISCARD_CONFIRM_PASSWORD } from '@/lib/discard-password';
 import {
   issueLabel,
   OVERVIEW_METRICS,
@@ -39,6 +40,11 @@ export function MetricsAdminClient() {
   const [cardFilter, setCardFilter] = useState<CardFilter>(null);
   const [periodFilter, setPeriodFilter] = useState('');
   const [codeQuery, setCodeQuery] = useState('');
+  const [discardTarget, setDiscardTarget] = useState<OverviewRow | null>(null);
+  const [discardPassword, setDiscardPassword] = useState('');
+  const [discardPasswordError, setDiscardPasswordError] = useState('');
+  const [rowBusyId, setRowBusyId] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState('');
 
   const toggleCardFilter = useCallback((key: Exclude<CardFilter, null>) => {
     setCardFilter((prev) => {
@@ -47,6 +53,23 @@ export function MetricsAdminClient() {
     });
     // Card filter owns the abnormal view; clear checkbox so UI stays unambiguous.
     setOnlyAbnormal(false);
+  }, []);
+
+  const closeDiscard = useCallback(() => {
+    setDiscardTarget(null);
+    setDiscardPassword('');
+    setDiscardPasswordError('');
+  }, []);
+
+  const askDiscard = useCallback((row: OverviewRow) => {
+    if (!row.announcementId) {
+      setActionMsg(`${row.code} ${row.period} 缺少公告 id，无法删除`);
+      return;
+    }
+    setActionMsg('');
+    setDiscardPassword('');
+    setDiscardPasswordError('');
+    setDiscardTarget(row);
   }, []);
 
   const load = useCallback(async () => {
@@ -74,6 +97,85 @@ export function MetricsAdminClient() {
     }
   }, [session]);
 
+  const confirmDiscard = useCallback(async () => {
+    if (!discardTarget?.announcementId) return;
+    if (discardPassword !== DISCARD_CONFIRM_PASSWORD) {
+      setDiscardPasswordError('删除密码错误');
+      return;
+    }
+    const row = discardTarget;
+    const password = discardPassword;
+    const busyKey = `${row.code}:${row.period}`;
+    setRowBusyId(busyKey);
+    setDiscardPasswordError('');
+    try {
+      const res = await fetch('/api/crawl/discard', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ announcementId: row.announcementId, password }),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string; note?: string };
+      if (res.status === 401) {
+        session.setAdmin(false);
+        setActionMsg('管理员登录已失效，请重新登录');
+        closeDiscard();
+        return;
+      }
+      if (!res.ok) {
+        setDiscardPasswordError(body.error || '删除失败');
+        return;
+      }
+      closeDiscard();
+      setActionMsg(body.note || `已剔除 ${row.code} ${row.period}`);
+      await load();
+    } catch (e) {
+      setDiscardPasswordError(e instanceof Error ? e.message : '删除失败');
+    } finally {
+      setRowBusyId(null);
+    }
+  }, [closeDiscard, discardPassword, discardTarget, load, session]);
+
+  const ackRow = useCallback(async (row: OverviewRow) => {
+    if (!row.announcementId) {
+      setActionMsg(`${row.code} ${row.period} 缺少公告 id，无法审核`);
+      return;
+    }
+    if (row.acked) return;
+    const busyKey = `${row.code}:${row.period}`;
+    if (rowBusyId === busyKey) return;
+    setRowBusyId(busyKey);
+    setActionMsg('');
+    try {
+      const res = await fetch('/api/admin/metrics/ack', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          announcementId: row.announcementId,
+          code: row.code,
+          period: row.period,
+        }),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string; note?: string };
+      if (res.status === 401) {
+        session.setAdmin(false);
+        setActionMsg('管理员登录已失效，请重新登录');
+        return;
+      }
+      if (!res.ok) {
+        setActionMsg(body.error || '审核失败');
+        return;
+      }
+      setActionMsg(body.note || `已审核通过 ${row.code} ${row.period}`);
+      await load();
+    } catch (e) {
+      setActionMsg(e instanceof Error ? e.message : '审核失败');
+    } finally {
+      setRowBusyId(null);
+    }
+  }, [load, rowBusyId, session]);
+
   useEffect(() => {
     if (session.admin) void load();
   }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -83,8 +185,8 @@ export function MetricsAdminClient() {
     const q = codeQuery.trim();
     return payload.rows.filter((row) => {
       if (cardFilter === 'abnormal' && !row.abnormal) return false;
-      if (cardFilter === 'missing' && !row.issues.includes('missing')) return false;
-      if (cardFilter === 'absurd_yoy' && !row.issues.includes('absurd_yoy')) return false;
+      if (cardFilter === 'missing' && !(row.abnormal && row.issues.includes('missing'))) return false;
+      if (cardFilter === 'absurd_yoy' && !(row.abnormal && row.issues.includes('absurd_yoy'))) return false;
       // Checkbox only when no card filter (card filter takes priority).
       if (!cardFilter && onlyAbnormal && !row.abnormal) return false;
       if (periodFilter && row.period !== periodFilter) return false;
@@ -121,6 +223,7 @@ export function MetricsAdminClient() {
       />
 
       {error ? <p style={s.err}>{error}</p> : null}
+      {actionMsg ? <p style={{ ...s.muted, color: '#15803d' }}>{actionMsg}</p> : null}
 
       {payload ? (
         <div style={s.cardRow}>
@@ -208,52 +311,152 @@ export function MetricsAdminClient() {
                 <th key={m} style={s.th}>{OVERVIEW_METRIC_LABEL[m]}</th>
               ))}
               <th style={s.th}>异常</th>
+              <th style={s.th}>操作</th>
             </tr>
           </thead>
           <tbody>
             {!loading && rows.length === 0 ? (
-              <tr><td colSpan={9} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
+              <tr><td colSpan={10} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
             ) : null}
-            {rows.map((row) => (
-              <tr key={`${row.code}-${row.period}`}>
-                <td style={s.td}>
-                  <Link href={row.href} style={linkStyle}>{row.code}</Link>
-                </td>
-                <td style={s.td}>
-                  <Link href={row.href} style={{ ...linkStyle, color: '#3a4d66' }}>
-                    {row.name || '—'}
-                  </Link>
-                </td>
-                <td style={s.td}>
-                  <Link href={row.href} style={{ ...linkStyle, color: '#3a4d66' }}>{row.period}</Link>
-                </td>
-                <td style={{ ...s.td, maxWidth: 220 }}>
-                  <TitleCell title={row.title} />
-                </td>
-                {OVERVIEW_METRICS.map((m) => (
-                  <td key={m} style={s.td}>
-                    <MetricCellView metric={m} row={row} />
+            {rows.map((row) => {
+              const busyKey = `${row.code}:${row.period}`;
+              const busy = rowBusyId === busyKey;
+              return (
+                <tr key={busyKey}>
+                  <td style={s.td}>
+                    <Link href={row.href} style={linkStyle}>{row.code}</Link>
                   </td>
-                ))}
-                <td style={s.td}>
-                  {row.abnormal ? (
-                    <span style={{ color: '#b91c1c', fontWeight: 650 }}>
-                      {row.issues.map(issueLabel).join(' · ')}
-                    </span>
-                  ) : (
-                    <span style={{ color: '#15803d' }}>正常</span>
-                  )}
-                </td>
-              </tr>
-            ))}
+                  <td style={s.td}>
+                    <Link href={row.href} style={{ ...linkStyle, color: '#3a4d66' }}>
+                      {row.name || '—'}
+                    </Link>
+                  </td>
+                  <td style={s.td}>
+                    <Link href={row.href} style={{ ...linkStyle, color: '#3a4d66' }}>{row.period}</Link>
+                  </td>
+                  <td style={{ ...s.td, maxWidth: 220 }}>
+                    <TitleCell title={row.title} />
+                  </td>
+                  {OVERVIEW_METRICS.map((m) => (
+                    <td key={m} style={s.td}>
+                      <MetricCellView metric={m} row={row} />
+                    </td>
+                  ))}
+                  <td style={s.td}>
+                    {row.acked ? (
+                      <span style={{ color: '#15803d', fontWeight: 650 }}>已审</span>
+                    ) : row.abnormal ? (
+                      <span style={{ color: '#b91c1c', fontWeight: 650 }}>
+                        {row.issues.map(issueLabel).join(' · ')}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#15803d' }}>正常</span>
+                    )}
+                  </td>
+                  <td style={s.td}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {row.abnormal && !row.acked ? (
+                        <button
+                          type="button"
+                          style={{
+                            ...s.btnAck,
+                            opacity: row.announcementId && !busy ? 1 : 0.45,
+                            cursor: row.announcementId && !busy ? 'pointer' : 'not-allowed',
+                          }}
+                          disabled={!row.announcementId || busy}
+                          onClick={() => { void ackRow(row); }}
+                        >
+                          {busy ? '…' : '审核通过'}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        style={{
+                          ...s.btnDanger,
+                          opacity: row.announcementId && !busy ? 1 : 0.45,
+                          cursor: row.announcementId && !busy ? 'pointer' : 'not-allowed',
+                        }}
+                        disabled={!row.announcementId || busy}
+                        onClick={() => askDiscard(row)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       <p style={{ ...s.muted, marginTop: 14 }}>
-        展示口径与详情页一致：金额按元÷1e8 显示「亿」，ROE 带 %，同比优先披露 yoy_pct / prior。
-        悬停明细仍在详情页卡片上。本页只读，不改库。
+        展示口径与详情页一致。错抓（如业绩预告）点删除；真暴增（如天齐 +1324%）点审核通过后不再进异常列表。
       </p>
+
+      {discardTarget ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="确认删除"
+          style={confirmBackdrop}
+          onClick={() => { if (!rowBusyId) closeDiscard(); }}
+        >
+          <div style={confirmDialog} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 650 }}>确认删除？</h3>
+            <p style={{ ...s.muted, margin: '0 0 8px' }}>
+              {discardTarget.code} {discardTarget.name || ''} · {discardTarget.period}
+            </p>
+            {discardTarget.title ? (
+              <p style={{ ...s.muted, margin: '0 0 12px', color: '#3a4d66' }}>
+                {discardTarget.title.replace(/\s+/g, ' ').slice(0, 100)}
+              </p>
+            ) : null}
+            <label style={{ display: 'block', marginBottom: 12 }}>
+              <span style={{ ...s.muted, display: 'block', marginBottom: 6 }}>删除密码</span>
+              <input
+                type="password"
+                autoComplete="off"
+                autoFocus
+                style={{ ...s.input, width: '100%', boxSizing: 'border-box' }}
+                value={discardPassword}
+                disabled={Boolean(rowBusyId)}
+                onChange={(e) => {
+                  setDiscardPassword(e.target.value);
+                  if (discardPasswordError) setDiscardPasswordError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void confirmDiscard();
+                  }
+                }}
+              />
+              {discardPasswordError ? (
+                <span style={{ ...s.err, display: 'block', marginTop: 6 }}>{discardPasswordError}</span>
+              ) : null}
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" style={s.btnGhost} disabled={Boolean(rowBusyId)} onClick={closeDiscard}>
+                取消
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...s.btn,
+                  background: '#b91c1c',
+                  opacity: discardPassword === DISCARD_CONFIRM_PASSWORD && !rowBusyId ? 1 : 0.5,
+                  cursor: discardPassword === DISCARD_CONFIRM_PASSWORD && !rowBusyId ? 'pointer' : 'not-allowed',
+                }}
+                disabled={discardPassword !== DISCARD_CONFIRM_PASSWORD || Boolean(rowBusyId)}
+                onClick={() => { void confirmDiscard(); }}
+              >
+                {rowBusyId ? '删除中…' : '删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AdminMain>
   );
 }
@@ -317,7 +520,7 @@ function TitleCell({ title }: { title: string }) {
 
 function MetricCellView({ metric, row }: { metric: HeadlineMetricName; row: OverviewRow }) {
   const cell = row.metrics[metric];
-  const bad = cell.issues.length > 0;
+  const bad = cell.issues.length > 0 && !row.acked;
   return (
     <div>
       <div style={{ fontWeight: 600, color: bad && cell.issues.includes('missing') ? '#b91c1c' : '#203047' }}>
@@ -326,17 +529,17 @@ function MetricCellView({ metric, row }: { metric: HeadlineMetricName; row: Over
       <div style={{
         marginTop: 2,
         fontSize: 11,
-        color: cell.issues.includes('absurd_yoy') ? '#b91c1c' : '#6b7a8d',
-        fontWeight: cell.issues.includes('absurd_yoy') ? 650 : 400,
+        color: !row.acked && cell.issues.includes('absurd_yoy') ? '#b91c1c' : '#6b7a8d',
+        fontWeight: !row.acked && cell.issues.includes('absurd_yoy') ? 650 : 400,
       }}
       >
         同比 {cell.yoyText}
         {' · '}
-        <span style={{ color: cell.issues.includes('no_page') ? '#b91c1c' : undefined }}>
+        <span style={{ color: !row.acked && cell.issues.includes('no_page') ? '#b91c1c' : undefined }}>
           {cell.pageText}
         </span>
       </div>
-      {cell.issues.length > 0 ? (
+      {!row.acked && cell.issues.length > 0 ? (
         <div style={{ marginTop: 2, fontSize: 11, color: '#b91c1c' }}>
           {cell.issues.map((i: OverviewIssue) => issueLabel(i)).join(' · ')}
         </div>
@@ -349,4 +552,24 @@ const linkStyle: CSSProperties = {
   color: '#1f4fad',
   textDecoration: 'none',
   fontWeight: 600,
+};
+
+const confirmBackdrop: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(16, 24, 40, 0.35)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 80,
+  padding: 16,
+};
+
+const confirmDialog: CSSProperties = {
+  width: 'min(420px, 100%)',
+  background: '#fff',
+  borderRadius: 12,
+  border: '1px solid #e5eaf1',
+  padding: 18,
+  boxShadow: '0 12px 40px rgba(16, 24, 40, 0.18)',
 };

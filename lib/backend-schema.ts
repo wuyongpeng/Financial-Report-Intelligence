@@ -111,5 +111,14 @@ async function migrate() {
     )`;
     await tx`CREATE INDEX IF NOT EXISTS survey_responses_invite_idx ON survey_responses (invite_id, created_at DESC)`;
     await tx`CREATE INDEX IF NOT EXISTS survey_responses_created_idx ON survey_responses (created_at DESC)`;
+    await tx`CREATE TABLE IF NOT EXISTS metrics_overview_acks (
+      announcement_id TEXT PRIMARY KEY REFERENCES announcements(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,
+      period TEXT NOT NULL,
+      note TEXT,
+      acked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS metrics_overview_acks_code_period_idx
+      ON metrics_overview_acks (code, period)`;
   });
 }
