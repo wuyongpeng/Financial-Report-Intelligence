@@ -148,6 +148,7 @@ function metricResolvedYoy(metric: NonNullable<ReturnType<typeof metricByName>>)
     disclosedPrior: metric.disclosedPrior,
     disclosedYoyPct: metric.disclosedYoyPct,
     crossReportPrior: metric.prior,
+    metric: metric.metric,
   });
 }
 
@@ -1554,6 +1555,7 @@ export default function ReportHome() {
                           disclosedPrior: metric.disclosedPrior,
                           disclosedYoyPct: metric.disclosedYoyPct,
                           crossReportPrior: metric.prior,
+                          metric: metric.metric,
                         });
                         const tone = yoyTone(yoy);
                         const badge = deltaLabel(yoy);

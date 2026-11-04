@@ -606,20 +606,39 @@ export type ResolvedYoy = YoyResult & { source: YoySource };
  * YoY% (or unit-scaled %) mis-stored as prior → astronomical computed %.
  * Same 500% bar as /admin/metrics; require prior ≪ current so true hypergrowth
  * (寒武纪等) with a real tiny base still keeps disclosed prior.
+ * Pass metric so ROE (already %) is not killed by relative YoY (牧原 13.79% vs 1.30%).
  */
-export function isAbsurdDisclosedPrior(current: number, prior: number): boolean {
+export function isAbsurdDisclosedPrior(
+  current: number,
+  prior: number,
+  metric?: HeadlineMetricName | string | null,
+): boolean {
   if (!Number.isFinite(current) || !Number.isFinite(prior)) return false;
+  const absCurrent = Math.abs(current);
+  const absPrior = Math.abs(prior);
+  // ROE is a rate: 1.3%→13.79% is real; relative +960% is not a parse error.
+  if (metric === 'roe') {
+    if (absCurrent <= 100 && absPrior <= 100) return false;
+    return absPrior > 1000 || absCurrent > 1000;
+  }
   const yoy = describeYoy(current, prior);
   const pct = yoy && !yoy.naPercent && yoy.pct !== undefined ? yoy.pct : null;
   if (pct == null || Math.abs(pct) < 500) return false;
-  const absCurrent = Math.abs(current);
-  const absPrior = Math.abs(prior);
   const ratio = absCurrent > 0 ? absPrior / absCurrent : 1;
   // Yuan-scale: bare YoY% (3.78) stored as prior against 亿-level amounts.
   if (ratio < 0.01 || absPrior < absCurrent * 1e-6) return true;
   // EPS / small-unit scale: bare YoY% (0.77) vs 15.35 → +1893%; keep 寒武纪-style 亿 prior.
   if (absCurrent < 1000 && absPrior <= 100 && ratio < 0.1) return true;
   return false;
+}
+
+/** ROE YoY is disclosed in percentage points, not relative %. */
+function roeYoyFromLevels(current: number, prior: number): YoyResult {
+  const pp = current - prior;
+  if (pp === 0) return { kind: 'flat', pct: 0, label: '持平', absoluteDelta: 0, naPercent: false };
+  const abs = Math.abs(pp);
+  const label = pp > 0 ? `上升 ${abs.toFixed(2)} 个百分点` : `下降 ${abs.toFixed(2)} 个百分点`;
+  return { kind: 'qualitative', pct: pp, label, absoluteDelta: pp, naPercent: false };
 }
 
 function yoyFromDisclosedPct(pct: number, current?: number, prior?: number): YoyResult {
@@ -660,12 +679,14 @@ export function resolveYoy(
     disclosedPrior?: number | null;
     disclosedYoyPct?: number | null;
     crossReportPrior?: number | null;
+    metric?: HeadlineMetricName | string | null;
   } = {},
 ): ResolvedYoy | undefined {
   if (current === undefined || !Number.isFinite(current)) return undefined;
   const dPrior = opts.disclosedPrior;
   const dYoy = opts.disclosedYoyPct;
   const cPrior = opts.crossReportPrior;
+  const metric = opts.metric ?? null;
   const hasDPrior = dPrior != null && Number.isFinite(dPrior);
   const hasDYoy = dYoy != null && Number.isFinite(dYoy);
   const hasCPrior = cPrior != null && Number.isFinite(cPrior);
@@ -674,20 +695,30 @@ export function resolveYoy(
     // Skip absurd/misparsed or zero prior so disclosed % stays authoritative (zero base → N/A %).
     const priorForPct = hasDPrior
       && (dPrior as number) !== 0
-      && !isAbsurdDisclosedPrior(current, dPrior as number)
+      && !isAbsurdDisclosedPrior(current, dPrior as number, metric)
       ? (dPrior as number)
       : undefined;
+    // ROE disclosed "yoy" is sometimes a mistaken relative %; prefer pp from levels when prior ok.
+    if (metric === 'roe' && priorForPct !== undefined) {
+      return { ...roeYoyFromLevels(current, priorForPct), source: 'disclosed' };
+    }
     const built = yoyFromDisclosedPct(dYoy as number, current, priorForPct);
     return { ...built, source: 'disclosed' };
   }
   // Guard: YoY% mis-read as prior → astronomical %; fall through to cross-report.
   if (hasDPrior) {
-    const yoy = describeYoy(current, dPrior as number);
-    if (yoy && !isAbsurdDisclosedPrior(current, dPrior as number)) {
-      return { ...yoy, source: 'disclosed' };
+    if (!isAbsurdDisclosedPrior(current, dPrior as number, metric)) {
+      if (metric === 'roe') {
+        return { ...roeYoyFromLevels(current, dPrior as number), source: 'disclosed' };
+      }
+      const yoy = describeYoy(current, dPrior as number);
+      if (yoy) return { ...yoy, source: 'disclosed' };
     }
   }
   if (hasCPrior) {
+    if (metric === 'roe') {
+      return { ...roeYoyFromLevels(current, cPrior as number), source: 'computed' };
+    }
     const yoy = describeYoy(current, cPrior as number);
     return yoy ? { ...yoy, source: 'computed' } : undefined;
   }

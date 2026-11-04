@@ -118,6 +118,7 @@ export function buildMetricCell(
   const yoy: ResolvedYoy | undefined = resolveYoy(row.value, {
     disclosedPrior: row.prior_value,
     disclosedYoyPct: row.yoy_pct,
+    metric,
   });
   const yoyText = formatYoyBadge(yoy, 1);
   const yoyPct = yoy && !yoy.naPercent && yoy.pct !== undefined ? yoy.pct : null;

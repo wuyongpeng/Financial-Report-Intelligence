@@ -107,11 +107,13 @@ function formatFourCore(
       disclosedPrior: row?.prior_value,
       disclosedYoyPct: row?.yoy_pct,
       crossReportPrior: crossPrior,
+      metric: name,
     });
     const priorVal = resolveMetricPrior(current, {
       disclosedPrior: row?.prior_value,
       disclosedYoyPct: row?.yoy_pct,
       crossReportPrior: crossPrior,
+      metric: name,
     });
     const cite = tagFor(
       citeTag,

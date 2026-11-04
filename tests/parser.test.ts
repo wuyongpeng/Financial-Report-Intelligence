@@ -555,6 +555,27 @@ test('CCB 2026H1 财务摘要: 基本和稀释每股收益 footnote + dash YoY',
   assert.equal(roe?.value, 9.52);
 });
 
+
+test('BOC EPS three-year columns 0.36|0.36|0.36 keep prior not yoy%', () => {
+  const metrics = parseCoreMetricPages([
+    '财务摘要 单位：百万元人民币 基本每股收益（元） 0.36 0.36 0.36 净资产收益率（%） 5 8.66 9.11 9.58',
+  ]);
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 0.36);
+  assert.equal(eps?.priorValue, 0.36);
+  assert.equal(eps?.yoyPct, undefined);
+});
+
+test('bank P&L 上年同期|变动额|变动比率% does not take 变动额 as restated prior', () => {
+  const metrics = parseCoreMetricPages([
+    '利润表主要项目 单位：百万元人民币 营业收入 356,903 329,003 27,900 8.48% 归属于母公司所有者的净利润 123,594 117,591 6,003 5.10%',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 356903000000);
+  assert.equal(revenue?.priorValue, 329003000000);
+  assert.ok(revenue?.yoyPct != null && Math.abs(revenue.yoyPct - 8.48) < 0.01);
+});
+
 test('BOC 2026H1 财务摘要: 净资产收益率（%） takes 2026年1-6月 column', () => {
   // 中国银行 601988 2026H1 P6：无「加权平均」字样；注释列「5」后是本期 8.66，不是上年 9.11。
   const page = [

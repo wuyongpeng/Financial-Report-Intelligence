@@ -272,6 +272,17 @@ test('resolveYoy ignores EPS-scale bare YoY% stored as prior (茅台 15.35 / 0.7
   assert.ok(Math.abs((yoy.pct ?? 0) - ((15.35 - 15.23) / 15.23) * 100) < 0.05);
 });
 
+test('ROE prior 1.30 vs 13.79 is kept; YoY shown in percentage points (牧原)', () => {
+  assert.equal(isAbsurdDisclosedPrior(13.79, 1.3, 'roe'), false);
+  assert.equal(isAbsurdDisclosedPrior(15.35, 0.77, 'eps'), true);
+  const yoy = resolveYoy(13.79, { disclosedPrior: 1.3, metric: 'roe' })!;
+  assert.equal(yoy.source, 'disclosed');
+  assert.equal(yoy.kind, 'qualitative');
+  assert.ok(yoy.label.includes('12.49'));
+  assert.ok(yoy.label.includes('个百分点'));
+  assert.equal(formatYoyBadge(yoy, 2), yoy.label);
+});
+
 test('resolveYoy prefers disclosed YoY percent over cross-report prior', () => {
   const yoy = resolveYoy(100, {
     disclosedYoyPct: -45.57,

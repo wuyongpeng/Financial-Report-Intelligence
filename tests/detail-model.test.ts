@@ -202,6 +202,10 @@ test('resolveMetricPrior prefers disclosed, then cross, then implied from YoY %'
   assert.ok(implied !== undefined && Math.abs(implied! - 100) < 1e-9);
 });
 
+test('resolveMetricPrior keeps Muyuan-style ROE prior 1.30', () => {
+  assert.equal(resolveMetricPrior(13.79, { disclosedPrior: 1.3, metric: 'roe' }), 1.3);
+});
+
 test('resolveMetricPrior skips misparsed YoY% prior that would show as 0 亿', () => {
   // 茅台 2026Q3：同比% 3.78 被误写入 prior_value，真实上年在跨期报告里。
   const current = 19_950_545_560.09;

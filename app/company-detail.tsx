@@ -814,6 +814,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         disclosedPrior: metricRow?.prior_value,
         disclosedYoyPct: metricRow?.yoy_pct,
         crossReportPrior: crossPrior,
+        metric: m,
       })
       : describeYoy(currentVal, crossPrior);
     const priorVal = baselineIsDefault
@@ -821,6 +822,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         disclosedPrior: metricRow?.prior_value,
         disclosedYoyPct: metricRow?.yoy_pct,
         crossReportPrior: crossPrior,
+        metric: m,
       })
       : crossPrior;
     const detail = currentVal !== undefined && yoy

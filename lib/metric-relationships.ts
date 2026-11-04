@@ -177,6 +177,7 @@ function resolveMetricYoy(
       disclosedPrior: row?.prior_value,
       disclosedYoyPct: row?.yoy_pct,
       crossReportPrior: crossPrior,
+      metric,
     });
   }
   return describeYoy(current, crossPrior);
@@ -193,6 +194,7 @@ function priorValue(
     disclosedPrior: row?.prior_value,
     disclosedYoyPct: row?.yoy_pct,
     crossReportPrior: previous ? value(previous, metric) : undefined,
+    metric,
   });
 }
 

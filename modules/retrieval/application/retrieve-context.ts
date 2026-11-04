@@ -203,6 +203,7 @@ export async function retrieveContext(input: {
       disclosedPrior: fact.metric.priorValue,
       disclosedYoyPct: fact.metric.yoyPct,
       crossReportPrior: prior?.metric.value,
+      metric: fact.metric.metric,
     });
     if (yoy) {
       const formula = yoy.source === 'disclosed'

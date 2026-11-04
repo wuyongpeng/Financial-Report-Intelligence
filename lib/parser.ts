@@ -210,6 +210,8 @@ function looksLikeBareYoyThenYtd(currentRaw: number, bare: number, next: number)
   // EPS-scale: 本期 | 同比% | 年初至期末(≥本期) | …
   // Allow next ≈ current (YTD folded poorly) when bare looks percent-sized (茅台 15.35|0.77|…).
   if (!(absBare <= 500)) return false;
+  // 银行摘要三年列 0.36|0.36|0.36：中间是上年同期 EPS，不是同比%。
+  if (absCurrent > 0 && Math.abs(absBare - absCurrent) / absCurrent <= 0.08) return false;
   if (absNext < absCurrent * 0.85 && !(absBare <= 100 && absNext > absBare * 2)) return false;
   // Percent column often exceeds YTD absolute (0.60 | 15.13 | 1.76); prior EPS rarely does.
   if (absBare > absNext) return true;
@@ -261,6 +263,14 @@ function parseTrailingPriorAndYoy(rest: string, currentRaw?: number) {
     const afterDual = cursor.slice(dualPrior[0].length);
     const yoyAfterDual = parseYoyPercentToken(afterDual);
     if (pre !== null && post !== null && yoyAfterDual) {
+      // 银行利润表：本期 | 上年同期 | 变动额 | 变动比率% — 变动额不是「调整后」。
+      // 若同比%贴近 (本期−上年同期)/|上年同期|，保留上年同期为 prior。
+      if (currentRaw !== undefined && Number.isFinite(currentRaw) && pre !== 0) {
+        const yoyFromPre = ((currentRaw - pre) / Math.abs(pre)) * 100;
+        if (Math.abs(yoyFromPre - yoyAfterDual.value) <= 0.15 + Math.abs(yoyAfterDual.value) * 0.002) {
+          return { priorValue: pre, yoyPct: yoyAfterDual.value };
+        }
+      }
       return { priorValue: post, yoyPct: yoyAfterDual.value };
     }
   }
@@ -514,6 +524,8 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
         if (!parsed) continue;
         let score = 0.68;
         if (isSummary) score += 0.14;
+        // 中行等：摘要页 EPS/ROE 必须压过后文利润表「（一）基本每股收益」。
+        if (isSummary && (definition.metric === 'eps' || definition.metric === 'roe')) score += 0.06;
         if (isPrimaryStatement && definition.metric !== 'roe') score += 0.08;
         if (parsed.detectedUnit || hasPageUnit) score += 0.06;
         if (pageIndex < 30) score += 0.03;

@@ -168,13 +168,19 @@ function impliedPriorFromYoy(current: number | undefined, pct: number | null | u
  */
 export function resolveMetricPrior(
   current: number | undefined,
-  opts: { disclosedPrior?: number | null; disclosedYoyPct?: number | null; crossReportPrior?: number | null },
+  opts: {
+    disclosedPrior?: number | null;
+    disclosedYoyPct?: number | null;
+    crossReportPrior?: number | null;
+    metric?: MetricName | string | null;
+  },
 ): number | undefined {
   const dPrior = opts.disclosedPrior;
+  const metric = opts.metric ?? null;
   const hasCurrent = current !== undefined && Number.isFinite(current);
   if (dPrior != null && Number.isFinite(dPrior)) {
     const prior = dPrior as number;
-    const absurd = hasCurrent && isAbsurdDisclosedPrior(current as number, prior);
+    const absurd = hasCurrent && isAbsurdDisclosedPrior(current as number, prior, metric);
     // 0 prior cannot underpin a normal disclosed %; prefer cross / imply instead.
     const zeroWithYoy = prior === 0
       && opts.disclosedYoyPct != null
@@ -190,7 +196,7 @@ export function resolveMetricPrior(
   if (
     hasCurrent
     && dPrior != null && Number.isFinite(dPrior)
-    && isAbsurdDisclosedPrior(current as number, dPrior as number)
+    && isAbsurdDisclosedPrior(current as number, dPrior as number, metric)
     && Math.abs(dPrior as number) <= 1000
   ) {
     return impliedPriorFromYoy(current, dPrior as number);
@@ -205,7 +211,7 @@ export function metricYoyHoverDetail(
   opts: { disclosedPrior?: number | null; disclosedYoyPct?: number | null; crossReportPrior?: number | null },
 ): string | undefined {
   if (current === undefined || !Number.isFinite(current)) return undefined;
-  const prior = resolveMetricPrior(current, opts);
+  const prior = resolveMetricPrior(current, { ...opts, metric });
   return metricYoyDetail(metric, current, prior, prior !== undefined ? current - prior : undefined);
 }
 
@@ -225,12 +231,14 @@ export function keyFindings(reports: Report[], selected: Report): Finding[] {
       disclosedPrior,
       disclosedYoyPct,
       crossReportPrior: crossPrior,
+      metric,
     });
     if (!yoy) continue;
     const priorVal = resolveMetricPrior(currentVal, {
       disclosedPrior,
       disclosedYoyPct,
       crossReportPrior: crossPrior,
+      metric,
     });
     const series = history.map(r => value(r, metric)).filter((v): v is number => v !== undefined);
     const current = currentVal!;
