@@ -602,6 +602,21 @@ export type YoySource = 'disclosed' | 'computed';
 
 export type ResolvedYoy = YoyResult & { source: YoySource };
 
+/**
+ * YoY% (or unit-scaled %) mis-stored as prior → astronomical computed %.
+ * Same 500% bar as /admin/metrics; require prior ≪ current so true hypergrowth
+ * (寒武纪等) with a real tiny base still keeps disclosed prior.
+ */
+export function isAbsurdDisclosedPrior(current: number, prior: number): boolean {
+  if (!Number.isFinite(current) || !Number.isFinite(prior)) return false;
+  const yoy = describeYoy(current, prior);
+  const pct = yoy && !yoy.naPercent && yoy.pct !== undefined ? yoy.pct : null;
+  const ratio = Math.abs(current) > 0 ? Math.abs(prior) / Math.abs(current) : 1;
+  return pct != null
+    && Math.abs(pct) >= 500
+    && (ratio < 0.01 || Math.abs(prior) < Math.abs(current) * 1e-6);
+}
+
 function yoyFromDisclosedPct(pct: number, current?: number, prior?: number): YoyResult {
   const absoluteDelta = current !== undefined && prior !== undefined
     && Number.isFinite(current) && Number.isFinite(prior)
@@ -651,27 +666,21 @@ export function resolveYoy(
   const hasCPrior = cPrior != null && Number.isFinite(cPrior);
 
   if (hasDYoy) {
-    const built = yoyFromDisclosedPct(
-      dYoy as number,
-      current,
-      hasDPrior ? (dPrior as number) : undefined,
-    );
+    // Skip absurd/misparsed or zero prior so disclosed % stays authoritative (zero base → N/A %).
+    const priorForPct = hasDPrior
+      && (dPrior as number) !== 0
+      && !isAbsurdDisclosedPrior(current, dPrior as number)
+      ? (dPrior as number)
+      : undefined;
+    const built = yoyFromDisclosedPct(dYoy as number, current, priorForPct);
     return { ...built, source: 'disclosed' };
   }
-  // Guard: YoY% (optionally unit-scaled) mis-read as prior → astronomical %.
-  // Same 500% bar as /admin/metrics; also require prior ≪ current so true
-  // hypergrowth (寒武纪等) with a real tiny base still keeps disclosed prior.
+  // Guard: YoY% mis-read as prior → astronomical %; fall through to cross-report.
   if (hasDPrior) {
     const yoy = describeYoy(current, dPrior as number);
-    const pct = yoy && !yoy.naPercent && yoy.pct !== undefined ? yoy.pct : null;
-    const ratio = Math.abs(current) > 0 ? Math.abs(dPrior as number) / Math.abs(current) : 1;
-    const absurdDisclosedPrior = pct != null
-      && Math.abs(pct) >= 500
-      && (ratio < 0.01 || Math.abs(dPrior as number) < Math.abs(current) * 1e-6);
-    if (yoy && !absurdDisclosedPrior) {
+    if (yoy && !isAbsurdDisclosedPrior(current, dPrior as number)) {
       return { ...yoy, source: 'disclosed' };
     }
-    // fall through to cross-report prior
   }
   if (hasCPrior) {
     const yoy = describeYoy(current, cPrior as number);

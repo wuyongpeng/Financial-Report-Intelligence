@@ -202,6 +202,40 @@ test('resolveMetricPrior prefers disclosed, then cross, then implied from YoY %'
   assert.ok(implied !== undefined && Math.abs(implied! - 100) < 1e-9);
 });
 
+test('resolveMetricPrior skips misparsed YoY% prior that would show as 0 亿', () => {
+  // 茅台 2026Q3：同比% 3.78 被误写入 prior_value，真实上年在跨期报告里。
+  const current = 19_950_545_560.09;
+  const cross = 19_223_784_414.08;
+  const prior = resolveMetricPrior(current, { disclosedPrior: 3.78, crossReportPrior: cross });
+  assert.equal(prior, cross);
+  const hover = metricYoyHoverDetail('net_profit', current, {
+    disclosedPrior: 3.78,
+    crossReportPrior: cross,
+  });
+  assert.ok(hover);
+  assert.ok(!hover!.includes('上年同期 0 亿'), hover);
+  assert.match(hover!, /上年同期 192\.24 亿/);
+});
+
+test('resolveMetricPrior implies from YoY % when prior missing or fake zero', () => {
+  const implied = resolveMetricPrior(199.51e8, { disclosedYoyPct: 3.78 });
+  assert.ok(implied !== undefined);
+  assert.ok(Math.abs(implied! - (199.51e8 / 1.0378)) < 1);
+  const fromZero = resolveMetricPrior(110, { disclosedPrior: 0, disclosedYoyPct: 10 });
+  assert.ok(fromZero !== undefined && Math.abs(fromZero! - 100) < 1e-9);
+  // Bare 0 prior with no YoY% is kept (真实零基期); fake-zero only skipped when YoY% can imply.
+  assert.match(
+    metricYoyHoverDetail('net_profit', 199.51e8, { disclosedPrior: 0 })!,
+    /上年同期 0 亿/,
+  );
+  // 无跨期时，荒谬 prior 若像百分比则反推，而不是展示 0 亿。
+  const fromPctPrior = resolveMetricPrior(19_950_545_560.09, { disclosedPrior: 3.78 });
+  assert.ok(fromPctPrior !== undefined);
+  assert.ok(Math.abs(fromPctPrior! - (19_950_545_560.09 / 1.0378)) < 1);
+  const hover = metricYoyHoverDetail('net_profit', 19_950_545_560.09, { disclosedPrior: 3.78 });
+  assert.ok(hover && !hover.includes('上年同期 0 亿'), hover);
+});
+
 test('metricYoyHoverDetail matches card tooltip and skips without prior', () => {
   assert.equal(
     metricYoyHoverDetail('revenue', 121_089_000_000, {

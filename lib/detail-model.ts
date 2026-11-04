@@ -1,6 +1,6 @@
 import { canonicalPeriodFromTitle, reportKindFromPeriod } from './ingest-period';
 import { betterKeepCandidate } from './period-dedupe';
-import { describeYoy, resolveYoy } from './crawl-display';
+import { describeYoy, isAbsurdDisclosedPrior, resolveYoy } from './crawl-display';
 
 export const metricNames = ['revenue', 'net_profit', 'eps', 'roe'] as const;
 // Balance-sheet and cash-flow rows power the health module; they are not headline cards.
@@ -151,22 +151,49 @@ export function metricYoyDetail(
   return `本期 ${format(current, metric)}，上年同期 ${format(prior, metric)}${deltaNote}${extreme}`;
 }
 
-/** Prefer disclosed prior, then cross-report; else back out from disclosed YoY %. */
+/** Back out prior from current and disclosed YoY % when 1 + yoy/100 is usable. */
+function impliedPriorFromYoy(current: number | undefined, pct: number | null | undefined): number | undefined {
+  if (current === undefined || !Number.isFinite(current)) return undefined;
+  if (pct == null || !Number.isFinite(pct)) return undefined;
+  const denom = 1 + (pct as number) / 100;
+  if (Math.abs(denom) < 1e-12) return undefined;
+  const implied = current / denom;
+  return Number.isFinite(implied) ? implied : undefined;
+}
+
+/**
+ * Prefer a usable disclosed prior, then cross-report, else imply from disclosed YoY %.
+ * Never keep a mis-parsed YoY% (e.g. 3.78) that formats as「0 亿」, and never prefer a
+ * bare 0 prior over an imply-able YoY % — that fakes「上年同期 0 亿」.
+ */
 export function resolveMetricPrior(
   current: number | undefined,
   opts: { disclosedPrior?: number | null; disclosedYoyPct?: number | null; crossReportPrior?: number | null },
 ): number | undefined {
   const dPrior = opts.disclosedPrior;
-  if (dPrior != null && Number.isFinite(dPrior)) return dPrior as number;
+  const hasCurrent = current !== undefined && Number.isFinite(current);
+  if (dPrior != null && Number.isFinite(dPrior)) {
+    const prior = dPrior as number;
+    const absurd = hasCurrent && isAbsurdDisclosedPrior(current as number, prior);
+    // 0 prior cannot underpin a normal disclosed %; prefer cross / imply instead.
+    const zeroWithYoy = prior === 0
+      && opts.disclosedYoyPct != null
+      && Number.isFinite(opts.disclosedYoyPct)
+      && opts.disclosedYoyPct !== -100;
+    if (!absurd && !zeroWithYoy) return prior;
+  }
   const cPrior = opts.crossReportPrior;
   if (cPrior != null && Number.isFinite(cPrior)) return cPrior as number;
-  const pct = opts.disclosedYoyPct;
+  const implied = impliedPriorFromYoy(current, opts.disclosedYoyPct);
+  if (implied !== undefined) return implied;
+  // Last resort: percentage-like absurd disclosed prior was actually a YoY % — imply from it.
   if (
-    current !== undefined && Number.isFinite(current)
-    && pct != null && Number.isFinite(pct) && pct !== -100
+    hasCurrent
+    && dPrior != null && Number.isFinite(dPrior)
+    && isAbsurdDisclosedPrior(current as number, dPrior as number)
+    && Math.abs(dPrior as number) <= 1000
   ) {
-    const implied = current / (1 + (pct as number) / 100);
-    if (Number.isFinite(implied)) return implied;
+    return impliedPriorFromYoy(current, dPrior as number);
   }
   return undefined;
 }
