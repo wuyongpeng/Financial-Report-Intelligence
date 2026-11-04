@@ -517,7 +517,7 @@ export function MetricsAdminClient() {
       </AdminHeader>
 
       {payload ? (
-        <div style={s.cardRow}>
+        <div style={s.chipRow}>
           <article style={s.cardCompact}>
             <p style={s.cardLabel}>公司×期次</p>
             <p style={s.cardValueCompact}>{payload.summary.rows}</p>
@@ -950,7 +950,6 @@ function SummaryFilterCard({
         ...s.cardCompact,
         textAlign: 'left',
         cursor: 'pointer',
-        width: '100%',
         font: 'inherit',
         border: active ? `1.5px solid ${accent}` : '1px solid #e5eaf1',
         background: active ? '#fff7ed' : '#fff',

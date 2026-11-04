@@ -284,15 +284,20 @@ const navLinkActive: CSSProperties = {
 const cardRow: CSSProperties = {
   display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 12,
 };
+/** Inline chip row: cards sit side-by-side at content width (metrics filters). */
+const chipRow: CSSProperties = {
+  display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12,
+};
 const card: CSSProperties = {
   border: '1px solid #e5eaf1', borderRadius: 10, background: '#fff', padding: '12px 14px',
 };
 /** Compact one-line summary / filter chips (metrics). */
 const cardCompact: CSSProperties = {
   border: '1px solid #e5eaf1', borderRadius: 8, background: '#fff',
-  padding: '6px 10px',
-  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
-  minHeight: 34,
+  padding: '5px 10px',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', gap: 8,
+  width: 'fit-content', maxWidth: '100%',
+  minHeight: 32,
 };
 const cardLabel: CSSProperties = { fontSize: 12, color: '#6b7a8d', margin: 0 };
 const cardValue: CSSProperties = { fontSize: 18, fontWeight: 650, margin: '6px 0 0', fontVariantNumeric: 'tabular-nums' };
@@ -320,6 +325,7 @@ export const adminStyles = {
   th,
   td,
   cardRow,
+  chipRow,
   card,
   cardCompact,
   cardLabel,
