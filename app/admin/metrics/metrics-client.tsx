@@ -701,7 +701,14 @@ export function MetricsAdminClient() {
                     </Link>
                   </td>
                   <td style={s.td}>
-                    <Link href={row.href} style={{ ...linkStyle, color: '#3a4d66' }}>{row.period}</Link>
+                    <Link
+                      href={row.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ ...linkStyle, color: '#3a4d66' }}
+                    >
+                      {row.period}
+                    </Link>
                   </td>
                   <td style={{ ...s.td, maxWidth: 220 }}>
                     <TitleCell title={row.title} />
