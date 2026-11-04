@@ -148,14 +148,80 @@ test('buildCheckCells summary counts OK/BAD/MISS; null third-party metric is MIS
   assert.ok(cells.some((c) => c.code === '601888' && c.period === '2026Q3' && c.metric === 'roe' && c.status === 'MISS' && c.thirdParty === null));
 });
 
-test('buildCheckCells marks MISS when DB lacks that period', () => {
+test('buildCheckCells omits code×period when DB has no metrics for that period', () => {
   const thirdParty: ThirdPartyRow[] = [
     { code: '688981', name: '中芯国际', period: '2026H1', revenueYi: 386.35, netProfitYi: 44.67, eps: 0.56, roe: 2.90 },
   ];
   const { cells, summary } = buildCheckCells(thirdParty, [
-    // Only a different period in DB
+    // Only a different period in DB (e.g. ops deleted 2026H1 stock metrics)
     { code: '688981', name: '中芯国际', period: '2025FY', metric: 'revenue', value: 100, unit: '亿元' },
   ]);
-  assert.equal(summary.revenue.miss, 1);
-  assert.ok(cells.every((c) => c.period === '2026H1' && c.status === 'MISS'));
+  assert.equal(cells.length, 0);
+  assert.equal(summary.revenue.miss, 0);
+  assert.equal(summary.revenue.ok, 0);
+  assert.equal(summary.revenue.bad, 0);
+});
+
+test('buildCheckCells keeps partial MISS when period still has some DB metrics', () => {
+  const thirdParty: ThirdPartyRow[] = [
+    { code: '000063', period: '2026H1', revenueYi: 780.25, netProfitYi: 27.53, eps: 0.58, roe: 3.65 },
+  ];
+  const { cells, summary } = buildCheckCells(thirdParty, [
+    { code: '000063', name: '中兴通讯', period: '2026H1', metric: 'revenue', value: 78025359, unit: '元' },
+    { code: '000063', name: '中兴通讯', period: '2026H1', metric: 'net_profit', value: 2752825, unit: '元' },
+    // eps/roe intentionally missing → still listed as MISS
+  ]);
+  assert.equal(cells.length, 4);
+  assert.equal(summary.revenue.ok, 1);
+  assert.equal(summary.eps.miss, 1);
+  assert.equal(summary.roe.miss, 1);
+  assert.ok(cells.some((c) => c.metric === 'eps' && c.status === 'MISS'));
+});
+
+test('buildCheckCells omits deleted Q3 even if companion H1 remains (fold must not resurrect)', () => {
+  const thirdParty: ThirdPartyRow[] = [
+    { code: '000333', name: '美的集团', period: '2026H1', revenueYi: 2610.52, netProfitYi: 264.46, eps: 3.52, roe: 11.33 },
+    { code: '000333', name: '美的集团', period: '2026Q3', revenueYi: 3690.87, netProfitYi: 413.93, eps: 5.54, roe: 18.06 },
+  ];
+  const { cells, summary } = buildCheckCells(thirdParty, [
+    // Q3 stock cleared; only H1 left
+    { code: '000333', name: '美的集团', period: '2026H1', metric: 'revenue', value: 261052000000, unit: '元' },
+    { code: '000333', name: '美的集团', period: '2026H1', metric: 'net_profit', value: 26446000000, unit: '元' },
+    { code: '000333', name: '美的集团', period: '2026H1', metric: 'eps', value: 3.52, unit: '元/股' },
+    { code: '000333', name: '美的集团', period: '2026H1', metric: 'roe', value: 11.33, unit: '%' },
+  ]);
+  assert.ok(cells.every((c) => c.period === '2026H1'));
+  assert.equal(cells.filter((c) => c.period === '2026Q3').length, 0);
+  assert.equal(summary.revenue.ok, 1);
+  assert.equal(summary.revenue.miss, 0);
+});
+
+test('buildCheckCells keeps Q3 when Q3 DB exists even without H1 companion', () => {
+  const thirdParty: ThirdPartyRow[] = [
+    { code: '601888', name: '中国中免', period: '2026Q3', revenueYi: 388.21, netProfitYi: 36.70, eps: 1.77, roe: 6.5 },
+  ];
+  const { cells, summary } = buildCheckCells(thirdParty, [
+    { code: '601888', name: '中国中免', period: '2026Q3', metric: 'revenue', value: 38821000000, unit: '元' },
+    { code: '601888', name: '中国中免', period: '2026Q3', metric: 'net_profit', value: 3670000000, unit: '元' },
+    { code: '601888', name: '中国中免', period: '2026Q3', metric: 'eps', value: 1.77, unit: '元/股' },
+    { code: '601888', name: '中国中免', period: '2026Q3', metric: 'roe', value: 6.5, unit: '%' },
+  ]);
+  assert.equal(cells.length, 4);
+  assert.equal(summary.revenue.ok, 1);
+  assert.ok(cells.every((c) => c.period === '2026Q3'));
+});
+
+test('buildCheckCells treats H1≡Q2 as present for skip gate', () => {
+  const thirdParty: ThirdPartyRow[] = [
+    { code: '600519', name: '贵州茅台', period: '2026H1', revenueYi: 922.78, netProfitYi: 445.17, eps: 35.57, roe: 17.95 },
+  ];
+  const { cells, summary } = buildCheckCells(thirdParty, [
+    { code: '600519', name: '贵州茅台', period: '2026Q2', metric: 'revenue', value: 90703260964.48, unit: '元' },
+    { code: '600519', name: '贵州茅台', period: '2026Q2', metric: 'net_profit', value: 44516880421.86, unit: '元' },
+    { code: '600519', name: '贵州茅台', period: '2026Q2', metric: 'eps', value: 35.57, unit: '元/股' },
+    { code: '600519', name: '贵州茅台', period: '2026Q2', metric: 'roe', value: 16.75, unit: '%' },
+  ]);
+  assert.equal(cells.length, 4);
+  assert.equal(summary.revenue.bad, 1); // 茅台营收仍对不上
+  assert.equal(summary.net_profit.ok, 1);
 });

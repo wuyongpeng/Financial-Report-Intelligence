@@ -243,6 +243,15 @@ function lookupDb(
   return undefined;
 }
 
+/** True when DB still has at least one check metric for this code×period (H1≡Q2). */
+export function hasDbCheckMetricsForPeriod(
+  byCodePeriodMetric: Map<string, DbMetricRow>,
+  code: string,
+  period: string,
+): boolean {
+  return CHECK_METRICS.some((metric) => Boolean(lookupDb(byCodePeriodMetric, code, period, metric)));
+}
+
 export function buildCheckCells(
   thirdParty: ThirdPartyRow[],
   dbRows: DbMetricRow[],
@@ -264,8 +273,8 @@ export function buildCheckCells(
     .map(([p, n]) => `${p}×${n}`)
     .join('、');
   const periodNote = periodList
-    ? `仅对照问财第三方已有期次（${periodList}），同公司同期比对；Q3 若库内为单季则对营收/净利/EPS 加同公司 H1 折成累计再比（ROE 不折算）`
-    : '仅对照问财第三方已有期次；Q3 若库内为单季则对营收/净利/EPS 加同公司 H1 折成累计再比（ROE 不折算）';
+    ? `仅对照问财第三方已有期次（${periodList}），同公司同期比对；库内该期次已无核对指标（如运营已删）则不展示；Q3 若库内为单季则对营收/净利/EPS 加同公司 H1 折成累计再比（ROE 不折算）`
+    : '仅对照问财第三方已有期次；库内该期次已无核对指标则不展示；Q3 若库内为单季则对营收/净利/EPS 加同公司 H1 折成累计再比（ROE 不折算）';
 
   const summary: CheckSummary = {
     revenue: { ok: 0, bad: 0, miss: 0 },
@@ -277,6 +286,11 @@ export function buildCheckCells(
   const cells: CheckCell[] = [];
   for (const tp of thirdParty) {
     const period = tp.period;
+    // Skip code×period when stock metrics were cleared (metrics delete). Do not use H1-only
+    // presence to keep a deleted Q3 row, and do not drop a Q3 that still has its own rows.
+    if (!hasDbCheckMetricsForPeriod(byCodePeriodMetric, tp.code, period)) {
+      continue;
+    }
     const name = tp.name || nameByCode.get(tp.code) || '';
     const h1Period = h1PeriodForQ3(period);
     for (const metric of CHECK_METRICS) {
