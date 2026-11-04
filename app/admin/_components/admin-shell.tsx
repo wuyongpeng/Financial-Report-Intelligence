@@ -137,11 +137,10 @@ export function AdminHeader({
   children?: ReactNode;
 }) {
   return (
-    <header style={head}>
+    <header style={headSticky} aria-label={title}>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <p style={brand}>Eva 运营管理</p>
-        <h1 style={{ ...h1, margin: '4px 0 0' }}>{title}</h1>
-        {subtitle ? <p style={{ ...muted, margin: '6px 0 0' }}>{subtitle}</p> : null}
+        <h1 style={brand}>Eva 运营管理</h1>
+        {subtitle ? <p style={{ ...muted, margin: '4px 0 0' }}>{subtitle}</p> : null}
         <nav style={nav} aria-label="管理页">
           {NAV.map((item) => (
             <Link
@@ -243,6 +242,23 @@ const btnParse: CSSProperties = {
 };
 const err: CSSProperties = { color: '#b91c1c', fontSize: 13, margin: '0 0 12px' };
 const head: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 };
+/** Sticky admin chrome: brand + tabs (+ optional toast children) stay visible while tables scroll. */
+const headSticky: CSSProperties = {
+  ...head,
+  position: 'sticky',
+  top: 0,
+  zIndex: 40,
+  marginBottom: 12,
+  marginLeft: -16,
+  marginRight: -16,
+  paddingTop: 8,
+  paddingBottom: 10,
+  paddingLeft: 16,
+  paddingRight: 16,
+  background: 'var(--bg, #f4f6f9)',
+  borderBottom: '1px solid #e5eaf1',
+  boxShadow: '0 8px 16px -12px rgba(32, 48, 71, 0.35)',
+};
 const filters: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center' };
 const tableWrap: CSSProperties = { overflow: 'auto', border: '1px solid #e5eaf1', borderRadius: 12, background: '#fff' };
 const table: CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 12 };
@@ -255,9 +271,9 @@ const td: CSSProperties = {
   color: '#3a4d66', overflowWrap: 'anywhere',
 };
 const brand: CSSProperties = {
-  margin: 0, fontSize: 12, fontWeight: 600, letterSpacing: '0.02em', color: '#6b7a8d',
+  margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: '0.01em', color: '#203047', lineHeight: 1.25,
 };
-const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 };
+const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 };
 const navLink: CSSProperties = {
   fontSize: 12, color: '#5b6d86', textDecoration: 'none',
   padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff',
@@ -266,13 +282,23 @@ const navLinkActive: CSSProperties = {
   color: '#1f4fad', borderColor: '#aec4ef', background: '#edf3ff', fontWeight: 600,
 };
 const cardRow: CSSProperties = {
-  display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 14,
+  display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 12,
 };
 const card: CSSProperties = {
-  border: '1px solid #e5eaf1', borderRadius: 12, background: '#fff', padding: '12px 14px',
+  border: '1px solid #e5eaf1', borderRadius: 10, background: '#fff', padding: '12px 14px',
+};
+/** Compact one-line summary / filter chips (metrics). */
+const cardCompact: CSSProperties = {
+  border: '1px solid #e5eaf1', borderRadius: 8, background: '#fff',
+  padding: '6px 10px',
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  minHeight: 34,
 };
 const cardLabel: CSSProperties = { fontSize: 12, color: '#6b7a8d', margin: 0 };
 const cardValue: CSSProperties = { fontSize: 18, fontWeight: 650, margin: '6px 0 0', fontVariantNumeric: 'tabular-nums' };
+const cardValueCompact: CSSProperties = {
+  fontSize: 15, fontWeight: 650, margin: 0, fontVariantNumeric: 'tabular-nums', lineHeight: 1.2,
+};
 
 export const adminStyles = {
   wrap,
@@ -295,6 +321,8 @@ export const adminStyles = {
   td,
   cardRow,
   card,
+  cardCompact,
   cardLabel,
   cardValue,
+  cardValueCompact,
 } as const;

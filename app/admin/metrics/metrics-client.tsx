@@ -511,16 +511,16 @@ export function MetricsAdminClient() {
         title="解析总览"
         activeHref="/admin/metrics"
         onLogout={() => { void session.logout(); }}
-      />
-
-      {error ? <p style={s.err}>{error}</p> : null}
-      {actionMsg ? <p style={{ ...s.muted, color: '#15803d' }}>{actionMsg}</p> : null}
+      >
+        {error ? <p style={{ ...s.err, margin: '8px 0 0' }}>{error}</p> : null}
+        {actionMsg ? <p style={{ ...s.muted, margin: '8px 0 0', color: '#15803d' }}>{actionMsg}</p> : null}
+      </AdminHeader>
 
       {payload ? (
         <div style={s.cardRow}>
-          <article style={s.card}>
+          <article style={s.cardCompact}>
             <p style={s.cardLabel}>公司×期次</p>
-            <p style={s.cardValue}>{payload.summary.rows}</p>
+            <p style={s.cardValueCompact}>{payload.summary.rows}</p>
           </article>
           <SummaryFilterCard
             label="异常行"
@@ -536,9 +536,9 @@ export function MetricsAdminClient() {
             accent="#b45309"
             onClick={() => toggleCardFilter('missing')}
           />
-          <article style={s.card}>
+          <article style={s.cardCompact}>
             <p style={s.cardLabel}>无页码</p>
-            <p style={s.cardValue}>{payload.summary.noPage}</p>
+            <p style={s.cardValueCompact}>{payload.summary.noPage}</p>
           </article>
           <SummaryFilterCard
             label="同比离谱"
@@ -947,18 +947,18 @@ function SummaryFilterCard({
       aria-pressed={active}
       aria-label={label}
       style={{
-        ...s.card,
+        ...s.cardCompact,
         textAlign: 'left',
         cursor: 'pointer',
         width: '100%',
         font: 'inherit',
-        border: active ? `2px solid ${accent}` : '1px solid #e5eaf1',
+        border: active ? `1.5px solid ${accent}` : '1px solid #e5eaf1',
         background: active ? '#fff7ed' : '#fff',
-        boxShadow: active ? `0 0 0 3px ${accent}22` : 'none',
+        boxShadow: active ? `0 0 0 2px ${accent}22` : 'none',
       }}
     >
       <p style={s.cardLabel}>{label}</p>
-      <p style={{ ...s.cardValue, color: accent }}>{value}</p>
+      <p style={{ ...s.cardValueCompact, color: accent }}>{value}</p>
     </button>
   );
 }
