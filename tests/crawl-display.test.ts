@@ -10,6 +10,7 @@ import {
   filingSourceLabel,
   formatQueueLastError,
   formatYoyBadge,
+  isAbsurdDisclosedPrior,
   openingCompanyLabel,
   periodPrefixMatches,
   resolveYoy,
@@ -258,6 +259,17 @@ test('resolveYoy ignores absurd tiny disclosed prior vs yuan-scale current', () 
   })!;
   assert.equal(yoy.source, 'computed');
   assert.ok(Math.abs((yoy.pct ?? 0) - ((19_950_545_560.09 - 19_200_000_000) / 19_200_000_000) * 100) < 0.01);
+});
+
+test('resolveYoy ignores EPS-scale bare YoY% stored as prior (茅台 15.35 / 0.77)', () => {
+  // Live leftover: prior_value=0.77 with yoy null → naive (15.35-0.77)/0.77 = +1893.51%.
+  assert.equal(isAbsurdDisclosedPrior(15.35, 0.77), true);
+  const yoy = resolveYoy(15.35, {
+    disclosedPrior: 0.77,
+    crossReportPrior: 15.23,
+  })!;
+  assert.equal(yoy.source, 'computed');
+  assert.ok(Math.abs((yoy.pct ?? 0) - ((15.35 - 15.23) / 15.23) * 100) < 0.05);
 });
 
 test('resolveYoy prefers disclosed YoY percent over cross-report prior', () => {

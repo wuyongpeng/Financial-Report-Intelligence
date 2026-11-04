@@ -208,12 +208,14 @@ function looksLikeBareYoyThenYtd(currentRaw: number, bare: number, next: number)
     return true;
   }
   // EPS-scale: 本期 | 同比% | 年初至期末(≥本期) | …
-  if (!(absNext >= absCurrent && absBare <= 500)) return false;
+  // Allow next ≈ current (YTD folded poorly) when bare looks percent-sized (茅台 15.35|0.77|…).
+  if (!(absBare <= 500)) return false;
+  if (absNext < absCurrent * 0.85 && !(absBare <= 100 && absNext > absBare * 2)) return false;
   // Percent column often exceeds YTD absolute (0.60 | 15.13 | 1.76); prior EPS rarely does.
   if (absBare > absNext) return true;
   // CMB-style Q3: 1.59 | 3.25 | 4.57 | 3.16 — YTD ≈ 2–4× quarterly, bare is %.
   const ytdRatio = absNext / absCurrent;
-  if (ytdRatio >= 1.5 && ytdRatio <= 5 && absBare <= 100) return true;
+  if (ytdRatio >= 1.0 && ytdRatio <= 5 && absBare <= 100) return true;
   return absNext > absBare * 2;
 }
 
@@ -519,10 +521,14 @@ function chooseCandidate(candidates: Candidate[]) {
   });
   // Statement rows often repeat the current amount without 上年同期 / 同比增减.
   // Keep disclosed YoY from any agreeing hit so a higher-scoring bare row cannot drop it.
+  // If a hit already has yoyPct, do NOT borrow priorValue from another agreeing hit:
+  // Maotai Q3 EPS often has one hit with yoyPct=0.77 and another that mis-read 0.77 as prior.
   const withYoy = agreeing.find((candidate) => candidate.yoyPct !== undefined);
   const withPrior = agreeing.find((candidate) => candidate.priorValue !== undefined);
-  const priorValue = withYoy?.priorValue ?? withPrior?.priorValue ?? selected.priorValue;
   const yoyPct = withYoy?.yoyPct ?? selected.yoyPct;
+  const priorValue = withYoy
+    ? withYoy.priorValue
+    : (withPrior?.priorValue ?? selected.priorValue);
   const conflicting = candidates.some((candidate) => candidate.value !== selected.value && candidate.score >= selected.score - 0.16);
   const confidence = Math.max(0.55, Math.min(0.96, selected.score + (agreeing.length > 1 ? 0.05 : 0) - (conflicting ? 0.12 : 0)));
   return {

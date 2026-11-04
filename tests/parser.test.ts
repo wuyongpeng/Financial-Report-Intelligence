@@ -157,6 +157,30 @@ test('Maotai-style Q3 row: bare YoY% then YTD must not become amount prior', () 
   assert.equal(eps?.priorValue, undefined);
 });
 
+test('Maotai 2025Q3 EPS: bare 0.77 YoY% must not become prior (1893% bug)', () => {
+  // Live PDF.js line from 贵州茅台 2025 年第三季度报告 p2.
+  // Bug: prior_value=0.77 + yoy null → UI (15.35-0.77)/0.77 = +1893.51%.
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 量净额 基本每股收益（元/股） 15.35 0.77 51.53 6.43 稀释每股收益（元/股） 15.35 0.77 51.53 6.43 加权平均净资产收益率（%） 7.75 减少 0.64 个百分点 24.64',
+  ]);
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 15.35);
+  assert.equal(eps?.yoyPct, 0.77);
+  assert.equal(eps?.priorValue, undefined);
+});
+
+test('agreeing EPS hits: keep yoyPct, do not borrow bare-YoY prior from sibling hit', () => {
+  // Summary hit has disclosed YoY; a scrambled sibling may store the same bare % as prior.
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 基本每股收益（元/股） 15.35 0.77 51.53 6.43',
+    '基本每股收益（元/股） 15.35 0.77',
+  ]);
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 15.35);
+  assert.equal(eps?.yoyPct, 0.77);
+  assert.equal(eps?.priorValue, undefined);
+});
+
 test('CATL-style row: current then YoY% (no prior amount) must not split 58.58%', () => {
   // 宁德时代季报摘要：本报告期 | 本报告期比上年同期增减 | 年初至报告期末 | …
   // Bug: regex backtracked "58.58%" into prior=58.5 (+千元→58500≈0亿) and yoy=8%.

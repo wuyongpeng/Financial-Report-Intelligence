@@ -611,10 +611,15 @@ export function isAbsurdDisclosedPrior(current: number, prior: number): boolean 
   if (!Number.isFinite(current) || !Number.isFinite(prior)) return false;
   const yoy = describeYoy(current, prior);
   const pct = yoy && !yoy.naPercent && yoy.pct !== undefined ? yoy.pct : null;
-  const ratio = Math.abs(current) > 0 ? Math.abs(prior) / Math.abs(current) : 1;
-  return pct != null
-    && Math.abs(pct) >= 500
-    && (ratio < 0.01 || Math.abs(prior) < Math.abs(current) * 1e-6);
+  if (pct == null || Math.abs(pct) < 500) return false;
+  const absCurrent = Math.abs(current);
+  const absPrior = Math.abs(prior);
+  const ratio = absCurrent > 0 ? absPrior / absCurrent : 1;
+  // Yuan-scale: bare YoY% (3.78) stored as prior against 亿-level amounts.
+  if (ratio < 0.01 || absPrior < absCurrent * 1e-6) return true;
+  // EPS / small-unit scale: bare YoY% (0.77) vs 15.35 → +1893%; keep 寒武纪-style 亿 prior.
+  if (absCurrent < 1000 && absPrior <= 100 && ratio < 0.1) return true;
+  return false;
 }
 
 function yoyFromDisclosedPct(pct: number, current?: number, prior?: number): YoyResult {
