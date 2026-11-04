@@ -18,6 +18,7 @@ import {
   type OverviewRow,
   type OverviewSummary,
 } from '@/lib/metrics-overview';
+import { splitTitleAttention } from '@/lib/metrics-title-attention';
 import type { HeadlineMetricName } from '@/lib/crawl-display';
 
 type MetricsPayload = {
@@ -511,9 +512,16 @@ function TitleCell({ title }: { title: string }) {
   const full = title?.trim() || '';
   if (!full) return <span style={{ color: '#8b97a9' }}>—</span>;
   const short = truncateTitle(full);
+  const segments = splitTitleAttention(short);
   return (
     <span title={full} style={{ color: '#3a4d66', fontSize: 12, lineHeight: 1.35 }}>
-      {short}
+      {segments.map((seg, i) =>
+        seg.kind === 'hit' ? (
+          <span key={i} style={{ color: '#b91c1c', fontWeight: 650 }}>{seg.text}</span>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        ),
+      )}
     </span>
   );
 }
