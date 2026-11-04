@@ -50,9 +50,12 @@ test('fingerprint changes when content or count changes', () => {
 test('buildSummarizeUserPrompt includes audit focus', () => {
   const prompt = buildSummarizeUserPrompt('audit', [{ id: 10, text: '类型:提问；公司:600519；问题:净利润怎样' }]);
   assert.match(prompt, /访问审计/);
-  assert.match(prompt, /常问什么问题/);
+  assert.match(prompt, /访问偏好/);
+  assert.match(prompt, /常问问题类型/);
+  assert.match(prompt, /禁止逐公司/);
   assert.match(prompt, /#1 \(id=10\)/);
   assert.match(ADMIN_SUMMARIZE_SYSTEM_PROMPT, /themes/);
+  assert.match(ADMIN_SUMMARIZE_SYSTEM_PROMPT, /禁止逐条\/逐公司流水账/);
 });
 
 test('formatSummaryStamp uses Asia/Shanghai MM-DD HH:mm', () => {

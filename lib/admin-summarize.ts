@@ -33,7 +33,7 @@ type NumberedItem = {
 
 const MAX_ITEMS = 200;
 const MAX_ITEM_CHARS = 480;
-const MAX_THEMES = 8;
+const MAX_THEMES = 10;
 const MIN_THEMES = 1;
 
 const SCOPES = new Set<AdminSummarizeScope>(['survey', 'feedback', 'audit']);
@@ -43,18 +43,18 @@ export function isAdminSummarizeScope(value: unknown): value is AdminSummarizeSc
 }
 
 /** Shared JSON shape; scope-specific focus is appended in the user prompt. */
-export const ADMIN_SUMMARIZE_SYSTEM_PROMPT = `你是产品运营助手，负责把运营数据归纳成主题。
+export const ADMIN_SUMMARIZE_SYSTEM_PROMPT = `你是产品运营助手，负责把运营数据归纳成可执行的洞察主题。
 只输出一个 JSON 对象，不要 Markdown、不要解释、不要额外字段。
 
 输出格式：
-{"themes":[{"title":"主题短名","ids":[1,2]}]}
+{"themes":[{"title":"一句结论","ids":[1,2]}]}
 
 规则：
-1. title 只起主题名，中文，建议不超过 20 字；不要完整句子，不要「用户认为」「很多人说」等套话。
+1. title 写一句中文结论（可含括号举例），建议不超过 36 字；不要「用户认为」「很多人说」等套话；不要在 title 里写条数/百分比（条数由程序根据 ids 计算）。
 2. ids 是归入该主题的条目编号（可重叠；一条可进多个主题）。
-3. 主题 3～8 个（条目很少时可更少），按覆盖条数降序。
-4. 禁止输出总条数、时间、百分比、总结段落。
-5. 不要编造输入中不存在的内容。`;
+3. 主题建议 4～8 个，最多 10 个（条目很少时可更少），按覆盖条数降序。
+4. 禁止输出总条数、时间、百分比、总结段落或其它字段。
+5. 不要编造输入中不存在的内容；可把同类条目合并成洞察，禁止逐条/逐公司流水账罗列。`;
 
 function storePath() {
   return resolve(process.env.RUNTIME_DIR ?? resolve(/* turbopackIgnore: true */ process.cwd(), '.data'), 'admin-summaries.json');
@@ -219,7 +219,12 @@ function scopeFocus(scope: AdminSummarizeScope) {
   if (scope === 'feedback') {
     return '侧重：产品问题、功能建议、数据不准等反馈主题。';
   }
-  return '侧重：用户常问什么问题、常访问哪些公司/页面、常见评价或反馈标签。公司代码可保留在主题名里（如「常看贵州茅台/600519」）。';
+  return [
+    '侧重访问审计，拆成两类主题（两类都要有，合计约 4～8 条）：',
+    '① 访问偏好（最多 2～3 条）：按板块/风格/集中度写洞察，禁止逐公司写成「常看XX/代码」流水账；应合并，例如「访问集中在消费/新能源龙头（茅台、比亚迪、宁德等）」。',
+    '② 常问问题类型：按语义聚类（财务口径、盈利能力、同比/环比、风险与负债、估值与分红、报告期对比等），title 写问题类型结论，不要堆具体问句。',
+    'title 只写结论句，不要写「常看+股票代码」；示例公司名最多点到 2～4 个作代表，其余用「等」。',
+  ].join('');
 }
 
 export function buildSummarizeUserPrompt(scope: AdminSummarizeScope, items: NumberedItem[]) {
@@ -284,7 +289,7 @@ export function parseSummarizeThemes(rawText: string, itemCount: number): Summar
     const title = String((row as { title?: unknown }).title ?? '')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 40);
+      .slice(0, 56);
     if (!title) continue;
 
     const idsRaw = (row as { ids?: unknown; count?: unknown }).ids;
