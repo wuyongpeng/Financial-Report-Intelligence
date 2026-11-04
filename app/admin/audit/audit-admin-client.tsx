@@ -130,38 +130,41 @@ export function AuditAdminClient() {
         }}
       />
 
-      <form
-        style={s.filters}
-        onSubmit={(e) => { e.preventDefault(); void load(); }}
-      >
-        <select value={eventType} onChange={(e) => setEventType(e.target.value)} style={s.input}>
-          <option value="">全部类型</option>
-          <option value="visit">访问</option>
-          <option value="ask">提问</option>
-          <option value="answer_feedback">反馈</option>
-        </select>
-        <input
-          style={s.input}
-          placeholder="股票代码"
-          value={companyCode}
-          onChange={(e) => setCompanyCode(e.target.value)}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <form
+          style={{ ...s.filters, marginBottom: 0, flex: '1 1 auto' }}
+          onSubmit={(e) => { e.preventDefault(); void load(); }}
+        >
+          <select value={eventType} onChange={(e) => setEventType(e.target.value)} style={s.input}>
+            <option value="">全部类型</option>
+            <option value="visit">访问</option>
+            <option value="ask">提问</option>
+            <option value="answer_feedback">反馈</option>
+          </select>
+          <input
+            style={{ ...s.input, width: 110 }}
+            placeholder="股票代码"
+            value={companyCode}
+            onChange={(e) => setCompanyCode(e.target.value)}
+          />
+          <input
+            style={{ ...s.input, width: 200 }}
+            placeholder="搜问题 / IP / UA"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <button type="submit" style={s.btn} disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+          <AdminHelpTip text="时间均为 Asia/Shanghai" />
+        </form>
+
+        <AiSummarizePanel
+          scope="audit"
+          inline
+          onSessionExpired={() => session.setAdmin(false)}
         />
-        <input
-          style={{ ...s.input, flex: 1, minWidth: 160 }}
-          placeholder="搜问题 / IP / UA"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <button type="submit" style={s.btn} disabled={loading}>{loading ? '查询中…' : '查询'}</button>
-        <AdminHelpTip text="时间均为 Asia/Shanghai" />
-      </form>
+      </div>
 
       {error ? <p style={s.err}>{error}</p> : null}
-
-      <AiSummarizePanel
-        scope="audit"
-        onSessionExpired={() => session.setAdmin(false)}
-      />
 
       <div style={s.tableWrap}>
         <table style={s.table}>

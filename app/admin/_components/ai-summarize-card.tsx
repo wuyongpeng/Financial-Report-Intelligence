@@ -78,10 +78,12 @@ type Props = {
   scope: AiSummarizeScope;
   /** When false, skip fetch (e.g. survey invites tab). */
   active?: boolean;
+  /** Sit beside filters: button / collapsed bar on one row; expanded card wraps full width. */
+  inline?: boolean;
   onSessionExpired?: () => void;
 };
 
-export function AiSummarizePanel({ scope, active = true, onSessionExpired }: Props) {
+export function AiSummarizePanel({ scope, active = true, inline = false, onSessionExpired }: Props) {
   const [summary, setSummary] = useState<SummaryRecord | null>(null);
   const [hasNewData, setHasNewData] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -167,7 +169,17 @@ export function AiSummarizePanel({ scope, active = true, onSessionExpired }: Pro
 
   if (!summary) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: inline ? 'flex-start' : 'flex-end',
+          alignItems: 'center',
+          gap: 10,
+          marginBottom: inline ? 0 : 12,
+          marginLeft: inline ? 'auto' : undefined,
+          flex: inline ? '0 0 auto' : undefined,
+        }}
+      >
         {error ? <span style={{ ...s.err, margin: 0 }}>{error}</span> : null}
         <button
           type="button"
@@ -175,6 +187,7 @@ export function AiSummarizePanel({ scope, active = true, onSessionExpired }: Pro
             ...s.btn,
             opacity: running || loading || !configured ? 0.65 : 1,
             cursor: running || loading || !configured ? 'not-allowed' : 'pointer',
+            whiteSpace: 'nowrap',
           }}
           disabled={running || loading || !configured}
           title={!configured ? 'LLM 未配置' : undefined}
@@ -187,9 +200,19 @@ export function AiSummarizePanel({ scope, active = true, onSessionExpired }: Pro
   }
 
   const stamp = formatStamp(summary.generatedAt);
+  const shellStyle: CSSProperties = inline
+    ? {
+        ...cardShell,
+        marginBottom: 0,
+        flex: expanded ? '1 1 100%' : '1 1 260px',
+        minWidth: expanded ? undefined : 220,
+        maxWidth: '100%',
+        marginLeft: expanded ? undefined : 'auto',
+      }
+    : cardShell;
 
   return (
-    <div style={cardShell}>
+    <div style={shellStyle}>
       <div
         role="button"
         tabIndex={0}
