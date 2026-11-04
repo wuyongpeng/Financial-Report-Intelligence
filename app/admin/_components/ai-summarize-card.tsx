@@ -78,7 +78,7 @@ type Props = {
   scope: AiSummarizeScope;
   /** When false, skip fetch (e.g. survey invites tab). */
   active?: boolean;
-  /** Sit beside filters: button / collapsed bar on one row; expanded card wraps full width. */
+  /** Sit beside filters: first-run button on that row; summary card (collapsed or expanded) always full width. */
   inline?: boolean;
   onSessionExpired?: () => void;
 };
@@ -200,14 +200,14 @@ export function AiSummarizePanel({ scope, active = true, inline = false, onSessi
   }
 
   const stamp = formatStamp(summary.generatedAt);
+  // inline: first-run button stays on the filter row; once a summary exists,
+  // collapsed and expanded both take a full-width row (same as feedback).
   const shellStyle: CSSProperties = inline
     ? {
         ...cardShell,
         marginBottom: 0,
-        flex: expanded ? '1 1 100%' : '1 1 260px',
-        minWidth: expanded ? undefined : 220,
+        flex: '1 1 100%',
         maxWidth: '100%',
-        marginLeft: expanded ? undefined : 'auto',
       }
     : cardShell;
 
