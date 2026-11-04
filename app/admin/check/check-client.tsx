@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   AdminHeader,
   AdminHelpTip,
@@ -177,7 +178,20 @@ export function CheckAdminClient() {
               <tr key={`${cell.code}-${cell.period}-${cell.metric}`}>
                 <td style={s.td}>{cell.code}</td>
                 <td style={s.td}>{cell.name || '—'}</td>
-                <td style={s.td}>{cell.period || '—'}</td>
+                <td style={s.td}>
+                  {cell.code && cell.period ? (
+                    <Link
+                      href={`/${cell.code}?period=${encodeURIComponent(cell.period)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={periodLinkStyle}
+                    >
+                      {cell.period}
+                    </Link>
+                  ) : (
+                    cell.period || '—'
+                  )}
+                </td>
                 <td style={s.td}>{cell.metricLabel}</td>
                 <td style={s.td}>{formatThird(cell)}</td>
                 <td style={s.td}>
@@ -212,3 +226,10 @@ function formatThird(cell: CheckCell) {
   if (cell.thirdParty == null) return '—';
   return formatConverted(cell.metric, cell.thirdParty);
 }
+
+const periodLinkStyle: CSSProperties = {
+  color: '#1f4fad',
+  textDecoration: 'none',
+  fontWeight: 600,
+};
+

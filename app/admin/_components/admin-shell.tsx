@@ -226,16 +226,20 @@ const btnGhost: CSSProperties = {
   padding: '7px 12px', fontSize: 13, cursor: 'pointer',
 };
 const btnDanger: CSSProperties = {
-  border: '1px solid #fecaca', borderRadius: 8, background: '#fff', color: '#b91c1c',
-  padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  border: 0, borderRadius: 4, background: 'transparent', color: '#b91c1c',
+  padding: '2px 4px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
 };
 const btnAck: CSSProperties = {
-  border: '1px solid #bbf7d0', borderRadius: 8, background: '#fff', color: '#15803d',
-  padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  border: 0, borderRadius: 4, background: 'transparent', color: '#15803d',
+  padding: '2px 4px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
 };
 const btnFlag: CSSProperties = {
-  border: '1px solid #fde68a', borderRadius: 8, background: '#fff', color: '#b45309',
-  padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+  border: 0, borderRadius: 4, background: 'transparent', color: '#b45309',
+  padding: '2px 4px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+};
+const btnParse: CSSProperties = {
+  border: 0, borderRadius: 4, background: 'transparent', color: '#1f4fad',
+  padding: '2px 4px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
 };
 const err: CSSProperties = { color: '#b91c1c', fontSize: 13, margin: '0 0 12px' };
 const head: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 };
@@ -281,6 +285,7 @@ export const adminStyles = {
   btnDanger,
   btnAck,
   btnFlag,
+  btnParse,
   err,
   head,
   filters,
