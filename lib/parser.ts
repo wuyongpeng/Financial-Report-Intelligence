@@ -54,13 +54,15 @@ const LABELS: MetricDefinition[] = [
     '归属于本行股东的净利润',
     '归属于本公司股东的净利润',
   ], unit: '元', minAbs: 1, maxAbs: 1e15 },
-  { metric: 'eps', labels: ['基本每股收益', '基本和稀释每股收益'], unit: '元/股', minAbs: 0, maxAbs: 1000 },
+  { metric: 'eps', labels: ['基本每股收益', '基本和稀释每股收益', '基本/稀释每股收益'], unit: '元/股', minAbs: 0, maxAbs: 1000 },
   { metric: 'roe', labels: [
     '归属于本行普通股股东的加权平均净资产收益率',
     '归属于本公司普通股股东的加权平均净资产收益率',
     '加权平均净资产收益率',
     '加权平均净资产收益',
     '净资产收益率（加权平均）',
+    // 中行等银行摘要常用「净资产收益率（%）」而无「加权平均」字样（仍按年化加权口径披露）。
+    '净资产收益率',
   ], unit: '%', minAbs: 0, maxAbs: 1000 },
   { metric: 'total_assets', labels: ['资产总计', '资产总额', '总资产'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
   { metric: 'total_liabilities', labels: ['负债合计', '负债总额'], unit: '元', minAbs: 1000, maxAbs: 1e16 },
@@ -277,7 +279,8 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
   // currency amounts stay intact — those are negative values, not footnotes.
   if (!currencyMetrics.has(definition.metric)) {
     nearby = nearby
-      .replace(/\(\s*元\s*\/?\s*股\s*\)/g, ' ')
+      // 元/股 or 人民币元 cell notes before the amount / footnote.
+      .replace(/\(\s*(?:人民币\s*)?元(?:\s*\/?\s*股)?\s*\)/g, ' ')
       .replace(/\(\s*[1-9]\d{0,2}\s*\)/g, ' ')
       // Bare footnote without parens: `基本每股收益（元/股）1 0.58`.
       // Only strip when another numeric token follows so a lone integer EPS like `2` is kept.
@@ -430,11 +433,22 @@ function isCleanLabelHit(page: string, position: number, label: string, metric: 
   }
   if (metric === 'roe') {
     // Prefer 加权平均净资产收益率 over 扣除非经常性损益后(的)加权平均净资产收益率.
-    const before = page.slice(Math.max(0, position - 28), position);
-    if (/扣除非经常性损益后的?$/.test(before)) return false;
+    const before = page.slice(Math.max(0, position - 36), position);
+    if (/扣除非经常性损益/.test(before)) return false;
     if (/扣非后$/.test(before)) return false;
     // Short alias「加权平均净资产收益」must not steal the hit inside「…收益率」.
     if (label === '加权平均净资产收益' && page[position + label.length] === '率') return false;
+    // Bare「净资产收益率」must not take 全面摊薄 / 摊薄 row when 加权平均 exists elsewhere.
+    const after = page.slice(position + label.length, position + label.length + 16);
+    if (/^\s*[（(]?\s*全面摊薄/.test(after)) return false;
+    if (/^\s*[（(]?\s*摊薄\s*[)）]/.test(after)) return false;
+    return true;
+  }
+  if (metric === 'eps') {
+    // Skip 扣除非经常性损益后的基本和稀释每股收益 — keep the headline EPS row.
+    const before = page.slice(Math.max(0, position - 36), position);
+    if (/扣除非经常性损益/.test(before)) return false;
+    if (/扣非后$/.test(before)) return false;
     return true;
   }
   return true;
@@ -444,7 +458,7 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
   const candidates: Candidate[] = [];
   for (let pageIndex = 0; pageIndex < Math.min(pages.length, PARSE_PAGE_LIMIT); pageIndex += 1) {
     const page = normalizePageText(pages[pageIndex]);
-    const isSummary = /主要会计数据|主要财务指标|报告摘要/.test(page);
+    const isSummary = /主要会计数据|主要财务指标|主要财务比率|报告摘要|财务摘要/.test(page);
     const balanceSheet = new Set([
       'total_assets', 'total_liabilities',
       'cash_and_equivalents', 'restricted_cash',
@@ -454,7 +468,7 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
     const statement = balanceSheet.has(definition.metric) ? /合并资产负债表|资产负债表/
       : definition.metric === 'operating_cash_flow' ? /合并现金流量表|现金流量表/
       : definition.metric === 'non_recurring_pnl' || definition.metric === 'profit_ex_non_recurring'
-        ? /非经常性损益|主要会计数据|主要财务指标|报告摘要|合并利润表|利润表/
+        ? /非经常性损益|主要会计数据|主要财务指标|主要财务比率|报告摘要|财务摘要|合并利润表|利润表/
       : /合并利润表|利润表/;
     const isPrimaryStatement = statement.test(page);
     const hasPageUnit = Boolean(pageCurrencyUnit(page));

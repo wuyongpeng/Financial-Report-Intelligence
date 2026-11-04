@@ -477,6 +477,56 @@ test('Shaanxi Coal-style 加权平均净资产收益（%） without 率', () => 
   assert.equal(metrics.find((item) => item.metric === 'roe')?.value, 5.72);
 });
 
+
+test('CCB 2026H1 财务摘要: 基本和稀释每股收益 footnote + dash YoY', () => {
+  // 建设银行 601939 2026H1 P7：脚注「2」、变动列「-」、小节名是「财务摘要」而非「报告摘要」。
+  const page = [
+    '1 财务摘要',
+    '（除特别注明外，以人民币百万元列示）截至2026年6月30日止六个月 截至2025年6月30日止六个月 变化(%) 截至2024年6月30日止六个月',
+    '营业收入 436,529 394,273 10.72 385,965',
+    '归属于本行股东的净利润 169,564 162,076 4.62 164,326',
+    '每股计（人民币元）',
+    '基本和稀释每股收益 2 0.65 0.65 - 0.66',
+    '扣除非经常性损益后的基本和稀释每股收益 1 0.64 0.65 (1.54) 0.66',
+    '年化加权平均净资产收益率 2 9.52 10.08 (0.56) 10.82',
+  ].join(' ');
+  const metrics = parseCoreMetricPages([page]);
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 0.65);
+  assert.equal(eps?.sourceLabel, '基本和稀释每股收益');
+  assert.equal(eps?.priorValue, 0.65);
+  const roe = metrics.find((item) => item.metric === 'roe');
+  assert.equal(roe?.value, 9.52);
+});
+
+test('BOC 2026H1 财务摘要: 净资产收益率（%） takes 2026年1-6月 column', () => {
+  // 中国银行 601988 2026H1 P6：无「加权平均」字样；注释列「5」后是本期 8.66，不是上年 9.11。
+  const page = [
+    '财务摘要 单位：百万元人民币',
+    '注释 2026年1-6月 2025年1-6月 2024年1-6月',
+    '营业收入 356,903 329,003 317,076',
+    '归属于母公司所有者的净利润 123,594 117,591 118,601',
+    '基本每股收益（元） 0.36 0.36 0.36',
+    '主要财务比率',
+    '平均总资产回报率（%） 4 0.67 0.70 0.76',
+    '净资产收益率（%） 5 8.66 9.11 9.58',
+    '净息差（%） 6 1.27 1.26 1.44',
+  ].join(' ');
+  const metrics = parseCoreMetricPages([page]);
+  const roe = metrics.find((item) => item.metric === 'roe');
+  assert.equal(roe?.value, 8.66);
+  assert.equal(roe?.priorValue, 9.11);
+  assert.equal(roe?.sourceLabel, '净资产收益率');
+  assert.equal(metrics.find((item) => item.metric === 'eps')?.value, 0.36);
+});
+
+test('bare 净资产收益率 skips 全面摊薄 row', () => {
+  const metrics = parseCoreMetricPages([
+    '主要财务指标 基本每股收益 (1.0075) 净资产收益率（全面摊薄） -6.24% 净资产收益率（加权平均） -6.07% -4.00% 下降 2.16 个百分点',
+  ]);
+  assert.equal(metrics.find((item) => item.metric === 'roe')?.value, -6.07);
+});
+
 test('large PDFs skip in-memory pdf.js and use external text extract', async () => {
   assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES), false);
   assert.equal(shouldExtractTextExternally(PDFJS_PARSE_MAX_BYTES + 1), true);
