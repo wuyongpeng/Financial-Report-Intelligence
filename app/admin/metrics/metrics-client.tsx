@@ -650,15 +650,15 @@ export function MetricsAdminClient() {
                   onChange={toggleSelectVisible}
                 />
               </th>
-              <th style={s.th}>代码</th>
-              <th style={s.th}>公司</th>
-              <th style={s.th}>期次</th>
-              <th style={s.th}>报告全称</th>
+              <th style={{ ...s.th, ...colCode }}>代码</th>
+              <th style={{ ...s.th, ...colName }}>公司</th>
+              <th style={{ ...s.th, ...colPeriod }}>期次</th>
+              <th style={{ ...s.th, ...colTitle }}>报告全称</th>
               {OVERVIEW_METRICS.map((m) => (
-                <th key={m} style={s.th}>{OVERVIEW_METRIC_LABEL[m]}</th>
+                <th key={m} style={{ ...s.th, ...colMetric }}>{OVERVIEW_METRIC_LABEL[m]}</th>
               ))}
-              <th style={s.th}>异常</th>
-              <th style={s.th}>操作</th>
+              <th style={{ ...s.th, ...colStatus }}>异常</th>
+              <th style={{ ...s.th, ...colActions }}>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -692,15 +692,15 @@ export function MetricsAdminClient() {
                       onChange={() => toggleSelectKey(busyKey)}
                     />
                   </td>
-                  <td style={s.td}>
+                  <td style={{ ...s.td, ...colCode }}>
                     <Link href={row.href} style={linkStyle}>{row.code}</Link>
                   </td>
-                  <td style={s.td}>
+                  <td style={{ ...s.td, ...colName }}>
                     <Link href={row.href} style={{ ...linkStyle, color: '#3a4d66' }}>
                       {row.name || '—'}
                     </Link>
                   </td>
-                  <td style={s.td}>
+                  <td style={{ ...s.td, ...colPeriod }}>
                     <Link
                       href={row.href}
                       target="_blank"
@@ -710,15 +710,15 @@ export function MetricsAdminClient() {
                       {row.period}
                     </Link>
                   </td>
-                  <td style={{ ...s.td, maxWidth: 220 }}>
+                  <td style={{ ...s.td, ...colTitle }}>
                     <TitleCell title={row.title} />
                   </td>
                   {OVERVIEW_METRICS.map((m) => (
-                    <td key={m} style={s.td}>
+                    <td key={m} style={{ ...s.td, ...colMetric }}>
                       <MetricCellView metric={m} row={row} />
                     </td>
                   ))}
-                  <td style={s.td}>
+                  <td style={{ ...s.td, ...colStatus }}>
                     {row.acked ? (
                       <span style={{ color: '#15803d', fontWeight: 650 }}>已审</span>
                     ) : statusBits.length > 0 ? (
@@ -740,7 +740,7 @@ export function MetricsAdminClient() {
                       <span style={{ color: '#15803d' }}>正常</span>
                     )}
                   </td>
-                  <td style={s.td}>
+                  <td style={{ ...s.td, ...colActions }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
                       <button
                         type="button"
@@ -963,7 +963,7 @@ function SummaryFilterCard({
   );
 }
 
-const TITLE_TRUNCATE = 32;
+const TITLE_TRUNCATE = 22;
 
 function truncateTitle(title: string, max = TITLE_TRUNCATE): string {
   const t = title.trim();
@@ -1019,6 +1019,45 @@ function MetricCellView({ metric, row }: { metric: HeadlineMetricName; row: Over
     </div>
   );
 }
+
+/** Key identity cols: never wrap; squeeze title / metrics / status / actions instead. */
+const colCode: CSSProperties = {
+  whiteSpace: 'nowrap',
+  minWidth: 72,
+  width: 72,
+  overflowWrap: 'normal',
+  wordBreak: 'keep-all',
+};
+const colName: CSSProperties = {
+  whiteSpace: 'nowrap',
+  minWidth: 108,
+  overflowWrap: 'normal',
+  wordBreak: 'keep-all',
+};
+const colPeriod: CSSProperties = {
+  whiteSpace: 'nowrap',
+  minWidth: 72,
+  width: 72,
+  overflowWrap: 'normal',
+  wordBreak: 'keep-all',
+};
+const colTitle: CSSProperties = {
+  maxWidth: 148,
+  width: 148,
+  overflowWrap: 'anywhere',
+};
+const colMetric: CSSProperties = {
+  maxWidth: 118,
+  overflowWrap: 'anywhere',
+};
+const colStatus: CSSProperties = {
+  maxWidth: 120,
+  overflowWrap: 'anywhere',
+};
+const colActions: CSSProperties = {
+  maxWidth: 168,
+  overflowWrap: 'anywhere',
+};
 
 const linkStyle: CSSProperties = {
   color: '#1f4fad',
