@@ -6,8 +6,8 @@ import { getDb } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 
 /**
- * Mark a metrics overview row as human-acked (true surge / acceptable anomaly).
- * Hides the row from异常筛选; does not delete metrics or the announcement.
+ * Mark a metrics overview row as human-acked (true surge / fixed after flag).
+ * Clears flagged state (mutual exclusive). Hides from异常筛选.
  * Admin session only — no EVA password (unlike discard).
  */
 export async function POST(request: Request) {
@@ -56,6 +56,18 @@ export async function POST(request: Request) {
       : null;
 
     await db`
+      INSERT INTO metrics_overview_reviews (announcement_id, code, period, status, note, updated_at)
+      VALUES (${announcementId}, ${code}, ${period}, 'acked', ${note}, NOW())
+      ON CONFLICT (announcement_id) DO UPDATE
+      SET code=EXCLUDED.code,
+          period=EXCLUDED.period,
+          status='acked',
+          note=COALESCE(EXCLUDED.note, metrics_overview_reviews.note),
+          updated_at=NOW()
+    `;
+
+    // Keep legacy acks table in sync for older readers.
+    await db`
       INSERT INTO metrics_overview_acks (announcement_id, code, period, note, acked_at)
       VALUES (${announcementId}, ${code}, ${period}, ${note}, NOW())
       ON CONFLICT (announcement_id) DO UPDATE
@@ -70,6 +82,7 @@ export async function POST(request: Request) {
       announcementId,
       code,
       period,
+      status: 'acked',
       note: `已审核通过 ${code} ${period}`,
     }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {

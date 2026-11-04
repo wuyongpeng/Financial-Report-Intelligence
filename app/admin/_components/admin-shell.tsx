@@ -205,6 +205,10 @@ const btnAck: CSSProperties = {
   border: '1px solid #bbf7d0', borderRadius: 8, background: '#fff', color: '#15803d',
   padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
 };
+const btnFlag: CSSProperties = {
+  border: '1px solid #fde68a', borderRadius: 8, background: '#fff', color: '#b45309',
+  padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+};
 const err: CSSProperties = { color: '#b91c1c', fontSize: 13, margin: '0 0 12px' };
 const head: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 };
 const filters: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center' };
@@ -248,6 +252,7 @@ export const adminStyles = {
   btnGhost,
   btnDanger,
   btnAck,
+  btnFlag,
   err,
   head,
   filters,

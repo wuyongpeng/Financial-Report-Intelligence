@@ -7,6 +7,7 @@ import {
   buildOverviewRows,
   OVERVIEW_METRICS,
   type OverviewDbMetric,
+  type OverviewReview,
 } from '@/lib/metrics-overview';
 
 export const dynamic = 'force-dynamic';
@@ -43,10 +44,22 @@ export async function GET(request: Request) {
       ORDER BY m.code, m.period, m.metric, m.confidence DESC NULLS LAST, m.created_at DESC NULLS LAST
     `;
 
-    const ackedRows = await db<Array<{ announcement_id: string }>>`
-      SELECT announcement_id FROM metrics_overview_acks
+    const reviewRows = await db<Array<{
+      announcement_id: string;
+      status: string;
+      note: string | null;
+    }>>`
+      SELECT announcement_id, status, note FROM metrics_overview_reviews
     `;
-    const ackedAnnouncementIds = ackedRows.map((r) => r.announcement_id);
+    const reviews: OverviewReview[] = [];
+    for (const r of reviewRows) {
+      if (r.status !== 'acked' && r.status !== 'flagged') continue;
+      reviews.push({
+        announcementId: r.announcement_id,
+        status: r.status,
+        note: r.note,
+      });
+    }
 
     const normalized: OverviewDbMetric[] = [];
     for (const row of raw) {
@@ -66,12 +79,12 @@ export async function GET(request: Request) {
       });
     }
 
-    const { rows, summary } = buildOverviewRows(normalized, { ackedAnnouncementIds });
+    const { rows, summary } = buildOverviewRows(normalized, { reviews });
     const periods = [...new Set(rows.map((r) => r.period))]
       .sort((a, b) => b.localeCompare(a));
 
     return Response.json({
-      note: '一眼看四核展示效果（值·同比·页码）。异常：缺核 / 无页码 / |同比|≥500%。错抓可删；真暴增可审核通过。',
+      note: '一眼看四核（值·同比·页码）。异常=规则检出或人工标异；错抓可删；真暴增/已修好点审核通过；用户反馈可标记异常。',
       summary,
       periods,
       rows,

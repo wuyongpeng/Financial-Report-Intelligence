@@ -160,3 +160,78 @@ test('acked true surge drops from abnormal summary (天齐)', () => {
   assert.equal(after.summary.abnormal, 0);
   assert.equal(after.summary.absurdYoy, 0);
 });
+
+test('flagged normal row enters abnormal summary and filter', () => {
+  const dbRows: OverviewDbMetric[] = [
+    {
+      code: '000001', name: '平安银行', announcement_id: 'ann-pab-q3',
+      period: '2026Q3', metric: 'revenue',
+      value: 1e11, unit: '元', source_page: 1, prior_value: null, yoy_pct: 3.8,
+    },
+    {
+      code: '000001', name: '平安银行', announcement_id: 'ann-pab-q3',
+      period: '2026Q3', metric: 'net_profit',
+      value: 1e10, unit: '元', source_page: 1, prior_value: null, yoy_pct: 2,
+    },
+    {
+      code: '000001', name: '平安银行', announcement_id: 'ann-pab-q3',
+      period: '2026Q3', metric: 'eps',
+      value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 2,
+    },
+    {
+      code: '000001', name: '平安银行', announcement_id: 'ann-pab-q3',
+      period: '2026Q3', metric: 'roe',
+      value: 10, unit: '%', source_page: 1, prior_value: null, yoy_pct: 1,
+    },
+  ];
+  const before = buildOverviewRows(dbRows);
+  assert.equal(before.rows[0].abnormal, false);
+  assert.equal(before.summary.abnormal, 0);
+
+  const flagged = buildOverviewRows(dbRows, {
+    reviews: [{ announcementId: 'ann-pab-q3', status: 'flagged', note: '用户反馈净利' }],
+  });
+  assert.equal(flagged.rows[0].flagged, true);
+  assert.equal(flagged.rows[0].acked, false);
+  assert.equal(flagged.rows[0].abnormal, true);
+  assert.equal(flagged.rows[0].reviewNote, '用户反馈净利');
+  assert.equal(flagged.summary.abnormal, 1);
+});
+
+test('acked and flagged are mutual exclusive in overview rows', () => {
+  const dbRows: OverviewDbMetric[] = [
+    {
+      code: '002466', name: '天齐锂业', announcement_id: 'ann-tianqi-q3',
+      period: '2026Q3', metric: 'revenue',
+      value: 1e9, unit: '元', source_page: 1, prior_value: null, yoy_pct: 10,
+    },
+    {
+      code: '002466', name: '天齐锂业', announcement_id: 'ann-tianqi-q3',
+      period: '2026Q3', metric: 'net_profit',
+      value: 1e8, unit: '元', source_page: 1, prior_value: null, yoy_pct: 1324,
+    },
+    {
+      code: '002466', name: '天齐锂业', announcement_id: 'ann-tianqi-q3',
+      period: '2026Q3', metric: 'eps',
+      value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 10,
+    },
+    {
+      code: '002466', name: '天齐锂业', announcement_id: 'ann-tianqi-q3',
+      period: '2026Q3', metric: 'roe',
+      value: 5, unit: '%', source_page: 1, prior_value: null, yoy_pct: 10,
+    },
+  ];
+  const acked = buildOverviewRows(dbRows, {
+    reviews: [{ announcementId: 'ann-tianqi-q3', status: 'acked' }],
+  });
+  assert.equal(acked.rows[0].acked, true);
+  assert.equal(acked.rows[0].flagged, false);
+  assert.equal(acked.rows[0].abnormal, false);
+
+  const reflag = buildOverviewRows(dbRows, {
+    reviews: [{ announcementId: 'ann-tianqi-q3', status: 'flagged', note: '再发现错' }],
+  });
+  assert.equal(reflag.rows[0].flagged, true);
+  assert.equal(reflag.rows[0].acked, false);
+  assert.equal(reflag.rows[0].abnormal, true);
+});

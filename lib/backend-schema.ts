@@ -120,5 +120,24 @@ async function migrate() {
     )`;
     await tx`CREATE INDEX IF NOT EXISTS metrics_overview_acks_code_period_idx
       ON metrics_overview_acks (code, period)`;
+    /* Human review state for /admin/metrics: acked ↔ flagged (mutual exclusive). */
+    await tx`CREATE TABLE IF NOT EXISTS metrics_overview_reviews (
+      announcement_id TEXT PRIMARY KEY REFERENCES announcements(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,
+      period TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('acked', 'flagged')),
+      note TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS metrics_overview_reviews_code_period_idx
+      ON metrics_overview_reviews (code, period)`;
+    await tx`CREATE INDEX IF NOT EXISTS metrics_overview_reviews_status_idx
+      ON metrics_overview_reviews (status)`;
+    await tx`
+      INSERT INTO metrics_overview_reviews (announcement_id, code, period, status, note, updated_at)
+      SELECT announcement_id, code, period, 'acked', note, acked_at
+      FROM metrics_overview_acks
+      ON CONFLICT (announcement_id) DO NOTHING
+    `;
   });
 }

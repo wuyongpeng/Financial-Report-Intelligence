@@ -52,21 +52,36 @@ export type OverviewMetricCell = {
   issues: OverviewIssue[];
 };
 
+export type OverviewReviewStatus = 'acked' | 'flagged';
+
+export type OverviewReview = {
+  announcementId: string;
+  status: OverviewReviewStatus;
+  note?: string | null;
+};
+
 export type OverviewRow = {
   code: string;
   name: string;
   /** announcements.title (may be empty if JOIN missed). */
   title: string;
   period: string;
-  /** Soft-discard / ack target; null if JOIN/metric had no announcement_id. */
+  /** Soft-discard / ack/flag target; null if JOIN/metric had no announcement_id. */
   announcementId: string | null;
   href: string;
   metrics: Record<HeadlineMetricName, OverviewMetricCell>;
   issues: OverviewIssue[];
-  /** True when issues exist and row is not manually acked (true surge). */
+  /**
+   * Visible as异常: human flagged, OR system issues while not acked.
+   * Flagged and acked are mutual exclusive.
+   */
   abnormal: boolean;
-  /** Human-acked true surge / acceptable anomaly; hidden from异常筛选. */
+  /** Human-acked true surge / fixed row; hidden from异常筛选. */
   acked: boolean;
+  /** Human-flagged (用户反馈/人工发现); always counts as异常 until审核通过. */
+  flagged: boolean;
+  /** Optional note on the current review (flag reason or ack note). */
+  reviewNote: string | null;
 };
 
 export type OverviewSummary = {
@@ -139,16 +154,32 @@ export function overviewPeriodRank(token: string): number {
 
 export function buildOverviewRows(
   dbRows: OverviewDbMetric[],
-  options?: { ackedAnnouncementIds?: Iterable<string> },
+  options?: {
+    /** Preferred: acked/flagged reviews keyed by announcement id. */
+    reviews?: Iterable<OverviewReview>;
+    /** @deprecated Prefer reviews; still accepted as acked-only. */
+    ackedAnnouncementIds?: Iterable<string>;
+  },
 ): {
   rows: OverviewRow[];
   summary: OverviewSummary;
 } {
-  const ackedIds = new Set(
-    [...(options?.ackedAnnouncementIds ?? [])]
-      .map((id) => id.trim())
-      .filter(Boolean),
-  );
+  const reviewById = new Map<string, OverviewReview>();
+  for (const r of options?.reviews ?? []) {
+    const id = r.announcementId?.trim();
+    if (!id) continue;
+    if (r.status !== 'acked' && r.status !== 'flagged') continue;
+    reviewById.set(id, {
+      announcementId: id,
+      status: r.status,
+      note: r.note ?? null,
+    });
+  }
+  for (const id of options?.ackedAnnouncementIds ?? []) {
+    const trimmed = id.trim();
+    if (!trimmed || reviewById.has(trimmed)) continue;
+    reviewById.set(trimmed, { announcementId: trimmed, status: 'acked', note: null });
+  }
   type Key = string;
   const byKey = new Map<Key, {
     code: string;
@@ -199,9 +230,14 @@ export function buildOverviewRows(
       for (const issue of cell.issues) issueSet.add(issue);
     }
     const issues = [...issueSet];
-    const acked = Boolean(bucket.announcementId && ackedIds.has(bucket.announcementId));
-    // Acked = human accepted (e.g. true surge); drop from异常 counts/filters.
-    const isAbnormal = issues.length > 0 && !acked;
+    const review = bucket.announcementId
+      ? reviewById.get(bucket.announcementId)
+      : undefined;
+    const acked = review?.status === 'acked';
+    const flagged = review?.status === 'flagged';
+    const reviewNote = review?.note?.trim() || null;
+    // Flagged always abnormal; system issues abnormal unless acked.
+    const isAbnormal = flagged || (issues.length > 0 && !acked);
     if (isAbnormal) abnormal += 1;
     if (isAbnormal && issues.includes('missing')) missingCore += 1;
     if (isAbnormal && issues.includes('no_page')) noPage += 1;
@@ -218,6 +254,8 @@ export function buildOverviewRows(
       issues,
       abnormal: isAbnormal,
       acked,
+      flagged,
+      reviewNote,
     });
   }
 

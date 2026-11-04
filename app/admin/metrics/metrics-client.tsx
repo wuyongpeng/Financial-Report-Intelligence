@@ -44,6 +44,9 @@ export function MetricsAdminClient() {
   const [discardTarget, setDiscardTarget] = useState<OverviewRow | null>(null);
   const [discardPassword, setDiscardPassword] = useState('');
   const [discardPasswordError, setDiscardPasswordError] = useState('');
+  const [flagTarget, setFlagTarget] = useState<OverviewRow | null>(null);
+  const [flagNote, setFlagNote] = useState('');
+  const [flagError, setFlagError] = useState('');
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState('');
 
@@ -60,6 +63,24 @@ export function MetricsAdminClient() {
     setDiscardTarget(null);
     setDiscardPassword('');
     setDiscardPasswordError('');
+  }, []);
+
+  const closeFlag = useCallback(() => {
+    setFlagTarget(null);
+    setFlagNote('');
+    setFlagError('');
+  }, []);
+
+  const askFlag = useCallback((row: OverviewRow) => {
+    if (!row.announcementId) {
+      setActionMsg(`${row.code} ${row.period} 缺少公告 id，无法标记`);
+      return;
+    }
+    if (row.flagged) return;
+    setActionMsg('');
+    setFlagNote(row.reviewNote || '');
+    setFlagError('');
+    setFlagTarget(row);
   }, []);
 
   const askDiscard = useCallback((row: OverviewRow) => {
@@ -176,6 +197,46 @@ export function MetricsAdminClient() {
       setRowBusyId(null);
     }
   }, [load, rowBusyId, session]);
+
+  const confirmFlag = useCallback(async () => {
+    if (!flagTarget?.announcementId) return;
+    const row = flagTarget;
+    const busyKey = `${row.code}:${row.period}`;
+    if (rowBusyId === busyKey) return;
+    setRowBusyId(busyKey);
+    setFlagError('');
+    setActionMsg('');
+    try {
+      const res = await fetch('/api/admin/metrics/flag', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          announcementId: row.announcementId,
+          code: row.code,
+          period: row.period,
+          note: flagNote.trim() || undefined,
+        }),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string; note?: string };
+      if (res.status === 401) {
+        session.setAdmin(false);
+        setFlagError('管理员登录已失效，请重新登录');
+        return;
+      }
+      if (!res.ok) {
+        setFlagError(body.error || '标记失败');
+        return;
+      }
+      closeFlag();
+      setActionMsg(body.note || `已标记异常 ${row.code} ${row.period}`);
+      await load();
+    } catch (e) {
+      setFlagError(e instanceof Error ? e.message : '标记失败');
+    } finally {
+      setRowBusyId(null);
+    }
+  }, [closeFlag, flagNote, flagTarget, load, rowBusyId, session]);
 
   useEffect(() => {
     if (session.admin) void load();
@@ -322,8 +383,20 @@ export function MetricsAdminClient() {
             {rows.map((row) => {
               const busyKey = `${row.code}:${row.period}`;
               const busy = rowBusyId === busyKey;
+              const rowBg = row.flagged
+                ? '#fff7ed'
+                : row.abnormal
+                  ? '#fff8f8'
+                  : row.acked
+                    ? '#f4faf6'
+                    : undefined;
+              const statusBits: string[] = [];
+              if (row.flagged) statusBits.push('人工标异');
+              if (!row.acked && row.issues.length > 0) {
+                statusBits.push(...row.issues.map(issueLabel));
+              }
               return (
-                <tr key={busyKey}>
+                <tr key={busyKey} style={rowBg ? { background: rowBg } : undefined}>
                   <td style={s.td}>
                     <Link href={row.href} style={linkStyle}>{row.code}</Link>
                   </td>
@@ -346,17 +419,28 @@ export function MetricsAdminClient() {
                   <td style={s.td}>
                     {row.acked ? (
                       <span style={{ color: '#15803d', fontWeight: 650 }}>已审</span>
-                    ) : row.abnormal ? (
-                      <span style={{ color: '#b91c1c', fontWeight: 650 }}>
-                        {row.issues.map(issueLabel).join(' · ')}
-                      </span>
+                    ) : statusBits.length > 0 ? (
+                      <div>
+                        <span style={{
+                          color: row.flagged ? '#b45309' : '#b91c1c',
+                          fontWeight: 650,
+                        }}
+                        >
+                          {statusBits.join(' · ')}
+                        </span>
+                        {row.flagged && row.reviewNote ? (
+                          <div style={{ marginTop: 2, fontSize: 11, color: '#9a6b2f' }} title={row.reviewNote}>
+                            {row.reviewNote.length > 28 ? `${row.reviewNote.slice(0, 28)}…` : row.reviewNote}
+                          </div>
+                        ) : null}
+                      </div>
                     ) : (
                       <span style={{ color: '#15803d' }}>正常</span>
                     )}
                   </td>
                   <td style={s.td}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {row.abnormal && !row.acked ? (
+                      {!row.acked && row.abnormal ? (
                         <button
                           type="button"
                           style={{
@@ -368,6 +452,20 @@ export function MetricsAdminClient() {
                           onClick={() => { void ackRow(row); }}
                         >
                           {busy ? '…' : '审核通过'}
+                        </button>
+                      ) : null}
+                      {!row.flagged ? (
+                        <button
+                          type="button"
+                          style={{
+                            ...s.btnFlag,
+                            opacity: row.announcementId && !busy ? 1 : 0.45,
+                            cursor: row.announcementId && !busy ? 'pointer' : 'not-allowed',
+                          }}
+                          disabled={!row.announcementId || busy}
+                          onClick={() => askFlag(row)}
+                        >
+                          标记异常
                         </button>
                       ) : null}
                       <button
@@ -392,7 +490,7 @@ export function MetricsAdminClient() {
       </div>
 
       <p style={{ ...s.muted, marginTop: 14 }}>
-        展示口径与详情页一致。错抓（如业绩预告）点删除；真暴增（如天齐 +1324%）点审核通过后不再进异常列表。
+        错抓点删除；真暴增或修完后点审核通过；用户反馈/人工发现点标记异常（可写短备注）。标记异常与审核通过互斥，均可再切换。
       </p>
 
       {discardTarget ? (
@@ -458,6 +556,58 @@ export function MetricsAdminClient() {
           </div>
         </div>
       ) : null}
+      {flagTarget ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="标记异常"
+          style={confirmBackdrop}
+          onClick={() => { if (!rowBusyId) closeFlag(); }}
+        >
+          <div style={confirmDialog} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 650 }}>标记异常</h3>
+            <p style={{ ...s.muted, margin: '0 0 8px' }}>
+              {flagTarget.code} {flagTarget.name || ''} · {flagTarget.period}
+            </p>
+            {flagTarget.title ? (
+              <p style={{ ...s.muted, margin: '0 0 12px', color: '#3a4d66' }}>
+                {flagTarget.title.replace(/\s+/g, ' ').slice(0, 100)}
+              </p>
+            ) : null}
+            <label style={{ display: 'block', marginBottom: 12 }}>
+              <span style={{ ...s.muted, display: 'block', marginBottom: 6 }}>备注（可选）</span>
+              <input
+                type="text"
+                value={flagNote}
+                onChange={(e) => setFlagNote(e.target.value)}
+                placeholder="如：用户反馈净利不对 / 问财口径"
+                maxLength={200}
+                style={{ ...s.input, width: '100%', boxSizing: 'border-box' }}
+              />
+            </label>
+            {flagError ? <p style={s.err}>{flagError}</p> : null}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                style={s.btnGhost}
+                disabled={Boolean(rowBusyId)}
+                onClick={closeFlag}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                style={{ ...s.btnFlag, background: '#fffbeb' }}
+                disabled={Boolean(rowBusyId)}
+                onClick={() => { void confirmFlag(); }}
+              >
+                {rowBusyId ? '…' : '确认标记'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </AdminMain>
   );
 }
