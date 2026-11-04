@@ -376,6 +376,7 @@ export function SurveyAdminClient() {
 
       <AiSummarizePanel
         scope="survey"
+        active={tab === 'results'}
         onSessionExpired={() => session.setAdmin(false)}
       />
 
