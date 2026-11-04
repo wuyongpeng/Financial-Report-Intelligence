@@ -755,6 +755,7 @@ export function SurveyForm({ token }: { token: string }) {
         <button type="button" style={btn} disabled={sending || !basicReady} onClick={() => void submit()}>
           {sending ? '提交中…' : (submitted ? '再次提交' : '提交')}
         </button>
+        <span style={muted}>专属邀请链接，请勿分享</span>
         {!basicReady ? <span style={muted}>基础必答题选完才能提交</span> : null}
       </div>
     </main>
