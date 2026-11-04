@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   AdminHeader,
+  AdminHelpTip,
   AdminLoginForm,
   AdminMain,
   adminStyles as s,
@@ -317,7 +318,6 @@ export function SurveyAdminClient() {
     <AdminMain>
       <AdminHeader
         title="用户调研"
-        subtitle="/admin/survey · 时间均为 Asia/Shanghai"
         activeHref="/admin/survey"
         onLogout={() => { void session.logout(); }}
       />
@@ -333,6 +333,7 @@ export function SurveyAdminClient() {
         <button type="button" style={{ ...s.btnGhost, marginLeft: 'auto' }} disabled={loading || busy} onClick={() => void load()}>
           刷新
         </button>
+        <AdminHelpTip text="邀请链接与回收问卷；时间均为 Asia/Shanghai" />
       </div>
 
       {tab === 'invites' ? (

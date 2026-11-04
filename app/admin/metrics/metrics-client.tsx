@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   AdminHeader,
+  AdminHelpTip,
   AdminLoginForm,
   AdminMain,
   adminStyles as s,
@@ -264,7 +265,7 @@ export function MetricsAdminClient() {
   if (!session.admin) {
     return (
       <AdminLoginForm
-        title="解析指标总览"
+        title="解析总览"
         hint="需要管理员密码后才能查看四核解析展示效果。"
         password={session.password}
         setPassword={session.setPassword}
@@ -278,8 +279,7 @@ export function MetricsAdminClient() {
   return (
     <AdminMain>
       <AdminHeader
-        title="解析指标总览"
-        subtitle={payload?.note ?? '/admin/metrics'}
+        title="解析总览"
         activeHref="/admin/metrics"
         onLogout={() => { void session.logout(); }}
       />
@@ -356,8 +356,9 @@ export function MetricsAdminClient() {
         <button type="submit" style={s.btn} disabled={loading}>
           {loading ? '刷新中…' : '刷新'}
         </button>
-        <span style={{ ...s.muted, alignSelf: 'center' }}>
+        <span style={{ ...s.muted, alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {payload ? `展示 ${rows.length} / ${payload.summary.rows} 行` : ''}
+          {payload?.note ? <AdminHelpTip text={payload.note} /> : null}
         </span>
       </form>
 

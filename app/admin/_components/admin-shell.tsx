@@ -167,6 +167,34 @@ export function AdminHeader({
 }
 
 
+/** 不起眼小问号：悬停看说明，截图时不抢眼。 */
+export function AdminHelpTip({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      aria-label={text}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 14,
+        height: 14,
+        borderRadius: '50%',
+        border: '1px solid #c5d0de',
+        color: '#8b97a9',
+        fontSize: 10,
+        fontWeight: 600,
+        cursor: 'help',
+        lineHeight: 1,
+        userSelect: 'none',
+        flexShrink: 0,
+      }}
+    >
+      ?
+    </span>
+  );
+}
+
 export function AdminMain({ children, style }: { children: ReactNode; style?: CSSProperties }) {
   return (
     <main className="admin-page" style={{ ...wrapWide, ...style }}>

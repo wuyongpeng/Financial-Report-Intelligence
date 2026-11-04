@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AdminHeader,
+  AdminHelpTip,
   AdminLoginForm,
   AdminMain,
   adminStyles as s,
@@ -77,7 +78,7 @@ export function CheckAdminClient() {
   if (!session.admin) {
     return (
       <AdminLoginForm
-        title="核心指标核对"
+        title="指标核对"
         hint="需要管理员密码后才能查看第三方对照结果。"
         password={session.password}
         setPassword={session.setPassword}
@@ -91,8 +92,7 @@ export function CheckAdminClient() {
   return (
     <AdminMain>
       <AdminHeader
-        title="核心指标核对 · 第三方对照"
-        subtitle={payload?.periodNote ?? '/admin/check'}
+        title="指标核对"
         activeHref="/admin/check"
         onLogout={() => { void session.logout(); }}
       />
@@ -149,8 +149,9 @@ export function CheckAdminClient() {
           onChange={(e) => setCodeQuery(e.target.value)}
         />
         <button type="submit" style={s.btn} disabled={loading}>{loading ? '刷新中…' : '刷新'}</button>
-        <span style={{ ...s.muted, alignSelf: 'center' }}>
+        <span style={{ ...s.muted, alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {payload ? `第三方 ${payload.thirdPartyCount} 家 · 展示 ${rows.length} 行` : ''}
+          {payload?.periodNote ? <AdminHelpTip text={payload.periodNote} /> : null}
         </span>
       </form>
 

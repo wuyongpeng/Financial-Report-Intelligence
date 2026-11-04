@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   AdminHeader,
+  AdminHelpTip,
   AdminLoginForm,
   AdminMain,
   adminStyles as s,
@@ -121,7 +122,6 @@ export function AuditAdminClient() {
     <AdminMain>
       <AdminHeader
         title="访问审计"
-        subtitle="/admin/audit · 时间均为 Asia/Shanghai"
         activeHref="/admin/audit"
         onLogout={() => {
           setEvents([]);
@@ -152,6 +152,7 @@ export function AuditAdminClient() {
           onChange={(e) => setQ(e.target.value)}
         />
         <button type="submit" style={s.btn} disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+        <AdminHelpTip text="时间均为 Asia/Shanghai" />
       </form>
 
       {error ? <p style={s.err}>{error}</p> : null}

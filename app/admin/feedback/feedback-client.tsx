@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   AdminHeader,
+  AdminHelpTip,
   AdminLoginForm,
   AdminMain,
   adminStyles as s,
@@ -89,7 +90,6 @@ export function FeedbackAdminClient() {
     <AdminMain>
       <AdminHeader
         title="反馈收集"
-        subtitle="/admin/feedback · 时间均为 Asia/Shanghai"
         activeHref="/admin/feedback"
         onLogout={() => { void session.logout(); }}
       />
@@ -135,7 +135,10 @@ export function FeedbackAdminClient() {
         >
           加载更多
         </button>
-        <span style={{ ...s.muted, alignSelf: 'center' }}>已显示 {items.length} 条</span>
+        <span style={{ ...s.muted, alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          已显示 {items.length} 条
+          <AdminHelpTip text="产品内用户反馈；时间均为 Asia/Shanghai" />
+        </span>
       </div>
     </AdminMain>
   );
