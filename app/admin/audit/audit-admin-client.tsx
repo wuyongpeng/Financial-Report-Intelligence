@@ -9,6 +9,7 @@ import {
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
+import { AiSummarizePanel } from '../_components/ai-summarize-card';
 
 type AuditEvent = {
   id: number;
@@ -156,6 +157,11 @@ export function AuditAdminClient() {
       </form>
 
       {error ? <p style={s.err}>{error}</p> : null}
+
+      <AiSummarizePanel
+        scope="audit"
+        onSessionExpired={() => session.setAdmin(false)}
+      />
 
       <div style={s.tableWrap}>
         <table style={s.table}>

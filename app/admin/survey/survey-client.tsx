@@ -9,6 +9,7 @@ import {
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
+import { AiSummarizePanel } from '../_components/ai-summarize-card';
 import { formatSurveyBasicLine, formatSurveyDeepLine, type SurveyBasic, type SurveyDeep } from '@/lib/survey';
 
 type Invite = {
@@ -472,6 +473,11 @@ export function SurveyAdminClient() {
         </section>
       ) : (
         <>
+          <AiSummarizePanel
+            scope="survey"
+            active={tab === 'results'}
+            onSessionExpired={() => session.setAdmin(false)}
+          />
           <section style={{ marginBottom: 18 }}>
             <div style={s.cardRow}>
               {cards.map((card) => (

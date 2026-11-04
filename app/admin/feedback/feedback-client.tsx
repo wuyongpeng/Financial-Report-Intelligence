@@ -9,6 +9,7 @@ import {
   adminStyles as s,
   useAdminSession,
 } from '../_components/admin-shell';
+import { AiSummarizePanel } from '../_components/ai-summarize-card';
 
 type FeedbackItem = {
   id: number;
@@ -94,6 +95,10 @@ export function FeedbackAdminClient() {
         onLogout={() => { void session.logout(); }}
       />
       {error ? <p style={s.err}>{error}</p> : null}
+      <AiSummarizePanel
+        scope="feedback"
+        onSessionExpired={() => session.setAdmin(false)}
+      />
       <div style={s.tableWrap}>
         <table style={s.table}>
           <thead>
