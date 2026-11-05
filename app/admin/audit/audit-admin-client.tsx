@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AdminHeader,
   AdminHelpTip,
@@ -10,6 +10,7 @@ import {
   useAdminSession,
 } from '../_components/admin-shell';
 import { AiSummarizePanel } from '../_components/ai-summarize-card';
+import { matchesQuickSearch } from '@/lib/admin-table-search';
 
 type AuditEvent = {
   id: number;
@@ -60,7 +61,6 @@ function detailSummary(ev: AuditEvent) {
 export function AuditAdminClient() {
   const session = useAdminSession();
   const [eventType, setEventType] = useState('');
-  const [companyCode, setCompanyCode] = useState('');
   const [q, setQ] = useState('');
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,7 +73,6 @@ export function AuditAdminClient() {
       const params = new URLSearchParams();
       params.set('limit', '50');
       if (eventType) params.set('eventType', eventType);
-      if (companyCode.trim()) params.set('companyCode', companyCode.trim());
       if (q.trim()) params.set('q', q.trim());
       if (opts?.beforeId) params.set('beforeId', String(opts.beforeId));
       const res = await fetch(`/api/admin/audit?${params}`, { cache: 'no-store', credentials: 'same-origin' });
@@ -93,7 +92,7 @@ export function AuditAdminClient() {
     } finally {
       setLoading(false);
     }
-  }, [eventType, companyCode, q, session]);
+  }, [eventType, q, session]);
 
   useEffect(() => {
     if (session.admin) void load();
@@ -116,6 +115,28 @@ export function AuditAdminClient() {
       />
     );
   }
+
+  const filteredEvents = useMemo(() => {
+    const query = q.trim();
+    if (!query) return events;
+    return events.filter((ev) => matchesQuickSearch(query, [
+      fmtTime(ev.created_at),
+      EVENT_LABEL[ev.event_type] ?? ev.event_type,
+      ev.event_type,
+      ev.company_code,
+      ev.ip,
+      ev.owner_key,
+      ev.question,
+      detailSummary(ev),
+      ev.user_agent,
+      ev.path,
+      ev.referer,
+      ev.report_id,
+      ev.conversation_id,
+      ev.request_id,
+      JSON.stringify(ev.detail ?? {}),
+    ]));
+  }, [events, q]);
 
   const lastId = events.length ? events[events.length - 1].id : null;
 
@@ -142,15 +163,10 @@ export function AuditAdminClient() {
             <option value="answer_feedback">反馈</option>
           </select>
           <input
-            style={{ ...s.input, width: 110 }}
-            placeholder="股票代码"
-            value={companyCode}
-            onChange={(e) => setCompanyCode(e.target.value)}
-          />
-          <input
-            style={{ ...s.input, width: 200 }}
-            placeholder="搜问题 / IP / UA"
+            style={{ ...s.input, width: 180, flex: '0 1 220px', fontSize: 12, padding: '5px 8px' }}
+            placeholder="快速检索"
             value={q}
+            maxLength={80}
             onChange={(e) => setQ(e.target.value)}
           />
           <button type="submit" style={s.btn} disabled={loading}>{loading ? '查询中…' : '查询'}</button>
@@ -180,10 +196,10 @@ export function AuditAdminClient() {
             </tr>
           </thead>
           <tbody>
-            {events.length === 0 && !loading ? (
+            {filteredEvents.length === 0 && !loading ? (
               <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
             ) : null}
-            {events.map((ev) => (
+            {filteredEvents.map((ev) => (
               <tr key={ev.id}>
                 <td style={s.td}>{fmtTime(ev.created_at)}</td>
                 <td style={s.td}>{EVENT_LABEL[ev.event_type] ?? ev.event_type}</td>
@@ -208,7 +224,7 @@ export function AuditAdminClient() {
         >
           加载更多
         </button>
-        <span style={{ ...s.muted, alignSelf: 'center' }}>已显示 {events.length} 条</span>
+        <span style={{ ...s.muted, alignSelf: 'center' }}>已显示 {filteredEvents.length}{filteredEvents.length !== events.length ? ` / ${events.length}` : ''} 条</span>
       </div>
     </AdminMain>
   );

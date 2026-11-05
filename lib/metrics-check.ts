@@ -3,6 +3,8 @@
  * Pure functions — used by /api/admin/check and unit tests.
  */
 
+import { rowSearchHaystack } from './admin-table-search';
+
 export type CheckMetric = 'revenue' | 'net_profit' | 'eps' | 'roe';
 
 export type ThirdPartyRow = {
@@ -361,4 +363,29 @@ export function buildCheckCells(
   }
 
   return { cells, summary, periodNote };
+}
+
+/** Visible admin/check table text for quick search (status OK/BAD/MISS etc.). */
+export function checkCellSearchParts(cell: CheckCell): Array<string | number | null | undefined> {
+  return [
+    cell.code,
+    cell.name,
+    cell.period,
+    cell.metric,
+    cell.metricLabel,
+    cell.thirdParty,
+    cell.dbConverted,
+    cell.dbRaw,
+    cell.status,
+    cell.note,
+    cell.relDiff,
+    formatConverted(cell.metric, cell.thirdParty),
+    formatConverted(cell.metric, cell.dbConverted),
+  ];
+}
+
+export function checkCellMatchesSearch(cell: CheckCell, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return rowSearchHaystack(checkCellSearchParts(cell)).includes(q);
 }

@@ -11,6 +11,7 @@ import {
 } from '../_components/admin-shell';
 import { AiSummarizePanel } from '../_components/ai-summarize-card';
 import { formatSurveyBasicLine, formatSurveyDeepLine, type SurveyBasic, type SurveyDeep } from '@/lib/survey';
+import { matchesQuickSearch } from '@/lib/admin-table-search';
 
 type Invite = {
   id: number;
@@ -148,6 +149,7 @@ export function SurveyAdminClient() {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
   const [inviteSearch, setInviteSearch] = useState('');
+  const [responseSearch, setResponseSearch] = useState('');
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [savingNote, setSavingNote] = useState('');
   const [inviteFeedbackFilter, setInviteFeedbackFilter] = useState<FeedbackFilter>('all');
@@ -306,20 +308,37 @@ export function SurveyAdminClient() {
   }, [summary]);
 
   const filteredInvites = useMemo(() => {
-    const q = inviteSearch.trim().toLowerCase();
+    const q = inviteSearch.trim();
     return invites.filter((item) => {
       if (inviteFeedbackFilter === 'done' && item.responseCount <= 0) return false;
       if (inviteFeedbackFilter === 'pending' && item.responseCount > 0) return false;
       if (!q) return true;
-      const hay = [
+      return matchesQuickSearch(q, [
         item.token,
         item.path,
-        item.note ?? '',
+        item.note,
         inviteUrl(item.path),
-      ].join(' ').toLowerCase();
-      return hay.includes(q);
+        fmtTime(item.createdAt),
+        item.responseCount > 0 ? '已反馈' : '未反馈',
+        item.active ? '有效' : '已作废',
+        String(item.responseCount),
+      ]);
     });
   }, [invites, inviteFeedbackFilter, inviteSearch]);
+
+  const filteredResponses = useMemo(() => {
+    const q = responseSearch.trim();
+    if (!q) return responses;
+    return responses.filter((item) => matchesQuickSearch(q, [
+      fmtTime(item.createdAt),
+      item.nickname,
+      item.token,
+      item.inviteNote,
+      '已反馈',
+      formatSurveyBasicLine(item.basic as unknown as Record<string, unknown>),
+      formatSurveyDeepLine(item.deep),
+    ]));
+  }, [responses, responseSearch]);
 
   if (!session.ready) {
     return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
@@ -549,6 +568,15 @@ export function SurveyAdminClient() {
           </section>
 
           <section>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+              <input
+                style={{ ...s.input, width: 180, flex: '0 1 220px', fontSize: 12, padding: '5px 8px' }}
+                value={responseSearch}
+                maxLength={80}
+                placeholder="快速检索"
+                onChange={(e) => setResponseSearch(e.target.value)}
+              />
+            </div>
             <div style={s.tableWrap}>
               <table style={s.table}>
                 <thead>
@@ -566,7 +594,10 @@ export function SurveyAdminClient() {
                   {!loading && responses.length === 0 ? (
                     <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
                   ) : null}
-                  {responses.map((item) => {
+                  {!loading && responses.length > 0 && filteredResponses.length === 0 ? (
+                    <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无匹配</td></tr>
+                  ) : null}
+                  {filteredResponses.map((item) => {
                     const basicLine = formatSurveyBasicLine(item.basic as unknown as Record<string, unknown>);
                     return (
                       <tr key={item.id}>

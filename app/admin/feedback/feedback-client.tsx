@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AdminHeader,
   AdminHelpTip,
@@ -10,6 +10,7 @@ import {
   useAdminSession,
 } from '../_components/admin-shell';
 import { AiSummarizePanel } from '../_components/ai-summarize-card';
+import { matchesQuickSearch } from '@/lib/admin-table-search';
 
 type FeedbackItem = {
   id: number;
@@ -33,6 +34,7 @@ export function FeedbackAdminClient() {
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
 
   const load = useCallback(async (opts?: { append?: boolean; beforeId?: number | null }) => {
     setLoading(true);
@@ -85,6 +87,20 @@ export function FeedbackAdminClient() {
     );
   }
 
+  const filteredItems = useMemo(() => {
+    const q = search.trim();
+    if (!q) return items;
+    return items.filter((item) => matchesQuickSearch(q, [
+      fmtTime(item.created_at),
+      item.category || '其它',
+      item.message,
+      item.contact,
+      item.page,
+      item.url,
+      item.user_agent,
+    ]));
+  }, [items, search]);
+
   const lastId = items.length ? items[items.length - 1].id : null;
 
   return (
@@ -99,6 +115,15 @@ export function FeedbackAdminClient() {
         scope="feedback"
         onSessionExpired={() => session.setAdmin(false)}
       />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+        <input
+          style={{ ...s.input, width: 180, flex: '0 1 220px', fontSize: 12, padding: '5px 8px' }}
+          value={search}
+          maxLength={80}
+          placeholder="快速检索"
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
       <div style={s.tableWrap}>
         <table style={s.table}>
           <thead>
@@ -115,7 +140,10 @@ export function FeedbackAdminClient() {
             {!loading && items.length === 0 ? (
               <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
             ) : null}
-            {items.map((item) => (
+            {!loading && items.length > 0 && filteredItems.length === 0 ? (
+              <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无匹配</td></tr>
+            ) : null}
+            {filteredItems.map((item) => (
               <tr key={item.id}>
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{fmtTime(item.created_at)}</td>
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.category || '其它'}</td>
@@ -141,7 +169,7 @@ export function FeedbackAdminClient() {
           加载更多
         </button>
         <span style={{ ...s.muted, alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          已显示 {items.length} 条
+          已显示 {filteredItems.length}{filteredItems.length !== items.length ? ` / ${items.length}` : ''} 条
           <AdminHelpTip text="产品内用户反馈；时间均为 Asia/Shanghai" />
         </span>
       </div>

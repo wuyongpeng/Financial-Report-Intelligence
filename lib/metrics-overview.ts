@@ -10,6 +10,7 @@ import {
   type HeadlineMetricName,
   type ResolvedYoy,
 } from './crawl-display';
+import { rowSearchHaystack } from './admin-table-search';
 
 export const OVERVIEW_METRICS: HeadlineMetricName[] = ['revenue', 'net_profit', 'eps', 'roe'];
 
@@ -282,4 +283,38 @@ export function issueLabel(issue: OverviewIssue): string {
   if (issue === 'missing') return '缺核';
   if (issue === 'no_page') return '无页码';
   return '同比离谱';
+}
+
+/** Visible admin/metrics table text for quick search (incl. 「同比 暂无同比」). */
+export function overviewRowSearchParts(row: OverviewRow): Array<string | number | null | undefined> {
+  const parts: Array<string | number | null | undefined> = [
+    row.code,
+    row.name,
+    row.period,
+    row.title,
+    row.reviewNote,
+  ];
+  for (const metric of OVERVIEW_METRICS) {
+    const cell = row.metrics[metric];
+    parts.push(
+      OVERVIEW_METRIC_LABEL[metric],
+      cell.valueText,
+      `同比 ${cell.yoyText}`,
+      cell.yoyText,
+      cell.pageText,
+      ...cell.issues.map(issueLabel),
+    );
+  }
+  if (row.acked) parts.push('已审');
+  else if (row.flagged) parts.push('人工标异');
+  else if (row.issues.length > 0) parts.push(...row.issues.map(issueLabel));
+  else parts.push('正常');
+  if (row.abnormal) parts.push('异常');
+  return parts;
+}
+
+export function overviewRowMatchesSearch(row: OverviewRow, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return rowSearchHaystack(overviewRowSearchParts(row)).includes(q);
 }

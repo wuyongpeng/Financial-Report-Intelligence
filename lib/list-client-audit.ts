@@ -54,6 +54,13 @@ export async function listClientAudit(query: ListClientAuditQuery): Promise<Clie
         OR user_agent ILIKE ${like}
         OR owner_key ILIKE ${like}
         OR company_code ILIKE ${like}
+        OR path ILIKE ${like}
+        OR referer ILIKE ${like}
+        OR report_id ILIKE ${like}
+        OR conversation_id::text ILIKE ${like}
+        OR request_id::text ILIKE ${like}
+        OR event_type ILIKE ${like}
+        OR detail::text ILIKE ${like}
       )
     ORDER BY id DESC
     LIMIT ${limit}

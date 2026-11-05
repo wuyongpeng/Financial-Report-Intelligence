@@ -12,6 +12,7 @@ import {
 } from '../_components/admin-shell';
 import {
   CHECK_METRICS,
+  checkCellMatchesSearch,
   formatConverted,
   METRIC_LABEL,
   type CheckCell,
@@ -67,7 +68,7 @@ export function CheckAdminClient() {
     return payload.cells.filter((cell) => {
       if (onlyMismatch && cell.status === 'OK') return false;
       if (metricFilter && cell.metric !== metricFilter) return false;
-      if (q && !cell.code.includes(q) && !(cell.name && cell.name.includes(q))) return false;
+      if (q && !checkCellMatchesSearch(cell, q)) return false;
       return true;
     });
   }, [payload, onlyMismatch, metricFilter, codeQuery]);
@@ -144,9 +145,10 @@ export function CheckAdminClient() {
           ))}
         </select>
         <input
-          style={{ ...s.input, width: 140 }}
-          placeholder="搜代码 / 公司"
+          style={{ ...s.input, width: 180, flex: '0 1 220px', fontSize: 12, padding: '5px 8px' }}
+          placeholder="快速检索"
           value={codeQuery}
+          maxLength={80}
           onChange={(e) => setCodeQuery(e.target.value)}
         />
         <button type="submit" style={s.btn} disabled={loading}>{loading ? '刷新中…' : '刷新'}</button>

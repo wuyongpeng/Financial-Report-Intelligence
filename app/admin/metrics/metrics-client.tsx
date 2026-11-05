@@ -15,6 +15,7 @@ import {
   issueLabel,
   OVERVIEW_METRICS,
   OVERVIEW_METRIC_LABEL,
+  overviewRowMatchesSearch,
   type OverviewIssue,
   type OverviewRow,
   type OverviewSummary,
@@ -311,7 +312,7 @@ export function MetricsAdminClient() {
       // Checkbox only when no card filter (card filter takes priority).
       if (!cardFilter && onlyAbnormal && !row.abnormal) return false;
       if (periodFilter && row.period !== periodFilter) return false;
-      if (q && !row.code.includes(q) && !(row.name && row.name.includes(q))) return false;
+      if (q && !overviewRowMatchesSearch(row, q)) return false;
       return true;
     });
   }, [payload, onlyAbnormal, cardFilter, periodFilter, codeQuery]);
@@ -577,9 +578,10 @@ export function MetricsAdminClient() {
           ))}
         </select>
         <input
-          style={{ ...s.input, width: 140 }}
-          placeholder="搜代码 / 公司"
+          style={{ ...s.input, width: 180, flex: '0 1 220px', fontSize: 12, padding: '5px 8px' }}
+          placeholder="快速检索"
           value={codeQuery}
+          maxLength={80}
           onChange={(e) => setCodeQuery(e.target.value)}
         />
         <button type="submit" style={s.btn} disabled={loading}>
