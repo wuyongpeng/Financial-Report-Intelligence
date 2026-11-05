@@ -166,6 +166,37 @@ test('Xinyisheng-style restated prior: prefer 调整后 and keep disclosed YoY%'
   assert.equal(roe?.yoyPct, undefined);
 });
 
+test('Shaanxi Coal restated prior: bare YoY% without % sign prefers 调整后; ROE dual before ppThenYtd', () => {
+  // 陕西煤业 2025Q3：上年同期分调整前/后，增减列常无 %；ROE 5.72|5.60|5.25|0.48。
+  // Bug: dualPrior 要 % 号→金额/EPS 吃调整前；ppThenYtd 把 5.60|5.25 当增减|YTD→ROE 无 prior。
+  const metrics = parseCoreMetricPages([
+    '主要会计数据和财务指标 单位：万元 币种：人民币 项目 本报告期 上年同期 本报告期比上年同期增减变动幅度(%) 年初至报告期末 上年同期 年初至报告期末比上年同期增减变动幅度(%) 调整前 调整后 调整后 调整前 调整后 调整后 '
+    + '营业收入 4,010,041.08 3,455,176.54 5,070,045.48 -20.91 11,808,310.93 12,542,720.08 13,543,717.80 -12.81 '
+    + '归属于上市公司股东的净利润 507,454.60 484,454.78 691,272.05 -26.59 1,271,300.40 1,594,315.68 1,746,862.34 -27.22 '
+    + '基本每股收益（元/股） 0.52 0.55 0.71 -26.77 1.31 1.64 1.80 -27.22 '
+    + '加权平均净资产收益（%） 5.72 5.60 5.25 0.48 13.74 16.92 16.57 减少 2.82 个百分点',
+  ]);
+  const revenue = metrics.find((item) => item.metric === 'revenue');
+  assert.equal(revenue?.value, 40_100_410_800);
+  assert.equal(revenue?.priorValue, 50_700_454_800);
+  assert.equal(revenue?.yoyPct, -20.91);
+
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 5_074_546_000);
+  assert.equal(profit?.priorValue, 6_912_720_500);
+  assert.equal(profit?.yoyPct, -26.59);
+
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 0.52);
+  assert.equal(eps?.priorValue, 0.71);
+  assert.equal(eps?.yoyPct, -26.77);
+
+  const roe = metrics.find((item) => item.metric === 'roe');
+  assert.equal(roe?.value, 5.72);
+  assert.equal(roe?.priorValue, 5.25);
+  assert.equal(roe?.yoyPct, undefined);
+});
+
 test('Maotai-style Q3 row: bare YoY% then YTD must not become amount prior', () => {
   // 贵州茅台三季报：本报告期 | 比上年同期增减变动幅度(%) | 年初至报告期末 | …
   // Cells often omit the % sign on the YoY column (3.78 not 3.78%).

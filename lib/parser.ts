@@ -256,12 +256,36 @@ function parseTrailingPriorAndYoy(rest: string, currentRaw?: number) {
   // Taking only the first prior leaves the duplicate column in the way of YoY
   // (新易盛 2025Q3 归母净利 prior 对但丢 205.38%), and for EPS/ROE the first
   // column is 调整前 while disclosed YoY uses 调整后 (1.1 vs 0.79).
+  // 陕西煤业等摘要表头已写「增减变动幅度(%)」时单元格常省略 % 号（-20.91 非 -20.91%）。
   const dualPrior = cursor.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)/);
   if (dualPrior) {
     const pre = parseSignedNumber(dualPrior[2], dualPrior[1], dualPrior[3]);
     const post = parseSignedNumber(dualPrior[5], dualPrior[4], dualPrior[6]);
     const afterDual = cursor.slice(dualPrior[0].length);
-    const yoyAfterDual = parseYoyPercentToken(afterDual);
+    let yoyAfterDual = parseYoyPercentToken(afterDual);
+    if (!yoyAfterDual && pre !== null && post !== null && currentRaw !== undefined && Number.isFinite(currentRaw)) {
+      const bareYoyMatch = afterDual.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?(?![.\d]*\s*%)/);
+      if (bareYoyMatch) {
+        const bareYoy = parseSignedNumber(bareYoyMatch[2], bareYoyMatch[1], bareYoyMatch[3]);
+        if (bareYoy !== null && Math.abs(bareYoy) < 1000) {
+          const tol = 0.15 + Math.abs(bareYoy) * 0.002;
+          // Prefer 调整后: YoY must reconcile to post first (用户：一律按调整后).
+          if (post !== 0) {
+            const yoyFromPost = ((currentRaw - post) / Math.abs(post)) * 100;
+            if (Math.abs(yoyFromPost - bareYoy) <= tol) {
+              return { priorValue: post, yoyPct: bareYoy };
+            }
+          }
+          // 银行利润表：中间是变动额时同比贴合上年同期(pre)，不是调整后。
+          if (pre !== 0) {
+            const yoyFromPre = ((currentRaw - pre) / Math.abs(pre)) * 100;
+            if (Math.abs(yoyFromPre - bareYoy) <= tol) {
+              return { priorValue: pre, yoyPct: bareYoy };
+            }
+          }
+        }
+      }
+    }
     if (pre !== null && post !== null && yoyAfterDual) {
       // 银行利润表：本期 | 上年同期 | 变动额 | 变动比率% — 变动额不是「调整后」。
       // 若同比%贴近 (本期−上年同期)/|上年同期|，保留上年同期为 prior。
@@ -324,24 +348,10 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
     const finishRoe = (value: number, after: string) => {
       if (!Number.isFinite(value)) return null;
       if (Math.abs(value) < definition.minAbs || Math.abs(value) > definition.maxAbs) return null;
-      // ROE tables list 本期 then 上年同期 (same unit). A following bare/percent
-      // number is prior level — not 同比增减 — unless a third % column appears.
-      // Q3 summary ROE: 本期 | 增减百分点 | 年初至期末 | … (陕西煤业 5.80 0.07 16.70 2.95)
-      const ppThenYtd = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?/);
-      if (ppThenYtd) {
-        const mid = parseSignedNumber(ppThenYtd[2], ppThenYtd[1], ppThenYtd[3]);
-        const ytd = parseSignedNumber(ppThenYtd[5], ppThenYtd[4], ppThenYtd[6]);
-        if (
-          mid !== null && ytd !== null
-          && Math.abs(ytd) >= Math.abs(value) * 0.5
-          && Math.abs(mid) < Math.abs(value)
-          && Math.abs(mid) <= 50
-        ) {
-          return { value, detectedUnit: '%', priorValue: undefined, yoyPct: undefined };
-        }
-      }
       // Restated ROE: 本期 | 调整前 | 调整后 | 增减(百分点). Prefer 调整后 when
-      // the third token matches |本期−调整后| (新易盛 20.81 | 12.45 | 6.81 | 14.00).
+      // the third token matches |本期−调整后| (新易盛 20.81 | 12.45 | 6.81 | 14.00;
+      // 陕西煤业 5.72 | 5.60 | 5.25 | 0.48). Must run before ppThenYtd — otherwise
+      // 调整前≈本期 would look like「增减百分点 | 年初至期末」and drop prior.
       const dualRoe = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?/);
       if (dualRoe) {
         const pre = parseSignedNumber(dualRoe[2], dualRoe[1], dualRoe[3]);
@@ -356,6 +366,22 @@ function candidateAfterLabel(pageText: string, label: string, definition: Metric
           if (Math.abs(pp - Math.abs(delta)) <= 0.05 + pp * 0.001 && Math.abs(delta) <= 80) {
             return { value, detectedUnit: '%', priorValue: post, yoyPct: undefined };
           }
+        }
+      }
+      // ROE tables list 本期 then 上年同期 (same unit). A following bare/percent
+      // number is prior level — not 同比增减 — unless a third % column appears.
+      // Q3 summary ROE: 本期 | 增减百分点 | 年初至期末 | … (陕西煤业 5.80 0.07 16.70 2.95)
+      const ppThenYtd = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?\s+(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?/);
+      if (ppThenYtd) {
+        const mid = parseSignedNumber(ppThenYtd[2], ppThenYtd[1], ppThenYtd[3]);
+        const ytd = parseSignedNumber(ppThenYtd[5], ppThenYtd[4], ppThenYtd[6]);
+        if (
+          mid !== null && ytd !== null
+          && Math.abs(ytd) >= Math.abs(value) * 0.5
+          && Math.abs(mid) < Math.abs(value)
+          && Math.abs(mid) <= 50
+        ) {
+          return { value, detectedUnit: '%', priorValue: undefined, yoyPct: undefined };
         }
       }
       const priorLevel = after.match(/^\s*(\()?\s*(-?\d+(?:\.\d+)?)\s*(\))?\s*%?/);
