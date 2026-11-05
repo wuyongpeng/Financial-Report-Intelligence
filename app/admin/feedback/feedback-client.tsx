@@ -69,6 +69,22 @@ export function FeedbackAdminClient() {
     if (session.admin) void load();
   }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const filteredItems = useMemo(() => {
+    const q = search.trim();
+    if (!q) return items;
+    return items.filter((item) => matchesQuickSearch(q, [
+      fmtTime(item.created_at),
+      item.category || '其它',
+      item.message,
+      item.contact,
+      item.page,
+      item.url,
+      item.user_agent,
+    ]));
+  }, [items, search]);
+
+  const lastId = items.length ? items[items.length - 1].id : null;
+
   if (!session.ready) {
     return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
   }
@@ -86,22 +102,6 @@ export function FeedbackAdminClient() {
       />
     );
   }
-
-  const filteredItems = useMemo(() => {
-    const q = search.trim();
-    if (!q) return items;
-    return items.filter((item) => matchesQuickSearch(q, [
-      fmtTime(item.created_at),
-      item.category || '其它',
-      item.message,
-      item.contact,
-      item.page,
-      item.url,
-      item.user_agent,
-    ]));
-  }, [items, search]);
-
-  const lastId = items.length ? items[items.length - 1].id : null;
 
   return (
     <AdminMain>

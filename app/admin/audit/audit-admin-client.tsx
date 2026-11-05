@@ -98,24 +98,6 @@ export function AuditAdminClient() {
     if (session.admin) void load();
   }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps -- initial load after login
 
-  if (!session.ready) {
-    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
-  }
-
-  if (!session.admin) {
-    return (
-      <AdminLoginForm
-        title="访问审计"
-        hint="需要管理员密码后才能查看访问、提问与反馈记录。"
-        password={session.password}
-        setPassword={session.setPassword}
-        loginError={session.loginError}
-        loggingIn={session.loggingIn}
-        onSubmit={() => { void session.submitLogin(); }}
-      />
-    );
-  }
-
   const filteredEvents = useMemo(() => {
     const query = q.trim();
     if (!query) return events;
@@ -139,6 +121,24 @@ export function AuditAdminClient() {
   }, [events, q]);
 
   const lastId = events.length ? events[events.length - 1].id : null;
+
+  if (!session.ready) {
+    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
+  }
+
+  if (!session.admin) {
+    return (
+      <AdminLoginForm
+        title="访问审计"
+        hint="需要管理员密码后才能查看访问、提问与反馈记录。"
+        password={session.password}
+        setPassword={session.setPassword}
+        loginError={session.loginError}
+        loggingIn={session.loggingIn}
+        onSubmit={() => { void session.submitLogin(); }}
+      />
+    );
+  }
 
   return (
     <AdminMain>
