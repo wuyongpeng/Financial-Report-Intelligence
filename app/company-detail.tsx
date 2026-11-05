@@ -354,6 +354,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const pendingSelectionRef = useRef<{ quote: string; page: number; kind: 'pdf' | 'text' } | null>(null);
   const sourceRef = useRef<HTMLDivElement>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const asrSessionRef = useRef<AsrSession | null>(null);
   const pcmCaptureRef = useRef<PcmCapture | null>(null);
@@ -619,7 +620,18 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       .catch(() => undefined);
     return () => abort.abort();
   }, [selected.id]);
-  useEffect(() => { if (messages.length) chatEnd.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [messages]);
+  // Pin to bottom on new turns / streamed answer text only — never on followup/feedback metadata,
+  // and never when the user has scrolled up to read earlier content.
+  const chatPinKey = messages.map((m) => `${m.role}\0${m.text}`).join('\n');
+  useEffect(() => {
+    if (!messages.length) return;
+    const root = chatScrollRef.current;
+    if (root) {
+      const distance = root.scrollHeight - root.scrollTop - root.clientHeight;
+      if (distance > 120) return;
+    }
+    chatEnd.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [chatPinKey, messages.length]);
   useEffect(() => {
     if (regenMenu == null) return;
     function onDoc(event: MouseEvent) {
@@ -2864,7 +2876,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       {!chatCollapsed && !middleCollapsed && <div className="cd-gutter" role="separator" aria-orientation="vertical" aria-label="调整对话栏宽度" onPointerDown={e=>onGutterDown('chat', e)} onPointerMove={onGutterMove} onPointerUp={onGutterUp} onPointerCancel={onGutterUp} />}
       <aside id="cd-chat-panel" className={`cd-chat cd-pane ${mobilePane==='chat'?'mobile-active':''}`} aria-label="财报对话" style={!chatCollapsed ? { flex: `${paneFlex.chat} 1 0%`, minWidth: 220 } : undefined}>
         <div className="cd-pane-head"><h2><span>✧</span> 追问</h2><div className="cd-chat-actions"><button aria-label="新建对话" title="新建对话" disabled={asking||memoryLoading} onClick={()=>void newConversation()}><Icon name="plus" size={16} /></button><button className="cd-dock" aria-label="收起对话" title={collapseGate.canCollapseChat ? '收起对话' : '至少保留一栏展开'} disabled={!collapseGate.canCollapseChat} onClick={()=>{if(!collapseGate.canCollapseChat)return;setChatCollapsed(true);setMobilePane(middleCollapsed?'sources':'dashboard');}}><DockIcon side="right" /></button></div></div>
-        <div className="cd-chat-scroll">
+        <div className="cd-chat-scroll" ref={chatScrollRef}>
           {messages.length === 0 && <div className="cd-ask-empty">
             <aside className="cd-ask-tips">
               <div className="cd-ask-tips-head">
