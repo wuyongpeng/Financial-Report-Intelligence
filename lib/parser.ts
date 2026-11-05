@@ -209,7 +209,9 @@ function looksLikeBareYoyThenYtd(currentRaw: number, bare: number, next: number)
   }
   // EPS-scale: 本期 | 同比% | 年初至期末(≥本期) | …
   // Allow next ≈ current (YTD folded poorly) when bare looks percent-sized (茅台 15.35|0.77|…).
-  if (!(absBare <= 500)) return false;
+  // Same <1000 bar as amount rows — 兆易 6.00|689.47|15.83 was rejected by a 500 cap
+  // and 689.47 was stored as prior → UI (6-689.47)/689.47 = -99.13%.
+  if (!(absBare < 1000)) return false;
   // 银行摘要三年列 0.36|0.36|0.36：中间是上年同期 EPS，不是同比%。
   if (absCurrent > 0 && Math.abs(absBare - absCurrent) / absCurrent <= 0.08) return false;
   if (absNext < absCurrent * 0.85 && !(absBare <= 100 && absNext > absBare * 2)) return false;

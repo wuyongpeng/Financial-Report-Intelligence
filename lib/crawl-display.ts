@@ -623,8 +623,20 @@ export function isAbsurdDisclosedPrior(
   }
   const yoy = describeYoy(current, prior);
   const pct = yoy && !yoy.naPercent && yoy.pct !== undefined ? yoy.pct : null;
-  if (pct == null || Math.abs(pct) < 500) return false;
   const ratio = absCurrent > 0 ? absPrior / absCurrent : 1;
+  // Hypergrowth bare YoY% stored as prior (兆易 6.00 vs 689.47 → computed -99.13%).
+  // |pct| stays under the 500 bar, so this must run before that early exit.
+  if (
+    absCurrent < 1000
+    && absPrior <= 1000
+    && absPrior > Math.max(100, absCurrent * 10)
+    && pct != null
+    && pct > -100
+    && pct <= -90
+  ) {
+    return true;
+  }
+  if (pct == null || Math.abs(pct) < 500) return false;
   // Yuan-scale: bare YoY% (3.78) stored as prior against 亿-level amounts.
   if (ratio < 0.01 || absPrior < absCurrent * 1e-6) return true;
   // EPS / small-unit scale: bare YoY% (0.77) vs 15.35 → +1893%; keep 寒武纪-style 亿 prior.
@@ -705,7 +717,8 @@ export function resolveYoy(
     const built = yoyFromDisclosedPct(dYoy as number, current, priorForPct);
     return { ...built, source: 'disclosed' };
   }
-  // Guard: YoY% mis-read as prior → astronomical %; fall through to cross-report.
+  // Guard: YoY% mis-read as prior → astronomical %; reuse as disclosed % when it
+  // still looks like a percent column (兆易 689.47 / 茅台 0.77), else cross-report.
   if (hasDPrior) {
     if (!isAbsurdDisclosedPrior(current, dPrior as number, metric)) {
       if (metric === 'roe') {
@@ -713,6 +726,14 @@ export function resolveYoy(
       }
       const yoy = describeYoy(current, dPrior as number);
       if (yoy) return { ...yoy, source: 'disclosed' };
+    } else if (
+      !hasDYoy
+      && metric !== 'roe'
+      && Math.abs(dPrior as number) < 1000
+      && Math.abs(dPrior as number) >= 0.01
+    ) {
+      const built = yoyFromDisclosedPct(dPrior as number, current, undefined);
+      return { ...built, source: 'disclosed' };
     }
   }
   if (hasCPrior) {

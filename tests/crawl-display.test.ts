@@ -253,23 +253,39 @@ test('resolveYoy keeps real hypergrowth disclosed prior (ratio ≥ 1%)', () => {
 
 test('resolveYoy ignores absurd tiny disclosed prior vs yuan-scale current', () => {
   // Parser bug leftover: bare YoY 3.78 stored as prior_value against 199亿 profit.
+  // Recover as disclosed YoY% (authoritative) rather than cross-report compute.
   const yoy = resolveYoy(19_950_545_560.09, {
     disclosedPrior: 3.78,
     crossReportPrior: 19_200_000_000,
   })!;
-  assert.equal(yoy.source, 'computed');
-  assert.ok(Math.abs((yoy.pct ?? 0) - ((19_950_545_560.09 - 19_200_000_000) / 19_200_000_000) * 100) < 0.01);
+  assert.equal(yoy.source, 'disclosed');
+  assert.ok(Math.abs((yoy.pct ?? 0) - 3.78) < 1e-9);
+  assert.equal(formatYoyBadge(yoy, 2), '+3.78%');
 });
 
 test('resolveYoy ignores EPS-scale bare YoY% stored as prior (茅台 15.35 / 0.77)', () => {
   // Live leftover: prior_value=0.77 with yoy null → naive (15.35-0.77)/0.77 = +1893.51%.
+  // Prefer recovering the bare number as disclosed YoY% over cross-report compute.
   assert.equal(isAbsurdDisclosedPrior(15.35, 0.77), true);
   const yoy = resolveYoy(15.35, {
     disclosedPrior: 0.77,
     crossReportPrior: 15.23,
   })!;
-  assert.equal(yoy.source, 'computed');
-  assert.ok(Math.abs((yoy.pct ?? 0) - ((15.35 - 15.23) / 15.23) * 100) < 0.05);
+  assert.equal(yoy.source, 'disclosed');
+  assert.ok(Math.abs((yoy.pct ?? 0) - 0.77) < 1e-9);
+  assert.equal(formatYoyBadge(yoy, 2), '+0.77%');
+});
+
+test('resolveYoy recovers Zhaoyi EPS bare 689.47 YoY mis-stored as prior (-99.13% bug)', () => {
+  assert.equal(isAbsurdDisclosedPrior(6, 689.47, 'eps'), true);
+  const yoy = resolveYoy(6, {
+    disclosedPrior: 689.47,
+    crossReportPrior: 0.76,
+    metric: 'eps',
+  })!;
+  assert.equal(yoy.source, 'disclosed');
+  assert.ok(Math.abs((yoy.pct ?? 0) - 689.47) < 1e-9);
+  assert.equal(formatYoyBadge(yoy, 2), '+689.47%');
 });
 
 test('ROE prior 1.30 vs 13.79 is kept; YoY shown in percentage points (牧原)', () => {

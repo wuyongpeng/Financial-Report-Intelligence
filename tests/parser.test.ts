@@ -232,6 +232,24 @@ test('Maotai 2025Q3 EPS: bare 0.77 YoY% must not become prior (1893% bug)', () =
   assert.equal(eps?.priorValue, undefined);
 });
 
+test('Zhaoyi 2026Q3 EPS: bare 689.47 YoY% must not become prior (-99.13% bug)', () => {
+  // 兆易创新 2026Q3 摘要：本报告期 | 增减幅度(%) | 年初至报告期末 | …
+  // 6.00 | 689.47 | 15.83 | 865.24 — old EPS-scale cap absBare<=500 rejected 689.47
+  // and stored it as prior → UI (6-689.47)/689.47 = -99.13%.
+  const metrics = parseCoreMetricPages([
+    '主要会计数据 项目 本报告期 本报告期比上年同期增减变动幅度(%) 年初至报告期末 年初至报告期末比上年同期增减变动幅度(%) 营业收入 8,731,610,944.35 225.65 20,297,371,376.50 197.11 归属于上市公司股东的净利润 4,208,900,978.28 728.93 11,065,687,391.96 921.55 基本每股收益（元/股） 6.00 689.47 15.83 865.24 稀释每股收益（元/股） 5.94 681.58 15.71 863.80 加权平均净资产收益率（%） 7.35 增加 4.52 个百分点 22.15 增加 15.85 个百分点',
+  ]);
+  const eps = metrics.find((item) => item.metric === 'eps');
+  assert.equal(eps?.value, 6);
+  assert.equal(eps?.yoyPct, 689.47);
+  assert.equal(eps?.priorValue, undefined);
+
+  const profit = metrics.find((item) => item.metric === 'net_profit');
+  assert.equal(profit?.value, 4_208_900_978.28);
+  assert.equal(profit?.yoyPct, 728.93);
+  assert.equal(profit?.priorValue, undefined);
+});
+
 test('agreeing EPS hits: keep yoyPct, do not borrow bare-YoY prior from sibling hit', () => {
   // Summary hit has disclosed YoY; a scrambled sibling may store the same bare % as prior.
   const metrics = parseCoreMetricPages([
