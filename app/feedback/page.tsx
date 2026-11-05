@@ -1,6 +1,6 @@
 import FeedbackForm from './feedback-form';
 
-export const metadata = { title: '发送反馈｜财报智析 Eva' };
+export const metadata = { title: 'Eva - 财报智能分析助手' };
 
 export default function FeedbackPage() {
   return <FeedbackForm />;

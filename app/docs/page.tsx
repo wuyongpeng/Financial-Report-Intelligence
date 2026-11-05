@@ -8,7 +8,7 @@ import MermaidBlock from './mermaid-block';
 import './docs.css';
 
 export const dynamic = 'force-dynamic';
-export const metadata = { title: '文档中心｜财报智析 Eva' };
+export const metadata = { title: 'Eva - 财报智能分析助手' };
 
 const DEFAULT_DOC = '产品介绍.md';
 

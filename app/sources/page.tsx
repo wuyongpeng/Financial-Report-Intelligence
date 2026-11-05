@@ -1,7 +1,7 @@
 import SourcesClient from './sources-client';
 
 export const metadata = {
-  title: '数据采集｜财报智析 Eva',
+  title: 'Eva - 财报智能分析助手',
   description: '公告发现管线、抓取覆盖与解析状态总览。',
 };
 
