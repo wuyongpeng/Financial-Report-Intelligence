@@ -11,6 +11,10 @@ import {
   type ResolvedYoy,
 } from './crawl-display';
 import { rowSearchHaystack } from './admin-table-search';
+import {
+  auditOpinionKindLabel,
+  type AuditOpinionKind,
+} from './audit-opinion';
 
 export const OVERVIEW_METRICS: HeadlineMetricName[] = ['revenue', 'net_profit', 'eps', 'roe'];
 
@@ -40,6 +44,10 @@ export type OverviewDbMetric = {
   source_page: number | null;
   prior_value: number | null;
   yoy_pct: number | null;
+  audit_opinion_kind?: AuditOpinionKind | null;
+  audit_opinion_type?: string | null;
+  audit_opinion_label?: string | null;
+  audit_opinion_page?: number | null;
 };
 
 export type OverviewMetricCell = {
@@ -83,6 +91,10 @@ export type OverviewRow = {
   flagged: boolean;
   /** Optional note on the current review (flag reason or ack note). */
   reviewNote: string | null;
+  /** Parsed auditor opinion; null/legacy → treat as 未见 for filters. */
+  auditOpinionKind: AuditOpinionKind | null;
+  auditOpinionLabel: string;
+  auditOpinionPage: number | null;
 };
 
 export type OverviewSummary = {
@@ -91,6 +103,9 @@ export type OverviewSummary = {
   missingCore: number;
   noPage: number;
   absurdYoy: number;
+  auditStandard: number;
+  auditNonStandard: number;
+  auditNone: number;
 };
 
 function emptyCell(metric: HeadlineMetricName): OverviewMetricCell {
@@ -189,6 +204,9 @@ export function buildOverviewRows(
     title: string;
     period: string;
     announcementId: string | null;
+    auditOpinionKind: AuditOpinionKind | null;
+    auditOpinionLabel: string;
+    auditOpinionPage: number | null;
     metrics: Map<HeadlineMetricName, OverviewDbMetric>;
   }>();
 
@@ -204,6 +222,12 @@ export function buildOverviewRows(
         title: row.title?.trim() || '',
         period: row.period,
         announcementId: row.announcement_id?.trim() || null,
+        auditOpinionKind: row.audit_opinion_kind ?? null,
+        auditOpinionLabel: row.audit_opinion_label?.trim()
+          || (row.audit_opinion_kind === 'standard' ? '标准无保留意见'
+            : row.audit_opinion_kind === 'non_standard' ? '非标意见'
+              : '本期未见审计意见'),
+        auditOpinionPage: row.audit_opinion_page ?? null,
         metrics: new Map(),
       };
       byKey.set(key, bucket);
@@ -212,6 +236,11 @@ export function buildOverviewRows(
     if (row.title?.trim() && !bucket.title) bucket.title = row.title.trim();
     if (!bucket.announcementId && row.announcement_id?.trim()) {
       bucket.announcementId = row.announcement_id.trim();
+    }
+    if (bucket.auditOpinionKind == null && row.audit_opinion_kind) {
+      bucket.auditOpinionKind = row.audit_opinion_kind;
+      bucket.auditOpinionLabel = row.audit_opinion_label?.trim() || bucket.auditOpinionLabel;
+      bucket.auditOpinionPage = row.audit_opinion_page ?? null;
     }
     // Prefer first row; callers should DISTINCT ON already.
     if (!bucket.metrics.has(row.metric)) bucket.metrics.set(row.metric, row);
@@ -222,6 +251,9 @@ export function buildOverviewRows(
   let noPage = 0;
   let absurdYoy = 0;
   let abnormal = 0;
+  let auditStandard = 0;
+  let auditNonStandard = 0;
+  let auditNone = 0;
 
   for (const bucket of byKey.values()) {
     const metrics = {} as Record<HeadlineMetricName, OverviewMetricCell>;
@@ -245,6 +277,11 @@ export function buildOverviewRows(
     if (isAbnormal && issues.includes('no_page')) noPage += 1;
     if (isAbnormal && issues.includes('absurd_yoy')) absurdYoy += 1;
 
+    const auditKind = bucket.auditOpinionKind;
+    if (auditKind === 'standard') auditStandard += 1;
+    else if (auditKind === 'non_standard') auditNonStandard += 1;
+    else auditNone += 1;
+
     rows.push({
       code: bucket.code,
       name: bucket.name,
@@ -258,6 +295,9 @@ export function buildOverviewRows(
       acked,
       flagged,
       reviewNote,
+      auditOpinionKind: auditKind,
+      auditOpinionLabel: bucket.auditOpinionLabel,
+      auditOpinionPage: bucket.auditOpinionPage,
     });
   }
 
@@ -275,6 +315,9 @@ export function buildOverviewRows(
       missingCore,
       noPage,
       absurdYoy,
+      auditStandard,
+      auditNonStandard,
+      auditNone,
     },
   };
 }
@@ -293,6 +336,12 @@ export function overviewRowSearchParts(row: OverviewRow): Array<string | number 
     row.period,
     row.title,
     row.reviewNote,
+    '审计意见',
+    row.auditOpinionLabel,
+    auditOpinionKindLabel(row.auditOpinionKind),
+    row.auditOpinionKind === 'non_standard' ? '非标' : null,
+    row.auditOpinionKind === 'standard' ? '标准' : null,
+    (!row.auditOpinionKind || row.auditOpinionKind === 'none') ? '未见' : null,
   ];
   for (const metric of OVERVIEW_METRICS) {
     const cell = row.metrics[metric];

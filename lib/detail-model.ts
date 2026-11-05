@@ -15,7 +15,24 @@ export const allMetricNames = [...metricNames, ...supportMetricNames] as const;
 export type HeadlineMetric = typeof metricNames[number];
 export type MetricName = typeof allMetricNames[number];
 export type Metric = { metric: MetricName; value: number; unit: string; source_page: number | null; source_label: string | null; confidence: number; verified: number; period: string; prior_value?: number | null; yoy_pct?: number | null; yoy_source?: 'disclosed' | 'computed' | null };
-export type Report = { id: string; code: string; company_name: string; title: string; report_type: string; published_at: string; parsed_at: string | null; industry: string; status: string; metrics: Metric[] };
+export type AuditOpinionKind = 'standard' | 'non_standard' | 'none';
+export type Report = {
+  id: string;
+  code: string;
+  company_name: string;
+  title: string;
+  report_type: string;
+  published_at: string;
+  parsed_at: string | null;
+  industry: string;
+  status: string;
+  metrics: Metric[];
+  /** null = legacy row never scanned; 'none' = scanned, no opinion found. */
+  audit_opinion_kind?: AuditOpinionKind | null;
+  audit_opinion_type?: string | null;
+  audit_opinion_label?: string | null;
+  audit_opinion_page?: number | null;
+};
 export type Citation = { id?: string; reportId?: string; companyName?: string; period?: string; page: number; quote: string; code?: string };
 export const labels: Record<MetricName, string> = {
   revenue: '营业收入', net_profit: '归母净利润', eps: '每股收益 EPS', roe: '净资产收益率 ROE',

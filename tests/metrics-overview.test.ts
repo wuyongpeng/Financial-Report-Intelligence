@@ -235,3 +235,52 @@ test('acked and flagged are mutual exclusive in overview rows', () => {
   assert.equal(reflag.rows[0].acked, false);
   assert.equal(reflag.rows[0].abnormal, true);
 });
+
+test('buildOverviewRows carries audit opinion and summary buckets', () => {
+  const rows: OverviewDbMetric[] = [
+    {
+      code: '600000', name: '浦发银行', period: '2025FY', metric: 'revenue',
+      announcement_id: 'a1', value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 1,
+      audit_opinion_kind: 'non_standard', audit_opinion_label: '保留意见', audit_opinion_page: 120,
+    },
+    {
+      code: '600000', name: '浦发银行', period: '2025FY', metric: 'net_profit',
+      announcement_id: 'a1', value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 1,
+      audit_opinion_kind: 'non_standard', audit_opinion_label: '保留意见', audit_opinion_page: 120,
+    },
+    {
+      code: '600000', name: '浦发银行', period: '2025FY', metric: 'eps',
+      announcement_id: 'a1', value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 1,
+    },
+    {
+      code: '600000', name: '浦发银行', period: '2025FY', metric: 'roe',
+      announcement_id: 'a1', value: 1, unit: '%', source_page: 1, prior_value: null, yoy_pct: 1,
+    },
+    {
+      code: '000001', name: '平安银行', period: '2025Q3', metric: 'revenue',
+      announcement_id: 'a2', value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 1,
+      audit_opinion_kind: 'none', audit_opinion_label: '本期未见审计意见', audit_opinion_page: null,
+    },
+    {
+      code: '000001', name: '平安银行', period: '2025Q3', metric: 'net_profit',
+      announcement_id: 'a2', value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 1,
+    },
+    {
+      code: '000001', name: '平安银行', period: '2025Q3', metric: 'eps',
+      announcement_id: 'a2', value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 1,
+    },
+    {
+      code: '000001', name: '平安银行', period: '2025Q3', metric: 'roe',
+      announcement_id: 'a2', value: 1, unit: '%', source_page: 1, prior_value: null, yoy_pct: 1,
+    },
+  ];
+  const { rows: out, summary } = buildOverviewRows(rows);
+  assert.equal(out.length, 2);
+  const nonStd = out.find((r) => r.code === '600000');
+  assert.equal(nonStd?.auditOpinionKind, 'non_standard');
+  assert.equal(nonStd?.auditOpinionLabel, '保留意见');
+  assert.equal(nonStd?.auditOpinionPage, 120);
+  assert.equal(summary.auditNonStandard, 1);
+  assert.equal(summary.auditNone, 1);
+  assert.equal(summary.auditStandard, 0);
+});

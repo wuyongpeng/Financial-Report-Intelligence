@@ -52,6 +52,10 @@ async function migrate() {
     await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS prior_value DOUBLE PRECISION`;
     await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS yoy_pct DOUBLE PRECISION`;
     await tx`ALTER TABLE financial_metrics ADD COLUMN IF NOT EXISTS yoy_source TEXT`;
+    await tx`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS audit_opinion_kind TEXT`;
+    await tx`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS audit_opinion_type TEXT`;
+    await tx`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS audit_opinion_label TEXT`;
+    await tx`ALTER TABLE announcements ADD COLUMN IF NOT EXISTS audit_opinion_page INTEGER`;
     await tx`CREATE TABLE IF NOT EXISTS guest_home_prompts (
       owner_key TEXT PRIMARY KEY,
       source_question TEXT NOT NULL,

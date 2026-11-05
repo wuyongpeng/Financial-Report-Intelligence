@@ -31,7 +31,7 @@ type MetricsPayload = {
 };
 
 /** Top summary cards that filter the table. */
-type CardFilter = 'abnormal' | 'missing' | 'absurd_yoy' | null;
+type CardFilter = 'abnormal' | 'missing' | 'absurd_yoy' | 'audit_non_standard' | 'audit_standard' | 'audit_none' | null;
 
 export function MetricsAdminClient() {
   const session = useAdminSession();
@@ -548,6 +548,27 @@ export function MetricsAdminClient() {
             accent="#b91c1c"
             onClick={() => toggleCardFilter('absurd_yoy')}
           />
+          <SummaryFilterCard
+            label="非标"
+            value={payload.summary.auditNonStandard}
+            active={cardFilter === 'audit_non_standard'}
+            accent="#b91c1c"
+            onClick={() => toggleCardFilter('audit_non_standard')}
+          />
+          <SummaryFilterCard
+            label="标准"
+            value={payload.summary.auditStandard}
+            active={cardFilter === 'audit_standard'}
+            accent="#3a4d66"
+            onClick={() => toggleCardFilter('audit_standard')}
+          />
+          <SummaryFilterCard
+            label="未见"
+            value={payload.summary.auditNone}
+            active={cardFilter === 'audit_none'}
+            accent="#6b7a8d"
+            onClick={() => toggleCardFilter('audit_none')}
+          />
         </div>
       ) : null}
 
@@ -656,6 +677,7 @@ export function MetricsAdminClient() {
               <th style={{ ...s.th, ...colName }}>公司</th>
               <th style={{ ...s.th, ...colPeriod }}>期次</th>
               <th style={{ ...s.th, ...colTitle }}>报告全称</th>
+              <th style={{ ...s.th, ...colAudit }}>审计意见</th>
               {OVERVIEW_METRICS.map((m) => (
                 <th key={m} style={{ ...s.th, ...colMetric }}>{OVERVIEW_METRIC_LABEL[m]}</th>
               ))}
@@ -665,7 +687,7 @@ export function MetricsAdminClient() {
           </thead>
           <tbody>
             {!loading && rows.length === 0 ? (
-              <tr><td colSpan={11} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
+              <tr><td colSpan={12} style={{ ...s.td, color: '#8b97a9' }}>暂无记录</td></tr>
             ) : null}
             {rows.map((row) => {
               const busyKey = `${row.code}:${row.period}`;
@@ -714,6 +736,9 @@ export function MetricsAdminClient() {
                   </td>
                   <td style={{ ...s.td, ...colTitle }}>
                     <TitleCell title={row.title} />
+                  </td>
+                  <td style={{ ...s.td, ...colAudit }}>
+                    <AuditOpinionCell row={row} />
                   </td>
                   {OVERVIEW_METRICS.map((m) => (
                     <td key={m} style={{ ...s.td, ...colMetric }}>
@@ -929,6 +954,27 @@ export function MetricsAdminClient() {
 }
 
 
+
+function AuditOpinionCell({ row }: { row: OverviewRow }) {
+  const kind = row.auditOpinionKind;
+  if (kind === 'non_standard') {
+    return (
+      <span style={{ color: '#b91c1c', fontWeight: 650 }} title={row.auditOpinionLabel}>
+        非标
+        {row.auditOpinionLabel && row.auditOpinionLabel !== '非标意见' ? (
+          <span style={{ display: 'block', fontSize: 11, fontWeight: 500, color: '#9a3412', marginTop: 1 }}>
+            {row.auditOpinionLabel.length > 10 ? `${row.auditOpinionLabel.slice(0, 10)}…` : row.auditOpinionLabel}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+  if (kind === 'standard') {
+    return <span style={{ color: '#3a4d66' }} title={row.auditOpinionLabel}>标准</span>;
+  }
+  return <span style={{ color: '#8b97a9' }} title="本期未见审计意见">未见</span>;
+}
+
 function SummaryFilterCard({
   label,
   value,
@@ -1047,6 +1093,7 @@ const colTitle: CSSProperties = {
   width: 148,
   overflowWrap: 'anywhere',
 };
+const colAudit: CSSProperties = { minWidth: 88, maxWidth: 120, whiteSpace: 'nowrap' };
 const colMetric: CSSProperties = {
   maxWidth: 118,
   overflowWrap: 'anywhere',

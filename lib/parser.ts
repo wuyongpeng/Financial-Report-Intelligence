@@ -1,3 +1,5 @@
+import { parseAuditOpinionPages, emptyAuditOpinion, type ParsedAuditOpinion } from './audit-opinion';
+
 export const parsedMetricNames = [
   'revenue', 'net_profit', 'eps', 'roe', 'total_assets', 'total_liabilities', 'operating_cash_flow', 'operating_cost',
   'non_recurring_pnl', 'profit_ex_non_recurring',
@@ -619,6 +621,10 @@ export function parseCoreMetricPages(pages: string[]) {
   return LABELS.map((definition) => chooseCandidate(metricCandidates(pages, definition))).filter((metric): metric is ParsedMetric => Boolean(metric));
 }
 
+export function parseAuditOpinionFromPages(pages: string[]): ParsedAuditOpinion {
+  return parseAuditOpinionPages(pages);
+}
+
 function splitPdfToTextPages(output: string) {
   const pages = output.split('\f').map((page) => page.trim());
   if (pages.at(-1) === '') pages.pop();
@@ -664,7 +670,13 @@ export async function parseCoreMetrics(bytes: ArrayBuffer | null, options?: { fi
 
   if (!usePdfJs) {
     const pages = await extractWithPoppler(bytes, filePath);
-    return { totalPages: pages.length, metrics: parseCoreMetricPages(pages), chunks: toChunks(pages) };
+    const metrics = parseCoreMetricPages(pages);
+    return {
+      totalPages: pages.length,
+      metrics,
+      chunks: toChunks(pages),
+      auditOpinion: pages.length ? parseAuditOpinionPages(pages) : emptyAuditOpinion(),
+    };
   }
 
   const { extractText, getDocumentProxy } = await import('unpdf');
@@ -689,5 +701,10 @@ export async function parseCoreMetrics(bytes: ArrayBuffer | null, options?: { fi
       metrics = fallbackMetrics;
     }
   }
-  return { totalPages: pages.length, metrics, chunks: toChunks(pages) };
+  return {
+    totalPages: pages.length,
+    metrics,
+    chunks: toChunks(pages),
+    auditOpinion: pages.length ? parseAuditOpinionPages(pages) : emptyAuditOpinion(),
+  };
 }

@@ -48,6 +48,10 @@ function reportDto(report: ReportRecord, metrics: ReportMetricRecord[]): Report 
     industry: report.industry,
     status: report.status,
     metrics: metrics.map(item => metricDto(item, canonicalPeriod)),
+    audit_opinion_kind: report.auditOpinionKind ?? null,
+    audit_opinion_type: report.auditOpinionType ?? null,
+    audit_opinion_label: report.auditOpinionLabel ?? null,
+    audit_opinion_page: report.auditOpinionPage ?? null,
   };
 }
 

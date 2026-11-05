@@ -10,6 +10,10 @@ export type ReportRecord = {
   parsedAt: string | null;
   industry: string;
   status: string;
+  auditOpinionKind?: 'standard' | 'non_standard' | 'none' | null;
+  auditOpinionType?: string | null;
+  auditOpinionLabel?: string | null;
+  auditOpinionPage?: number | null;
 };
 
 export type ReportMetricRecord = {

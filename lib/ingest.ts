@@ -573,10 +573,15 @@ async function parseStoredAnnouncement(
           ON CONFLICT (announcement_id, page) DO UPDATE SET content=EXCLUDED.content, created_at=EXCLUDED.created_at
         `;
       }
+      const audit = extracted.auditOpinion ?? { kind: 'none', type: null, label: '本期未见审计意见', page: null };
       await tx`
         UPDATE announcements SET status=${coreOk ? 'review' : 'parse_partial'}, online_at=NULL,
           parsed_at=${createdAt}, parse_priority=0,
           parse_error=${coreOk ? null : '指标不完整（已解析，仅标注，不自动重试）'},
+          audit_opinion_kind=${audit.kind},
+          audit_opinion_type=${audit.type},
+          audit_opinion_label=${audit.label},
+          audit_opinion_page=${audit.page},
           updated_at=${createdAt}
         WHERE id=${record.id} AND status='parsing'
       `;

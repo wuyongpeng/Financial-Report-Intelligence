@@ -24,6 +24,10 @@ type RawMetricRow = {
   source_page: number | null;
   prior_value: number | null;
   yoy_pct: number | null;
+  audit_opinion_kind: string | null;
+  audit_opinion_type: string | null;
+  audit_opinion_label: string | null;
+  audit_opinion_page: number | null;
 };
 
 export async function GET(request: Request) {
@@ -36,7 +40,8 @@ export async function GET(request: Request) {
     const raw = await db<RawMetricRow[]>`
       SELECT DISTINCT ON (m.code, m.period, m.metric)
         m.code, c.name, a.title, m.announcement_id, m.period, m.metric, m.value, m.unit,
-        m.source_page, m.prior_value, m.yoy_pct
+        m.source_page, m.prior_value, m.yoy_pct,
+        a.audit_opinion_kind, a.audit_opinion_type, a.audit_opinion_label, a.audit_opinion_page
       FROM financial_metrics m
       LEFT JOIN companies c ON c.code = m.code
       LEFT JOIN announcements a ON a.id = m.announcement_id
@@ -64,6 +69,8 @@ export async function GET(request: Request) {
     const normalized: OverviewDbMetric[] = [];
     for (const row of raw) {
       if (!OVERVIEW_METRICS.includes(row.metric as HeadlineMetricName)) continue;
+      const kind = row.audit_opinion_kind;
+      const auditKind = kind === 'standard' || kind === 'non_standard' || kind === 'none' ? kind : null;
       normalized.push({
         code: row.code,
         name: row.name,
@@ -76,6 +83,10 @@ export async function GET(request: Request) {
         source_page: row.source_page == null ? null : Number(row.source_page),
         prior_value: row.prior_value == null ? null : Number(row.prior_value),
         yoy_pct: row.yoy_pct == null ? null : Number(row.yoy_pct),
+        audit_opinion_kind: auditKind,
+        audit_opinion_type: row.audit_opinion_type,
+        audit_opinion_label: row.audit_opinion_label,
+        audit_opinion_page: row.audit_opinion_page == null ? null : Number(row.audit_opinion_page),
       });
     }
 
@@ -84,7 +95,7 @@ export async function GET(request: Request) {
       .sort((a, b) => b.localeCompare(a));
 
     return Response.json({
-      note: '一眼看四核（值·同比·页码）。异常=规则检出或人工标异；错抓可删；真暴增/已修好点审核通过；用户反馈可标记异常。',
+      note: '一眼看四核与审计意见。异常=规则检出或人工标异；非标可一键过滤；错抓可删；真暴增/已修好点审核通过。',
       summary,
       periods,
       rows,

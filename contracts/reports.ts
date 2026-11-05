@@ -74,8 +74,17 @@ export function parseMetricDto(value: unknown): Metric {
   };
 }
 
+function parseAuditOpinionKind(value: unknown): Report['audit_opinion_kind'] {
+  if (value === null || value === undefined || value === '') return null;
+  if (value === 'standard' || value === 'non_standard' || value === 'none') return value;
+  return null;
+}
+
 export function parseReportDto(value: unknown): Report {
   const row = contractObject(value, 'report');
+  const auditPage = row.audit_opinion_page === null || row.audit_opinion_page === undefined
+    ? null
+    : contractNumber(row.audit_opinion_page, 'report.audit_opinion_page');
   return {
     id: contractString(row.id, 'report.id'),
     code: contractString(row.code, 'report.code'),
@@ -87,6 +96,14 @@ export function parseReportDto(value: unknown): Report {
     industry: contractString(row.industry, 'report.industry'),
     status: contractString(row.status, 'report.status'),
     metrics: contractArray(row.metrics, 'report.metrics').map(parseMetricDto),
+    audit_opinion_kind: parseAuditOpinionKind(row.audit_opinion_kind),
+    audit_opinion_type: row.audit_opinion_type === null || row.audit_opinion_type === undefined
+      ? null
+      : optionalString(row.audit_opinion_type, 'report.audit_opinion_type') ?? null,
+    audit_opinion_label: row.audit_opinion_label === null || row.audit_opinion_label === undefined
+      ? null
+      : optionalString(row.audit_opinion_label, 'report.audit_opinion_label') ?? null,
+    audit_opinion_page: auditPage != null && Number.isFinite(auditPage) ? auditPage : null,
   };
 }
 

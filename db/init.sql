@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS announcements (
   online_at TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'discovered',
   parse_error TEXT,
+  audit_opinion_kind TEXT,
+  audit_opinion_type TEXT,
+  audit_opinion_label TEXT,
+  audit_opinion_page INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (source, source_id)

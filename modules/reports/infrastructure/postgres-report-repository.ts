@@ -17,6 +17,10 @@ export type DatabaseReportRow = {
   parsed_at: unknown;
   industry: string;
   status: string;
+  audit_opinion_kind?: string | null;
+  audit_opinion_type?: string | null;
+  audit_opinion_label?: string | null;
+  audit_opinion_page?: number | null;
 };
 
 export type DatabaseMetricRow = {
@@ -42,7 +46,13 @@ export type ReportsDatabase = {
   findMetricsByReportIds(reportIds: string[]): Promise<DatabaseMetricRow[]>;
 };
 
+function mapAuditKind(raw: string | null | undefined): ReportRecord['auditOpinionKind'] {
+  if (raw === 'standard' || raw === 'non_standard' || raw === 'none') return raw;
+  return null;
+}
+
 export function mapReportRow(row: DatabaseReportRow): ReportRecord {
+  const page = row.audit_opinion_page == null ? null : Number(row.audit_opinion_page);
   return {
     id: String(row.id),
     code: String(row.code),
@@ -53,6 +63,10 @@ export function mapReportRow(row: DatabaseReportRow): ReportRecord {
     parsedAt: row.parsed_at == null ? null : asIsoDate(row.parsed_at),
     industry: String(row.industry),
     status: String(row.status),
+    auditOpinionKind: mapAuditKind(row.audit_opinion_kind),
+    auditOpinionType: row.audit_opinion_type == null ? null : String(row.audit_opinion_type),
+    auditOpinionLabel: row.audit_opinion_label == null ? null : String(row.audit_opinion_label),
+    auditOpinionPage: page != null && Number.isFinite(page) ? page : null,
   };
 }
 
