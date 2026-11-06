@@ -31,7 +31,7 @@ type MetricsPayload = {
 };
 
 /** Top summary cards that filter the table. */
-type CardFilter = 'abnormal' | 'missing' | 'absurd_yoy' | 'audit_non_standard' | 'audit_standard' | 'audit_none' | null;
+type CardFilter = 'abnormal' | 'missing' | 'absurd_yoy' | 'audit_non_standard' | null;
 
 export function MetricsAdminClient() {
   const session = useAdminSession();
@@ -309,10 +309,8 @@ export function MetricsAdminClient() {
       if (cardFilter === 'abnormal' && !row.abnormal) return false;
       if (cardFilter === 'missing' && !(row.abnormal && row.issues.includes('missing'))) return false;
       if (cardFilter === 'absurd_yoy' && !(row.abnormal && row.issues.includes('absurd_yoy'))) return false;
-      // Audit chips: keep only that opinion bucket (非标 / 标准 / 未见).
+      // 非标 chip: only non-standard auditor opinions (risk).
       if (cardFilter === 'audit_non_standard' && row.auditOpinionKind !== 'non_standard') return false;
-      if (cardFilter === 'audit_standard' && row.auditOpinionKind !== 'standard') return false;
-      if (cardFilter === 'audit_none' && row.auditOpinionKind && row.auditOpinionKind !== 'none') return false;
       // Checkbox only when no card filter (card filter takes priority).
       if (!cardFilter && onlyAbnormal && !row.abnormal) return false;
       if (periodFilter && row.period !== periodFilter) return false;
@@ -541,10 +539,6 @@ export function MetricsAdminClient() {
             accent="#b45309"
             onClick={() => toggleCardFilter('missing')}
           />
-          <article style={s.cardCompact}>
-            <p style={s.cardLabel}>无页码</p>
-            <p style={s.cardValueCompact}>{payload.summary.noPage}</p>
-          </article>
           <SummaryFilterCard
             label="同比离谱"
             value={payload.summary.absurdYoy}
@@ -557,21 +551,8 @@ export function MetricsAdminClient() {
             value={payload.summary.auditNonStandard}
             active={cardFilter === 'audit_non_standard'}
             accent="#b91c1c"
+            labelColor="#b91c1c"
             onClick={() => toggleCardFilter('audit_non_standard')}
-          />
-          <SummaryFilterCard
-            label="标准"
-            value={payload.summary.auditStandard}
-            active={cardFilter === 'audit_standard'}
-            accent="#3a4d66"
-            onClick={() => toggleCardFilter('audit_standard')}
-          />
-          <SummaryFilterCard
-            label="未见"
-            value={payload.summary.auditNone}
-            active={cardFilter === 'audit_none'}
-            accent="#6b7a8d"
-            onClick={() => toggleCardFilter('audit_none')}
           />
         </div>
       ) : null}
@@ -986,12 +967,14 @@ function SummaryFilterCard({
   value,
   active,
   accent,
+  labelColor,
   onClick,
 }: {
   label: string;
   value: number;
   active: boolean;
   accent: string;
+  labelColor?: string;
   onClick: () => void;
 }) {
   return (
@@ -1010,7 +993,7 @@ function SummaryFilterCard({
         boxShadow: active ? `0 0 0 2px ${accent}22` : 'none',
       }}
     >
-      <p style={s.cardLabel}>{label}</p>
+      <p style={{ ...s.cardLabel, ...(labelColor ? { color: labelColor, fontWeight: 650 } : null) }}>{label}</p>
       <p style={{ ...s.cardValueCompact, color: accent }}>{value}</p>
     </button>
   );
