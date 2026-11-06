@@ -524,9 +524,9 @@ function isCleanLabelHit(page: string, position: number, label: string, metric: 
     if (/扣除非经常性损益/.test(before)) return false;
     if (/扣非后$/.test(before)) return false;
   }
-  // 变动说明表行：「基本每股收益（元/股）-本报告期 61.54」——数字是变动比例，不是指标值。
+  // 变动说明表行：「…-本报告期 / _本报告期 61.54」——数字是变动比例，不是指标值。
   const afterHead = page.slice(position + label.length, position + label.length + 40);
-  if (/\-\s*(?:本报告期|年初至报告期末)/.test(afterHead)) return false;
+  if (/[_\-]\s*(?:本报告期|年初至报告期末)/.test(afterHead)) return false;
   return true;
 }
 
