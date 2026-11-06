@@ -18,6 +18,7 @@ import {
   VOICE_NO_SPEECH_MS,
   VOICE_IDLE_EMPTY_TURNS,
   VOICE_IDLE_EXIT_TOAST,
+  shouldQuietEndOnEmptyFinalize,
 } from '@/lib/voice/timing';
 import { VoiceFloat } from '@/components/voice-float';
 import { correctAsrHomophones, type AsrCorrectContext } from '@/lib/voice/asr-correct';
@@ -63,7 +64,12 @@ type VoiceSessionApi = {
   stopMic: () => void;
   /** After hold (ask/TTS/nav), listen again if session still active. */
   resumeListen: () => void;
-  finalizeListen: () => void;
+  /**
+   * Stop the current listen turn and flush ASR.
+   * Pass `{ userInitiated: true }` for explicit stop / 「说完了」:
+   * empty transcript ends the session quietly (no idle toast).
+   */
+  finalizeListen: (opts?: { userInitiated?: boolean }) => void;
   clearToast: () => void;
 };
 
@@ -105,6 +111,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const bargeInHandlerRef = useRef<(() => void) | null>(null);
   /** Detail local barge-in ASR collecting — block heal from opening a second mic. */
   const suppressAutoListenRef = useRef(false);
+  /** True while finalizeListen is waiting on ASR flush — block heal auto-listen. */
+  const finalizingRef = useRef(false);
   const [floatHeadExtra, setFloatHeadExtraState] = useState<ReactNode | null>(null);
   const listenTurnRef = useRef<() => Promise<void>>(async () => undefined);
   const handleUtteranceRef = useRef<(raw: string) => Promise<void>>(async () => undefined);
@@ -141,6 +149,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const end = useCallback((message?: string) => {
     activeRef.current = false;
     suppressAutoListenRef.current = false;
+    finalizingRef.current = false;
     voiceEmptyTurnsRef.current = 0;
     asrReconnectRef.current = 0;
     voiceGenRef.current += 1;
@@ -232,9 +241,19 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
 
   handleUtteranceRef.current = handleUtterance;
 
-  const finalizeListen = useCallback(() => {
+  const finalizeListen = useCallback((opts?: { userInitiated?: boolean }) => {
     clearVoiceTurnTimers();
+    const userInitiated = Boolean(opts?.userInitiated);
+    const pendingNow = voicePartialRef.current.trim();
+    // Explicit stop with nothing heard — exit quietly (Esc / 「结束语音」), never idle toast.
+    if (shouldQuietEndOnEmptyFinalize(userInitiated) && !pendingNow) {
+      end();
+      return;
+    }
+    // Block heal-stuck from reopening the mic during the ASR flush window.
+    finalizingRef.current = true;
     if (!asrSessionRef.current && !pcmCaptureRef.current) {
+      finalizingRef.current = false;
       if (activeRef.current) void handleUtteranceRef.current(voicePartialRef.current);
       else {
         setListening(false);
@@ -249,13 +268,22 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     const gen = voiceGenRef.current;
     voiceFinalTimerRef.current = window.setTimeout(() => {
       voiceFinalTimerRef.current = null;
-      if (gen !== voiceGenRef.current) return;
+      if (gen !== voiceGenRef.current) {
+        finalizingRef.current = false;
+        return;
+      }
       const pending = voicePartialRef.current.trim();
       asrSessionRef.current?.close();
       asrSessionRef.current = null;
+      finalizingRef.current = false;
+      // User tapped stop/说完了 but ASR never produced text — quiet end, not idle.
+      if (shouldQuietEndOnEmptyFinalize(userInitiated) && !pending) {
+        end();
+        return;
+      }
       void handleUtteranceRef.current(pending);
     }, 2500);
-  }, [clearVoiceFinalTimer, clearVoiceTurnTimers]);
+  }, [clearVoiceFinalTimer, clearVoiceTurnTimers, end]);
 
   const listenTurn = useCallback(async () => {
     if (!activeRef.current) return;
@@ -263,6 +291,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     const gen = ++voiceGenRef.current;
     voiceUtteranceHandledRef.current = false;
     suppressAutoListenRef.current = false;
+    finalizingRef.current = false;
     setSpeakingState(false);
     setListening(true);
     voicePartialRef.current = '';
@@ -402,6 +431,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     const t = window.setTimeout(() => {
       if (!activeRef.current) return;
       if (suppressAutoListenRef.current) return;
+      if (finalizingRef.current) return;
       if (asrSessionRef.current || pcmCaptureRef.current) return;
       void listenTurnRef.current();
     }, 1600);
@@ -459,7 +489,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
             ? '说出公司名称、代码或问题；停顿即发送'
             : undefined}
           onEnd={() => end()}
-          onFinalize={listening ? () => finalizeListen() : undefined}
+          onFinalize={listening ? () => finalizeListen({ userInitiated: true }) : undefined}
           onBargeIn={(speaking || busy) && !listening
             ? () => {
                 const h = bargeInHandlerRef.current;

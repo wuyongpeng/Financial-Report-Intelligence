@@ -1119,7 +1119,7 @@ export default function ReportHome() {
           // While listening, treat the box as the utterance (lets user correct ASR).
           if (voiceListening) {
             voice.setPartial(typed);
-            voice.finalizeListen();
+            voice.finalizeListen({ userInitiated: true });
             return;
           }
           if (voice.active && searchEditedDuringVoiceRef.current) {
@@ -1138,7 +1138,7 @@ export default function ReportHome() {
         <input
           ref={searchInputRef}
           aria-label="搜索或提问：公司名称、股票代码，或自然语言问题"
-          placeholder={voiceListening ? '正在聆听…可手动改字' : activePlaceholder}
+          placeholder={voiceListening ? '正在聆听…' : activePlaceholder}
           value={search}
           onChange={(e) => {
             const v = e.target.value;
@@ -1217,13 +1217,23 @@ export default function ReportHome() {
             );
           }
           if (voiceListening) {
+            const hasText = Boolean(search.trim() || voice.partial.trim());
+            const stopLabel = hasText ? '结束并发送' : '结束语音';
             return (
               <button
                 className="rh-search-submit rh-search-stop"
                 type="button"
-                aria-label="结束并发送"
-                title="结束并发送"
-                onClick={() => voice.finalizeListen()}
+                aria-label={stopLabel}
+                title={stopLabel}
+                onClick={() => {
+                  // Mirror detail: empty → quiet end; has text → flush & send.
+                  if (!hasText) {
+                    voice.end();
+                    return;
+                  }
+                  if (search.trim()) voice.setPartial(search.trim());
+                  voice.finalizeListen({ userInitiated: true });
+                }}
               >
                 {stopGlyph}
               </button>
@@ -1259,9 +1269,9 @@ export default function ReportHome() {
         })()}
       </form>
       {voiceListening ? (
-        <p className="rh-search-hint" role="status">正在聆听…可直接改输入框；也可在底部浮层点「说完了」</p>
+        <p className="rh-search-hint" role="status">正在聆听…</p>
       ) : voice.active ? (
-        <p className="rh-search-hint" role="status">语音会话中：可手动改字后回车搜索，或点波形继续说</p>
+        <p className="rh-search-hint" role="status">语音会话中</p>
       ) : (
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
       )}

@@ -18,3 +18,12 @@ export function isMeaningfulBargePartial(
 ): boolean {
   return text.trim().length >= minChars;
 }
+
+/**
+ * Explicit user stop (composer / 「说完了」) with no transcript should end the
+ * session quietly. Auto no-speech / endpoint empty turns still count toward idle.
+ */
+export function shouldQuietEndOnEmptyFinalize(userInitiated: boolean): boolean {
+  return userInitiated;
+}
+

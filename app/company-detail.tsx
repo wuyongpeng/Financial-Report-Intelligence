@@ -3158,7 +3158,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                     onClick={() => {
                       if (asking || voiceSpeaking) bargeInFromVoice();
                       else if (voiceListening) {
-                        if (voicePartial.trim()) voice.finalizeListen();
+                        if (voicePartial.trim()) voice.finalizeListen({ userInitiated: true });
                         else endVoiceConversation();
                       } else endVoiceConversation();
                     }}
