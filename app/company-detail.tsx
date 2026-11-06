@@ -607,39 +607,66 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       .catch(() => undefined);
     return () => abort.abort();
   }, [selected.id]);
-  // Pin to bottom on new turns / streamed answer text only — never on followup/feedback metadata,
-  // and never when the user has scrolled up to read earlier content.
+  // Pin to bottom on new turns / streamed answer text.
+  // Only wheel/touch/keys can cancel stick — never the scroll event itself (content growth
+  // fires scroll and would look like "user scrolled up").
   const chatPinKey = messages.map((m) => `${m.role}\0${m.text}`).join('\n');
+  const pinChatToBottom = (force = false) => {
+    if (!force && !chatStickRef.current) return;
+    const root = chatScrollRef.current;
+    if (root) {
+      root.scrollTop = root.scrollHeight;
+      chatEnd.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
+    } else {
+      chatEnd.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
+    }
+  };
   useEffect(() => {
     const root = chatScrollRef.current;
     if (!root) return;
     const onScroll = () => {
+      // Re-arm stick only when the user (or pin) is near the bottom again.
       const distance = root.scrollHeight - root.scrollTop - root.clientHeight;
-      if (distance > 96) chatStickRef.current = false;
-      else chatStickRef.current = true;
+      if (distance <= 48) chatStickRef.current = true;
     };
-    const onUserScrollIntent = () => {
+    const onUserScrollIntent = (event: WheelEvent | TouchEvent | KeyboardEvent) => {
+      if (event instanceof WheelEvent && event.deltaY === 0 && event.deltaX === 0) return;
+      if (event instanceof KeyboardEvent) {
+        const keys = ['ArrowUp', 'PageUp', 'Home'];
+        if (!keys.includes(event.key)) return;
+      }
+      // Any intentional upward browse cancels auto-follow until near bottom again.
       const distance = root.scrollHeight - root.scrollTop - root.clientHeight;
-      if (distance > 48) chatStickRef.current = false;
+      if (event instanceof WheelEvent && event.deltaY < 0) {
+        chatStickRef.current = false;
+        return;
+      }
+      if (event instanceof WheelEvent && event.deltaY > 0) {
+        // scrolling down: keep/restore stick only if already near bottom after event
+        return;
+      }
+      if (distance > 24 || event instanceof KeyboardEvent) chatStickRef.current = false;
     };
     root.addEventListener('scroll', onScroll, { passive: true });
     root.addEventListener('wheel', onUserScrollIntent, { passive: true });
     root.addEventListener('touchmove', onUserScrollIntent, { passive: true });
+    root.addEventListener('keydown', onUserScrollIntent);
     return () => {
       root.removeEventListener('scroll', onScroll);
       root.removeEventListener('wheel', onUserScrollIntent);
       root.removeEventListener('touchmove', onUserScrollIntent);
+      root.removeEventListener('keydown', onUserScrollIntent);
     };
   }, []);
   useEffect(() => {
     if (!messages.length || !chatStickRef.current) return;
-    const root = chatScrollRef.current;
-    if (root) {
-      root.scrollTop = root.scrollHeight;
-    } else {
-      chatEnd.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
-    }
-  }, [chatPinKey, messages.length]);
+    // Double rAF: wait for bubble DOM height after send / typewriter paint.
+    const id = window.requestAnimationFrame(() => {
+      pinChatToBottom();
+      window.requestAnimationFrame(() => pinChatToBottom());
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [chatPinKey, messages.length, asking, thinking]);
   useEffect(() => {
     if (regenMenu == null) return;
     function onDoc(event: MouseEvent) {
@@ -2357,6 +2384,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     } else {
       setMessages(m => [...m.slice(0, replacing), { role:'assistant', text:'' }]);
     }
+    // Jump to the new question immediately (before first tokens arrive).
+    window.requestAnimationFrame(() => {
+      chatStickRef.current = true;
+      pinChatToBottom(true);
+      window.requestAnimationFrame(() => pinChatToBottom(true));
+    });
     const targetModule = moduleForQuestion(assembled); if (targetModule) focusModule(targetModule);
     let answer = '';
     let revealed = '';
@@ -2373,6 +2406,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (!force && controller.signal.aborted) return;
       const cites = citations ?? lastEvidence;
       setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:revealed, ...(cites ? { citations: cites } : {}) } : item));
+      if (chatStickRef.current) {
+        window.requestAnimationFrame(() => pinChatToBottom());
+      }
     };
     const ensureTypewriter = () => {
       if (typewriterTimerRef.current != null) return;

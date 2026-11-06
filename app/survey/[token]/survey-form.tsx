@@ -487,7 +487,7 @@ export function SurveyForm({ token }: { token: string }) {
           <ChipGroup options={B4_OPTIONS} value={b4} onChange={setB4} disabled={sending} />
         </Question>
 
-        <Question title="5. 追问栏里的角标,你用过吗?" required>
+        <Question title="5. 追问栏里的Eva回答内容的角标,你用过吗?" required>
           <ChipGroup options={B5_OPTIONS} value={b5} onChange={setB5} disabled={sending} />
         </Question>
 
