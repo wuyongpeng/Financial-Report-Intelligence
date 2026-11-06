@@ -894,14 +894,30 @@ export default function ReportHome() {
         const inPool = listedCandidates
           .map((listed) => coverage.find((c) => c.code === listed.code))
           .filter((c): c is CrawlCompanyCoverage => Boolean(c));
-        if (inPool.length === 1) {
-          const company = inPool[0];
-          if (isActiveTypedAsk) rememberActiveAsk(raw, company);
-          await navigateWithAsk(company, raw, parsed.period, { fromVoice: opts?.fromVoice });
+        if (inPool.length >= 1) {
+          // Compare / multi-name asks: open the first company that appears in the
+          // question and is already in the pool; carry the full question into detail.
+          const preferred = [...inPool].sort((a, b) => {
+            const ai = Math.min(
+              ...[a.name, a.code].map((token) => {
+                const i = raw.indexOf(token);
+                return i < 0 ? Number.POSITIVE_INFINITY : i;
+              }),
+            );
+            const bi = Math.min(
+              ...[b.name, b.code].map((token) => {
+                const i = raw.indexOf(token);
+                return i < 0 ? Number.POSITIVE_INFINITY : i;
+              }),
+            );
+            return ai - bi || a.code.localeCompare(b.code);
+          })[0] ?? inPool[0];
+          if (isActiveTypedAsk) rememberActiveAsk(raw, preferred);
+          await navigateWithAsk(preferred, raw, parsed.period, { fromVoice: opts?.fromVoice });
           return;
         }
-        // Multiple listed hits (or 0/N in pool): let user pick from the candidate list.
-        document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // None in pool yet — prompt to join the first named company.
+        setDialog({ kind: 'missing-company', listed: listedCandidates[0], query: raw });
         return;
       }
       const listed = listedCandidates[0];
@@ -1099,20 +1115,24 @@ export default function ReportHome() {
           e.preventDefault();
           if (submitting) return;
           const typed = search.trim();
-          if (!typed) return;
+          const placeholderAsk = activePlaceholder?.trim() || '';
+          // Empty box + rotating recommend: send the placeholder question.
+          const payload = typed || placeholderAsk;
+          if (!payload) return;
           // While listening, treat the box as the utterance (lets user correct ASR).
           if (voiceListening) {
-            voice.setPartial(typed);
+            voice.setPartial(typed || payload);
             voice.finalizeListen();
             return;
           }
           if (voice.active && searchEditedDuringVoiceRef.current) {
             searchEditedDuringVoiceRef.current = false;
             voice.setSuppressAutoListen(false);
-            void onSearchSubmit(typed, { fromVoice: true });
+            void onSearchSubmit(payload, { fromVoice: true, fromPlaceholder: !typed });
             return;
           }
-          void onSearchSubmit(typed);
+          if (!typed) setSearch(payload);
+          void onSearchSubmit(payload, { fromPlaceholder: !typed });
         }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -1225,20 +1245,33 @@ export default function ReportHome() {
               </button>
             );
           }
+          // Empty box: keep voice, and offer one-click send for the rotating recommend.
           return (
-            <button
-              className="rh-search-submit rh-search-voice"
-              type="button"
-              aria-label="语音提问"
-              title="语音提问"
-              onClick={() => {
-                searchEditedDuringVoiceRef.current = false;
-                voice.setSuppressAutoListen(false);
-                void voice.start();
-              }}
-            >
-              {waveGlyph}
-            </button>
+            <>
+              <button
+                className="rh-search-submit rh-search-voice"
+                type="button"
+                aria-label="语音提问"
+                title="语音提问"
+                onClick={() => {
+                  searchEditedDuringVoiceRef.current = false;
+                  voice.setSuppressAutoListen(false);
+                  void voice.start();
+                }}
+              >
+                {waveGlyph}
+              </button>
+              {activePlaceholder?.trim() ? (
+                <button
+                  className="rh-search-submit rh-search-send"
+                  type="submit"
+                  aria-label="发送推荐问题"
+                  title="发送推荐问题"
+                >
+                  {sendGlyph}
+                </button>
+              ) : null}
+            </>
           );
         })()}
       </form>

@@ -29,6 +29,7 @@
 .rh-home-answer-dismiss{position:absolute;top:10px;right:10px;border:0;background:transparent;color:#8494ab;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;padding:0}
 .rh-home-answer-dismiss:hover{background:#e2eaf8;color:#475569}
 .rh-search-submit{border:0;border-radius:999px;width:48px;height:48px;min-height:48px;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1;flex:none;transition:background .15s,color .15s,transform .12s,box-shadow .15s}
+.rh-search .rh-search-submit+.rh-search-submit{margin-left:2px}
 .rh-search-submit svg,.rh-search-glyph{display:block;width:18px;height:18px}
 .rh-search-submit:disabled{opacity:.45;cursor:not-allowed}
 .rh-search-voice{background:#e8edf5;color:#3064db;box-shadow:none}
