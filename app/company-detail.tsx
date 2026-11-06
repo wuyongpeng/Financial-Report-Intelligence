@@ -8,7 +8,7 @@ import MetricLinkage from './metric-linkage';
 import { verdictTone, type ReportVerdict } from '@/lib/report-verdict';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
-import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, mergeLiveSelectionFocus, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
+import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, mergeLiveSelectionFocus, readSourceSelection, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
 import { citeFilingLabel, citeHoverText, embedAttributionPageCites, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources, uniqueCitationsByPage } from '@/lib/answer-cite';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
 import { readContractJson } from '@/contracts/common';
@@ -795,6 +795,17 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     root.addEventListener('scroll', onScroll, { passive: true });
     return () => root.removeEventListener('scroll', onScroll);
   }, [selected.id, sourceMode]);
+
+  // Remember while selection still exists: mic/input focus and PDF virtualization can
+  // collapse it before ASR finishes. Keyboard/touch selections need no pick-bar click.
+  useEffect(() => {
+    const capture = () => {
+      const live = readSourceSelection(sourceRef.current, window.getSelection(), sourcePageRef.current);
+      if (live) pendingSelectionRef.current = live;
+    };
+    document.addEventListener('selectionchange', capture);
+    return () => document.removeEventListener('selectionchange', capture);
+  }, [selected.id]);
 
   // Continuous PDF scroll: wheel page-flip removed — .cd-source-scroll owns vertical scrolling.
 
@@ -2329,7 +2340,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (replacing != null) {
       if (busyRef.current || !memoryReady.current) return;
     } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
-    // User-selected clips / explicit caller focus only — never treat soft-merged page as "attached".
+    // Explicit clips / caller focus; live selections get a badge too, auto page text does not.
     const userFocus: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
       kind: c.kind,
       text: c.quote,
@@ -2338,7 +2349,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     })));
     let focusPayload: FocusItem[] = [...userFocus];
     // Live PDF/text selection without 「加入AI分析」 — soft-merge as priority focus (voice + typed).
-    const liveSel = replacing != null ? null : pendingSelectionRef.current;
+    const liveSel = replacing != null ? null
+      : readSourceSelection(sourceRef.current, window.getSelection(), sourcePageRef.current) ?? pendingSelectionRef.current;
     if (liveSel) {
       focusPayload = mergeLiveSelectionFocus(focusPayload, liveSel);
     }
@@ -2398,7 +2410,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // Bubble shows the typed question only — never append 「已带上 N 段原文」.
     // Auto soft-merged current page stays in focusPayload for the API, not in the visible text.
     const display = displayFocusPrompt(question, userFocus);
-    const attachNote = focusAttachNote(userFocus);
+    const attachNote = focusAttachNote(liveSel ? mergeLiveSelectionFocus(userFocus, liveSel) : userFocus);
     setRegenMenu(null);
     const controller = new AbortController(); requestRef.current = controller; busyRef.current = true;
     const id = selected.id;

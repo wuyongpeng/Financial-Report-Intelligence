@@ -1,3 +1,4 @@
+import type { FocusItem } from './focus-prompt';
 import type { MemoryMessage } from './conversations';
 import { getDb } from './db';
 import { healFilingLabels } from './period-heal';
@@ -44,6 +45,7 @@ export async function loadRagContext(
   question: string,
   history: MemoryMessage[],
   summary = false,
+  focus: FocusItem[] = [],
 ): Promise<RagContext> {
   const db = getDb();
   return retrieveContext({
@@ -51,6 +53,7 @@ export async function loadRagContext(
     question,
     history,
     summary,
+    focus,
     repository: new PostgresRetrievalRepository(db),
     passageRetriever,
     observeTarget: report => healFilingLabels(db, [{

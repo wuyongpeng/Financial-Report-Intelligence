@@ -62,6 +62,7 @@ export function assembleFocusPrompt(question: string, focus: FocusItem[]) {
   if (pdf.length) frames.push(`用户在财报pdf中圈定并关注的信息有${quoteList(pdf)}。`);
   if (brief.length) frames.push(`用户从概览中关注的要点有${quoteList(brief)}。`);
   if (!frames.length) return typed;
+  if (isFocusReferenceQuestion(typed)) frames.push('本轮指代的是上面用户圈定的内容，请优先解释该内容，而非历史问题。');
   const head = frames.join('');
   if (typed && typed !== '怎么看待这些数据') return `${head}${typed}`;
   return `${head}怎么看待这些数据`;
@@ -72,7 +73,7 @@ export function displayFocusPrompt(question: string, focus: FocusItem[]) {
   return question.trim() || (focus.length ? '怎么看待这些数据' : '');
 }
 
-/** Quiet badge copy for user-selected clips only (not auto page soft-merge). */
+/** Quiet badge for explicit clips / live selections, not auto page soft-merge. */
 export function focusAttachNote(focus: FocusItem[]) {
   if (!focus.length) return '';
   const pdf = focus.filter(f => f.kind === 'pdf' || f.kind === 'text').length;
@@ -86,7 +87,7 @@ export function focusAttachNote(focus: FocusItem[]) {
 
 /** Soft-merge a live PDF/text selection (no 「加入AI分析」 click) into focus.
  *  Puts the live quote first so the model prioritizes it; skips tiny/dupes.
- *  Does not count as an explicit clip for attachNote — caller keeps that separate.
+ *  Caller decides whether to show the selection badge (auto page text stays silent).
  */
 export function mergeLiveSelectionFocus(
   focus: FocusItem[],
@@ -121,4 +122,30 @@ export function focusContextBlock(focus: FocusItem[]) {
       return `${i + 1}. [${where}] ${labelOf(f)}`;
     }),
   ].join('\n');
+}
+
+/** A short spoken/typed pointer refers to this selection, not an older chat turn. */
+export function isFocusReferenceQuestion(question: string) {
+  const q = question.replace(/[\s，,。.!！?？]/g, '').replace(/[呀啊呢吗吧]+$/, '');
+  return /^(?:请|帮我|给我)?(?:这|这个|这些|这段|这句话|它|这里|这个词)?(?:是啥|是什么|啥意思|什么意思|是啥意思|是什么意思|指什么|指的是什么|解释一下|解释下|解读一下|解读下|讲一下|说明一下)$/.test(q)
+    || /^(?:请|帮我)?(?:解释|解读|说明)(?:一下|下)?(?:这|这个|这些|这段|这句话|这里)$/.test(q);
+}
+
+export type LiveSourceSelection = { quote: string; page: number; kind: 'pdf' | 'text' };
+
+/** Only read report text, never arbitrary selected UI/chat text. Both endpoints must belong. */
+export function readSourceSelection(root: HTMLElement | null, selection: Selection | null, textPage: number): LiveSourceSelection | null {
+  if (!root || !selection || selection.isCollapsed || !selection.rangeCount) return null;
+  const { anchorNode, focusNode } = selection;
+  if (!anchorNode || !focusNode || !root.contains(anchorNode) || !root.contains(focusNode)) return null;
+  const elementOf = (node: Node) => node.nodeType === 1 ? node as Element : node.parentElement;
+  const start = elementOf(anchorNode)?.closest('.cd-pdf-textlayer, .cd-source-text');
+  const end = elementOf(focusNode)?.closest('.cd-pdf-textlayer, .cd-source-text');
+  if (!start || !end) return null;
+  const quote = clipQuote(selection.toString());
+  if (quote.length < 2) return null;
+  const kind = start.matches('.cd-pdf-textlayer') ? 'pdf' : 'text';
+  const page = kind === 'pdf' ? Number(start.getAttribute('data-pdf-page')) : textPage;
+  if (!Number.isInteger(page) || page < 1) return null;
+  return { quote, page, kind };
 }

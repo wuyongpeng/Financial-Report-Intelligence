@@ -1,3 +1,4 @@
+import { assembleFocusPrompt, focusContextBlock, type FocusItem } from '@/lib/focus-prompt';
 import { ApiError } from '@/lib/api';
 import { buildPageLabels, resolvePageQuestion } from '@/lib/pdf-pages';
 import { labels, type MetricName } from '@/lib/detail-model';
@@ -96,6 +97,7 @@ export async function retrieveContext(input: {
   question: string;
   history: MemoryMessage[];
   summary?: boolean;
+  focus?: FocusItem[];
   repository: RetrievalRepository;
   passageRetriever: PassageRetriever;
   observeTarget?: RetrievalObserver;
@@ -116,6 +118,7 @@ export async function retrieveContext(input: {
     watched,
     currentCode: target.code,
     summary: input.summary,
+    hasFocus: Boolean(input.focus?.length),
   });
   if (plan.outOfScope) {
     const directAnswer = outOfScopeReply(plan.outOfScopeKind);
@@ -229,16 +232,27 @@ export async function retrieveContext(input: {
     chunksByReport.set(chunk.reportId, rows);
   }
   const currentChunks = chunksByReport.get(input.reportId) ?? [];
-  const pageQuery = resolvePageQuestion(plan.retrievalQuestion, buildPageLabels(currentChunks.map(chunk => ({ page: chunk.page, content: chunk.content }))));
+  const sourceFocus = (input.focus ?? []).filter(f => f.kind === 'pdf' || f.kind === 'text');
+  const passageQuery = [plan.retrievalQuestion, ...sourceFocus.map(f => f.text)].join('\n');
+  const pageQuery = resolvePageQuestion(passageQuery, buildPageLabels(currentChunks.map(chunk => ({ page: chunk.page, content: chunk.content }))));
   const passages: RetrievalContext['passages'] = [];
   const pushPassages = (report: RetrievalReport, limit: number) => {
     const metricPages = metrics.filter(metric => metric.reportId === report.id && plan.metricNames.includes(metric.metric as typeof plan.metricNames[number]))
       .flatMap(metric => metric.sourcePage ? [metric.sourcePage] : []);
-    const ranked = input.passageRetriever.retrieve({ query: pageQuery, chunks: chunksByReport.get(report.id) ?? [], metricPages, limit });
+    const reportChunks = chunksByReport.get(report.id) ?? [];
+    // Prioritize each selected quote/page within this report only. Quotes never
+    // change metric/history/peer planning and client text is not a citation.
+    const focused = report.id === input.reportId ? sourceFocus.flatMap(f => input.passageRetriever.retrieve({
+      query: f.text, chunks: reportChunks, metricPages: f.page ? [f.page] : [], limit: 2,
+    })) : [];
+    const ranked = [...focused, ...input.passageRetriever.retrieve({
+      query: sourceFocus.length && report.id !== input.reportId ? plan.retrievalQuestion : pageQuery,
+      chunks: reportChunks, metricPages, limit,
+    })].filter((p, i, rows) => rows.findIndex(other => other.page === p.page && other.content === p.content) === i).slice(0, limit);
     const reportPeriod = metrics.find(metric => metric.reportId === report.id)?.period ?? '';
     for (const candidate of ranked) {
-      const content = input.passageRetriever.excerpt(plan.retrievalQuestion, candidate.content);
-      const quote = input.passageRetriever.excerpt(plan.retrievalQuestion, content, 160);
+      const content = input.passageRetriever.excerpt(report.id === input.reportId ? passageQuery : plan.retrievalQuestion, candidate.content);
+      const quote = input.passageRetriever.excerpt(report.id === input.reportId ? passageQuery : plan.retrievalQuestion, content, 160);
       passages.push({
         ...addEvidence({ reportId: report.id, companyName: report.companyName, period: reportPeriod, page: candidate.page, quote, code: report.code }),
         content,
@@ -280,6 +294,7 @@ export async function retrieveContext(input: {
   });
 
   const structuredContext = [
+    focusContextBlock(input.focus ?? []),
     `当前报告：${target.companyName}（${target.code}），${period || '报告期尚未解析'}，行业 ${target.industry}。`,
     plan.softScopeHint
       ? '本轮问题与财报关联度可能偏低：请先用一两句简短有用的话回答用户（含常识性问题如天气），再在末尾加软提示；边界不要过硬，天气/宏观因素也可能影响业绩。不要编造本份报告里没有的财务数字。'
@@ -322,7 +337,7 @@ export async function retrieveContext(input: {
     })());
 
   return {
-    question: input.question,
+    question: assembleFocusPrompt(input.question, input.focus ?? []),
     retrievalQuestion: plan.retrievalQuestion,
     structuredContext,
     industry: target.industry || '',

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ApiError } from '../lib/api';
+import { modelMessages } from '../lib/answer';
 import { retrieveContext } from '../modules/retrieval/application/retrieve-context';
 import { KeywordPassageRetriever } from '../modules/retrieval/application/keyword-passage-retriever';
 import { planQuestion } from '../modules/retrieval/application/question-planner';
@@ -310,4 +311,43 @@ test('soft-merged page text must not be used as the planner question', () => {
   ], currentCode: '600519' });
   assert.deepEqual(clean.metricNames, ['revenue']);
   assert.equal(clean.needsPeers, false);
+});
+
+test('selected quote wins over stale chat topic without expanding KPI/peer planning', async () => {
+  const history = [{ role: 'user' as const, content: '和格力相比营业收入如何增长' }];
+  for (const question of ['这啥意思', '什么意思', '这是啥', '解释一下']) {
+    const plan = planQuestion({ question, hasFocus: true, history, watched: [], currentCode: '000333' });
+    assert.equal(plan.retrievalQuestion, question);
+    assert.deepEqual(plan.metricNames, []);
+    assert.equal(plan.needsPeers, false);
+    assert.equal(plan.needsHistory, false);
+    assert.equal(plan.softScopeHint, false);
+    assert.equal(plan.outOfScope, false);
+  }
+  // A real unrelated ask or investment request remains subject to normal policy.
+  assert.equal(planQuestion({ question: '明天天气', hasFocus: true, history: [], watched: [], currentCode: '000333' }).softScopeHint, true);
+  assert.equal(planQuestion({ question: '推荐股票', hasFocus: true, history: [], watched: [], currentCode: '000333' }).outOfScope, true);
+
+  const repository = new FakeRetrievalRepository();
+  repository.chunks.push({ reportId: 'current', page: 121, content: '长期应付职工薪酬是预计在一年后支付的职工薪酬。' });
+  const focus = [{ kind: 'pdf' as const, text: '长期应付职工薪酬', page: 121 }];
+  const context = await retrieveContext({
+    reportId: 'current', question: '这啥意思', history, focus,
+    repository, passageRetriever: new KeywordPassageRetriever(),
+  });
+  assert.match(context.question, /长期应付职工薪酬/);
+  assert.match(context.question, /这啥意思$/);
+  assert.equal(context.retrievalQuestion, '这啥意思');
+  assert.equal(context.passages[0]?.page, 121);
+  assert.match(context.passages[0]?.content ?? '', /预计在一年后支付/);
+  assert.equal(context.softScopeHint, false);
+  assert.equal(context.directAnswer, undefined);
+  assert.ok(!repository.calls.includes('industry-peers'));
+  assert.ok(!repository.calls.includes('named-peers'));
+  assert.match(context.structuredContext, /本轮附带的阅读摘录/);
+  for (const spoken of [true, false]) {
+    const messages = modelMessages(context, history, { spoken });
+    assert.match(messages.at(-1)!.content, /当前问题：[^\n]*长期应付职工薪酬[^\n]*这啥意思/);
+    assert.match(messages.at(-1)!.content, /PDF第121页/);
+  }
 });

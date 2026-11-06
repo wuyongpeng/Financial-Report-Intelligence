@@ -1,3 +1,4 @@
+import { isFocusReferenceQuestion } from '@/lib/focus-prompt';
 import { nameVariants, WELL_KNOWN_ALIASES } from '@/lib/company-aliases';
 import type { MemoryMessage } from '@/lib/conversations';
 import { isProductIdentityQuestion } from '@/lib/product-identity';
@@ -181,6 +182,7 @@ export function classifyQuestionScope(input: {
   summary?: boolean;
   metricNames: RetrievalMetricName[];
   explicitPage: number | null;
+  hasFocus?: boolean;
 }): { outOfScope: boolean; outOfScopeKind?: OutOfScopeKind; softScopeHint?: boolean } {
   const original = input.originalQuestion.trim();
   // Hard refuse only for investment advice — everything else stays answerable.
@@ -191,7 +193,7 @@ export function classifyQuestionScope(input: {
   if (isProductIdentityQuestion(original) || isProductIdentityQuestion(input.retrievalQuestion)) {
     return { outOfScope: true, outOfScopeKind: 'identity' };
   }
-  if (input.summary) return { outOfScope: false };
+  if (input.summary || (input.hasFocus && isFocusReferenceQuestion(original))) return { outOfScope: false };
   if (input.metricNames.length || input.explicitPage != null) return { outOfScope: false };
   // Follow-ups rewrite into retrievalQuestion with prior finance context — treat as in-scope.
   if (hasFinanceSignal(input.retrievalQuestion) || hasFinanceSignal(original)) return { outOfScope: false };
@@ -215,8 +217,12 @@ export function planQuestion(input: {
   watched: WatchedCompany[];
   currentCode: string;
   summary?: boolean;
+  hasFocus?: boolean;
 }): QueryPlan {
-  const query = retrievalQuestion(input.question, input.history);
+  // A current selection wins over stale conversational deixis. Do not plan KPIs,
+  // peers or years from quote text; it is used separately for passage retrieval.
+  const query = input.hasFocus && isFocusReferenceQuestion(input.question)
+    ? input.question : retrievalQuestion(input.question, input.history);
   const namedPeerCodes = mentionedCompanyCodes(query, input.watched, input.currentCode);
   const needsHistory = Boolean(input.summary) || wantsCompanyHistory(query);
   const needsPeers = wantsPeerCompare(query) || namedPeerCodes.length > 0 || wantsEvaluativeJudgement(query);
@@ -231,6 +237,7 @@ export function planQuestion(input: {
     summary: input.summary,
     metricNames,
     explicitPage,
+    hasFocus: input.hasFocus,
   });
   return {
     originalQuestion: input.question,

@@ -10,7 +10,7 @@ import {
 import { beginTurn, finishTurn, type AnswerResult, type MemoryMessage } from '@/lib/conversations';
 import { loadRagContext } from '@/lib/rag';
 import { generateAnswer } from '@/lib/answer';
-import { assembleFocusPrompt, focusContextBlock } from '@/lib/focus-prompt';
+import { assembleFocusPrompt } from '@/lib/focus-prompt';
 import { recordClientAudit } from '@/lib/client-audit';
 import { resolveAuditReportMeta } from '@/lib/client-audit-report';
 
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const input = parseChatRequest(await readObject(request));
     const { reportId, focus, requestId, conversationId } = input;
     // Typed question drives retrieval planning (metrics / peers / history).
-    // Focus clips stay in structuredContext only — never rewrite the planner query,
+    // Focus enriches the model question and passage search, not the KPI planner query,
     // or soft-merged PDF page text will match 利润/资产/现金流 and dump every KPI + peers.
     const question = input.question.trim();
     const assembled = assembleFocusPrompt(question, focus);
@@ -59,11 +59,7 @@ export async function POST(request: Request) {
         }, request);
       })();
     }
-    const context = replay ? null : await loadRagContext(reportId, question, history, input.summary);
-    if (context && focus.length) {
-      const block = focusContextBlock(focus);
-      if (block) context.structuredContext = `${block}\n\n${context.structuredContext}`;
-    }
+    const context = replay ? null : await loadRagContext(reportId, question, history, input.summary, focus);
     const persist = async (result: AnswerResult) => {
       if (lease) await finishTurn(lease.owner, lease.conversationId, lease.requestId, result);
     };
