@@ -2569,7 +2569,7 @@ export default function CrawlOverview() {
                     {llmProbeBusy ? '检测中…' : '检测连接'}
                   </button>
                 </div>
-                <p className="co-llm-probe-lead">检测已配置模型，并短连上游语音 ASR/TTS 网关（优先 VOICE_API_KEY，否则 LLM_API_KEY）。</p>
+                <p className="co-llm-probe-lead">检测已配置LLM模型可用性，检测语音 ASR/TTS 网关连通性</p>
                 {llmProbeError ? <p className="co-llm-probe-error" role="status">{llmProbeError}</p> : null}
                 {llmProbeResults ? (
                   <ul className="co-llm-probe-list">
