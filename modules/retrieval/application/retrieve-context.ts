@@ -2,6 +2,7 @@ import { ApiError } from '@/lib/api';
 import { buildPageLabels, resolvePageQuestion } from '@/lib/pdf-pages';
 import { labels, type MetricName } from '@/lib/detail-model';
 import { resolveYoy } from '@/lib/crawl-display';
+import { formatFinanceAmount } from '@/lib/format-finance-amount';
 import { canonicalPeriodFromTitle } from '@/lib/ingest-period';
 import type { Evidence, MemoryMessage } from '@/lib/conversations';
 import {
@@ -190,7 +191,7 @@ export async function retrieveContext(input: {
     return {
       metric,
       citation,
-      line: `${report.companyName} ${metric.period} ${metricLabel(metric.metric)}：${metric.value}${metric.unit}${citation ? `【${citation.id}】` : '（无原文页码，待核验）'}`,
+      line: `${report.companyName} ${metric.period} ${metricLabel(metric.metric)}：${formatFinanceAmount(metric.value, metric.unit)}${citation ? `【${citation.id}】` : '（无原文页码，待核验）'}`,
     };
   });
   const priorPeriod = period.replace(/^20\d{2}/, year => String(Number(year) - 1));
@@ -216,7 +217,7 @@ export async function retrieveContext(input: {
       const priorBit = prior
         ? `基期 ${priorPeriod}${prior.citation ? `【${prior.citation.id}】` : ''}`
         : (fact.metric.priorValue != null ? '基期来自本份财报上年同期列' : '无跨报告基期');
-      calculations.push(`${metricLabel(fact.metric.metric)}同比：${yoy.label}${fact.citation ? `【${fact.citation.id}】` : ''}（${priorBit}，绝对变化 ${yoy.absoluteDelta}，${formula}）`);
+      calculations.push(`${metricLabel(fact.metric.metric)}同比：${yoy.label}${fact.citation ? `【${fact.citation.id}】` : ''}（${priorBit}，绝对变化 ${formatFinanceAmount(yoy.absoluteDelta, fact.metric.unit)}，${formula}）`);
     }
   }
 

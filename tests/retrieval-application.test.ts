@@ -247,7 +247,7 @@ test('营收是多少 scopes to current-report revenue only — no peer/KPI dump
     passageRetriever: new KeywordPassageRetriever(),
   });
   assert.equal(context.mode, 'structured-query');
-  assert.match(context.directAnswer ?? '', /贵州茅台 2026H1 营业收入：90703260964\.48元【E1】/);
+  assert.match(context.directAnswer ?? '', /贵州茅台 2026H1 营业收入：907\.03亿元【E1】/);
   assert.doesNotMatch(context.directAnswer ?? '', /归母净利润|经营现金流|资产总计|山西汾酒|五粮液/);
   assert.equal(context.peers.length, 0);
   assert.ok(context.evidence.some(e => e.page === 2 && /营业收入/.test(e.quote ?? '')));
