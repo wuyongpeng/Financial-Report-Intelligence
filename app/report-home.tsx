@@ -1269,7 +1269,8 @@ export default function ReportHome() {
         })()}
       </form>
       {voiceListening ? (
-        <p className="rh-search-hint" role="status">正在聆听…</p>
+        /* Placeholder already says 正在聆听… — keep spacer so layout doesn't jump. */
+        <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
       ) : voice.active ? (
         <p className="rh-search-hint" role="status">语音会话中</p>
       ) : (
