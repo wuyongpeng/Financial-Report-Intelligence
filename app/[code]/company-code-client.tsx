@@ -8,6 +8,8 @@ import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
 import companiesJson from '@/data/companies.json';
 import { openingCompanyLabel } from '@/lib/crawl-display';
+import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
+import { period } from '@/lib/detail-model';
 
 type CompanyMeta = {
   code: string;
@@ -69,9 +71,23 @@ export default function CompanyCodeClient({ code }: { code: string }) {
         const payload = await readContractJson(response, parseReportListResponse);
         if (!active) return;
         const reports = payload.reports;
-        const preferred = reports.find((item) => item.metrics?.length)
-          ?? reports[0]
-          ?? placeholderReport(code, meta);
+        const periodParam = preferredPeriod;
+        let preferred = reports[0];
+        if (periodParam) {
+          const hint = parsePeriodHints(periodParam);
+          if (!hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(periodParam)) {
+            hint.token = periodParam.toUpperCase();
+          }
+          preferred = reports.find((item) =>
+            reportMatchesPeriod(item, hint)
+            || item.metrics.some((m) => m.period === periodParam)
+            || item.title.includes(periodParam)
+          ) ?? preferred;
+        }
+        if (!preferred || (preferred && !periodParam)) {
+          preferred = reports.find((item) => item.metrics?.length) ?? reports[0] ?? preferred;
+        }
+        preferred = preferred ?? placeholderReport(code, meta);
         setReport(preferred);
         setError('');
       } catch (err) {
@@ -84,7 +100,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
     }
     void load();
     return () => { active = false; };
-  }, [code, meta]);
+  }, [code, meta, preferredPeriod]);
 
   function approveReport(reportId: string) {
     setReviewReportId(reportId);

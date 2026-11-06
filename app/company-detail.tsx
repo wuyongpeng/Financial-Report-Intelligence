@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { amount, anomaliesConclusion, attributionConclusion, comparableHistory, sequentialHistory, filingType, format, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { amount, anomaliesConclusion, attributionConclusion, comparableHistory, sequentialHistory, filingType, format, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, suggestClosestReport, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
 import { buildMetricRelationships } from '@/lib/metric-relationships';
 import MetricLinkage from './metric-linkage';
@@ -370,11 +370,23 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [verdictStatus, setVerdictStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [verdictError, setVerdictError] = useState('');
   const [quietToast, setQuietToast] = useState<{ text: string; at: number } | null>(null);
+  const [periodMiss, setPeriodMiss] = useState<null | { requested: string; showing: string; suggestionId: string | null }>(null);
   const autoParsePosted = useRef(new Set<string>());
 
-  function selectReport(report: Report) {
+  function selectReport(report: Report, opts?: { syncUrl?: boolean; clearMiss?: boolean }) {
     setReportListOpen(false);
     if (report.id === activeId.current) return;
+    if (opts?.clearMiss !== false) setPeriodMiss(null);
+    if (opts?.syncUrl !== false) {
+      try {
+        const url = new URL(window.location.href);
+        const token = period(report);
+        if (isCanonicalPeriod(token)) url.searchParams.set('period', token);
+        else url.searchParams.delete('period');
+        const next = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : '');
+        window.history.replaceState(null, '', next);
+      } catch { /* ignore */ }
+    }
     requestRef.current?.abort(); busyRef.current = false;
     // Period switch → different reportId → different thread. Clear UI immediately so
     // company/period A messages cannot flash or stick on B while hydrate runs.
@@ -402,10 +414,28 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const matched = preferredPeriod
         ? all.find(r => reportMatchesPeriod(r, hint) || r.metrics.some(m => m.period === preferredPeriod) || r.title.includes(preferredPeriod))
         : null;
-      const latest = matched ?? all[0];
-      if (latest) selectReport(latest);
-      if (preferredPeriod && !matched && latest && !abort.signal.aborted) {
-        setQuietToast({ text: `未找到 ${preferredPeriod}，已显示最新已入库报告`, at: Date.now() });
+      if (matched) {
+        selectReport(matched);
+        setPeriodMiss(null);
+      } else if (preferredPeriod) {
+        const suggestion = suggestClosestReport(all, preferredPeriod) ?? all[0];
+        // Keep ?period= requested token in the URL; do not pretend the fallback is that period.
+        if (suggestion) selectReport(suggestion, { syncUrl: false, clearMiss: false });
+        if (suggestion && !abort.signal.aborted) {
+          const showing = period(suggestion);
+          setPeriodMiss({
+            requested: preferredPeriod.toUpperCase(),
+            showing,
+            suggestionId: suggestion.id,
+          });
+          setQuietToast({
+            text: `未找到 ${preferredPeriod.toUpperCase()}，当前为 ${showing}（同类型最近期）`,
+            at: Date.now(),
+          });
+        }
+      } else if (all[0]) {
+        selectReport(all[0]);
+        setPeriodMiss(null);
       }
       if (!abort.signal.aborted) setPeriodBootstrapDone(true);
     }).catch(() => {
@@ -3177,6 +3207,21 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       >
         答案在第 {voiceJumpHint.page} 页 · 去看
       </button>
+    )}
+    {periodMiss && (
+      <div className="cd-period-miss" role="status">
+        <div>
+          <b>未找到 {periodMiss.requested}</b>
+          <span>链接期次不在库中。当前展示的是 {periodMiss.showing}，不是链接要的报告期。</span>
+        </div>
+        <button
+          type="button"
+          className="cd-button"
+          onClick={() => setReportListOpen(true)}
+        >
+          选择已入库报告期
+        </button>
+      </div>
     )}
     {quietToast && (
       <div className="cd-quiet-toast" role="status" aria-live="polite">

@@ -15,6 +15,7 @@ import {
   auditOpinionKindLabel,
   type AuditOpinionKind,
 } from './audit-opinion';
+import { canonicalPeriodFromTitle } from './ingest-period';
 
 export const OVERVIEW_METRICS: HeadlineMetricName[] = ['revenue', 'net_profit', 'eps', 'roe'];
 
@@ -28,7 +29,7 @@ export const OVERVIEW_METRIC_LABEL: Record<HeadlineMetricName, string> = {
 /** |YoY%| at or above this → 离谱 (catches prior-as-yoy bugs like 茅台天文同比). */
 export const ABSURD_YOY_ABS_PCT = 500;
 
-export type OverviewIssue = 'missing' | 'no_page' | 'absurd_yoy';
+export type OverviewIssue = 'missing' | 'no_page' | 'absurd_yoy' | 'period_mismatch';
 
 export type OverviewDbMetric = {
   code: string;
@@ -263,7 +264,16 @@ export function buildOverviewRows(
       metrics[metric] = cell;
       for (const issue of cell.issues) issueSet.add(issue);
     }
+    // Title is the announcement the metrics JOIN to — if it names another filing period,
+    // the metrics.period tag is wrong (or a preview was mis-bucketed). Flag + deep-link by title.
+    const titlePeriod = bucket.title
+      ? canonicalPeriodFromTitle(bucket.title, null)
+      : null;
+    if (titlePeriod && titlePeriod !== bucket.period) {
+      issueSet.add('period_mismatch');
+    }
     const issues = [...issueSet];
+    const linkPeriod = titlePeriod && titlePeriod !== bucket.period ? titlePeriod : bucket.period;
     const review = bucket.announcementId
       ? reviewById.get(bucket.announcementId)
       : undefined;
@@ -271,7 +281,10 @@ export function buildOverviewRows(
     const flagged = review?.status === 'flagged';
     const reviewNote = review?.note?.trim() || null;
     // Flagged always abnormal; system issues abnormal unless acked.
-    const isAbnormal = flagged || (issues.length > 0 && !acked);
+    // period_mismatch is never coverable by ack alone — wrong grab must be discarded/reparsed.
+    const isAbnormal = flagged
+      || issues.includes('period_mismatch')
+      || (issues.length > 0 && !acked);
     if (isAbnormal) abnormal += 1;
     if (isAbnormal && issues.includes('missing')) missingCore += 1;
     if (isAbnormal && issues.includes('no_page')) noPage += 1;
@@ -288,7 +301,7 @@ export function buildOverviewRows(
       title: bucket.title,
       period: bucket.period,
       announcementId: bucket.announcementId,
-      href: `/${bucket.code}?period=${encodeURIComponent(bucket.period)}`,
+      href: `/${bucket.code}?period=${encodeURIComponent(linkPeriod)}`,
       metrics,
       issues,
       abnormal: isAbnormal,
@@ -325,6 +338,7 @@ export function buildOverviewRows(
 export function issueLabel(issue: OverviewIssue): string {
   if (issue === 'missing') return '缺核';
   if (issue === 'no_page') return '无页码';
+  if (issue === 'period_mismatch') return '期次错位';
   return '同比离谱';
 }
 

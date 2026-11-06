@@ -3,6 +3,7 @@
  * Real data comes from /api/crawl; mock remains a last-resort fallback only.
  */
 import { isCanonicalPeriod } from './ingest-period';
+import { formatMetricFinanceAmount } from './format-finance-amount';
 import { periodMeetsAutoCutoff } from './ingest-lookback';
 export type CrawlSourceKind = 'exchange' | 'cninfo';
 export type ParseStatus = 'completed' | 'parsing' | 'queued' | 'failed' | 'pending';
@@ -501,12 +502,7 @@ export function verdictStatusLabel(status: 'ready' | 'pending' | 'failed' | null
 }
 
 export function formatMetricValue(metric: HeadlineMetricName, value: number) {
-  if (!Number.isFinite(value)) return '—';
-  if (metric === 'revenue' || metric === 'net_profit') {
-    return `${(value / 1e8).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 亿`;
-  }
-  if (metric === 'roe') return `${value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}%`;
-  return `${value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 元`;
+  return formatMetricFinanceAmount(metric, value);
 }
 
 export type YoyKind = 'pct' | 'qualitative' | 'flat';

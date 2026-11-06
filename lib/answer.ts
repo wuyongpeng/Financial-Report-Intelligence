@@ -5,11 +5,12 @@ import { fetchChatCompletions, withLlmSlot } from './llm-gate';
 import { llmConfigured } from './llm-providers';
 import { historyForModel } from '@/modules/retrieval/application/question-planner';
 import { ensureSoftScopeFooter, SOFT_SCOPE_FOOTER, SOFT_SCOPE_FOOTER_SPOKEN } from '@/modules/retrieval/application/answer-policy';
+import { humanizeYuanInText } from '@/lib/format-finance-amount';
 
 export type AnswerRewrite = 'detailed' | 'brief' | 'retry';
 
 const REWRITE_HINT: Record<AnswerRewrite, string> = {
-  detailed: '重写要求：在已提供证据范围内写得更详尽。补充对比、口径说明与原文页码，可用小标题分点；不要编造未提供的数字。',
+  detailed: '重写要求：在已提供证据范围内写得更详尽。补充对比、口径说明与原文页码，可用小标题分点；不要编造未提供的数字。Markdown 表内金额一律用亿元/万元等可读单位，禁止单元格写一长串元整数。',
   brief: '重写要求：写得更简短。只保留关键结论与必要出处，不要展开背景或重复解释。',
   retry: '重写要求：重新作答。纠正含糊或可能不准的表述，不要重复上一稿套话。',
 };
@@ -32,7 +33,7 @@ const SPOKEN_HINT = (
   + '第一句就给出数字或结论，不要开场白、不要「先说明一点」、不要复述用户问题。'
   + '禁止「一、结论先行」等多级标题与长列表；不要分段长文。'
   + '只用结构简单的描述性短句；禁止 Markdown 表格、多列表格、指标网格——表格读出来没有结构。'
-  + '数字写进句子里，例如「营收约907亿，同比增1.5%」，不要用表行罗列。'
+  + '数字写进句子里，例如「营收约907.03亿元，同比增1.5%」，不要用表行罗列；禁止念/写出一长串元整数。'
   + '可保留必要【E1】出处，但不要念成长串。'
 );
 
@@ -48,8 +49,9 @@ export function formatSpokenDirectAnswer(answer: string) {
       .trim();
   }
   const lines = text.split(/\n+/).map(line => line.trim()).filter(Boolean);
-  if (lines.length <= 1) return (lines[0] ?? text).trim();
-  return lines[0];
+  const head = lines.length <= 1 ? (lines[0] ?? text).trim() : lines[0];
+  // Avoid TTS reading 32483000000元 digit-by-digit.
+  return humanizeYuanInText(head);
 }
 
 export function modelMessages(context: RagContext, history: MemoryMessage[], rewriteOrOpts?: AnswerRewrite | AnswerOptions) {
@@ -70,7 +72,7 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
   );
   const style = spoken
     ? '用口语化短句中文回答，优先短、快、直接。禁止表格与多列布局，数字写入句子。不要输出 HTML。'
-    : '用简洁中文回答。比较或多列数字时用 Markdown 表格；分层说明可用标题与列表。不要输出 HTML。';
+    : '用简洁中文回答。比较或多列数字时用 Markdown 表格，表内金额用亿元/万元等可读单位，禁止单元格写库内原始元整数；分层说明可用标题与列表。不要输出 HTML。';
   const softHint = context.softScopeHint
     ? (
       '本轮问题与财报关联度可能偏低（闲聊/天气/常识也可能与天气敏感型业绩相关，边界不要过硬）。'
@@ -91,6 +93,7 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
     + '计算优先使用服务端结果；同比仅当报告期口径相同（如 2026Q1 对 2025Q1）；年报与季报可作参考但不得称为同比。'
     + '本轮若已提供上期或同业数据，评估「好不好」时应使用这些对比，不得以「仅有单期」为由拒绝。'
     + '缺失依据明确回答暂无法回答，不编造原因、排名或页码。不提供投资建议。'
+    + '金额单位：结构化数据里的金额已换算为亿元/万元等可读单位；有结构化金额时必须优先用这些可读数字写进句子或表格，禁止再输出库内原始元长整数（如 32483000000元）。引用 PDF 原文表内数字时，须带披露单位（如百万元）或先换算成亿元/万元并括注原文口径。'
     + softHint
     + style
   );
@@ -126,7 +129,7 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
   const start = Date.now();
   const soft = Boolean(context.softScopeHint);
   const finish = (answer: string, mode: string, status: AnswerResult['status'] = 'complete', warnings: string[] = []): AnswerResult => {
-    const text = soft ? ensureSoftScopeFooter(answer, spoken) : answer;
+    const text = humanizeYuanInText(soft ? ensureSoftScopeFooter(answer, spoken) : answer);
     return {
       answer: text,
       mode,

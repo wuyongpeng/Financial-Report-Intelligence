@@ -284,3 +284,38 @@ test('buildOverviewRows carries audit opinion and summary buckets', () => {
   assert.equal(summary.auditNone, 1);
   assert.equal(summary.auditStandard, 0);
 });
+
+
+test('buildOverviewRows flags period_mismatch and deep-links by title period', () => {
+  const { rows, summary } = buildOverviewRows([
+    {
+      code: '300760',
+      name: '迈瑞医疗',
+      title: '迈瑞医疗：2026年一季度报告',
+      announcement_id: 'ann-mindray-q1',
+      period: '2026FY',
+      metric: 'revenue',
+      value: 1e10, unit: '元', source_page: 1, prior_value: null, yoy_pct: 5,
+    },
+    {
+      code: '300760', name: '迈瑞医疗', announcement_id: 'ann-mindray-q1',
+      period: '2026FY', metric: 'net_profit',
+      value: 1e9, unit: '元', source_page: 1, prior_value: null, yoy_pct: 5,
+    },
+    {
+      code: '300760', name: '迈瑞医疗', announcement_id: 'ann-mindray-q1',
+      period: '2026FY', metric: 'eps',
+      value: 1, unit: '元', source_page: 1, prior_value: null, yoy_pct: 5,
+    },
+    {
+      code: '300760', name: '迈瑞医疗', announcement_id: 'ann-mindray-q1',
+      period: '2026FY', metric: 'roe',
+      value: 5, unit: '%', source_page: 1, prior_value: null, yoy_pct: 5,
+    },
+  ]);
+  assert.equal(rows[0].period, '2026FY');
+  assert.ok(rows[0].issues.includes('period_mismatch'));
+  assert.equal(rows[0].abnormal, true);
+  assert.equal(rows[0].href, '/300760?period=2026Q1');
+  assert.ok(summary.abnormal >= 1);
+});

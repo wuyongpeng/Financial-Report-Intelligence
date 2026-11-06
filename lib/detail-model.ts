@@ -1,4 +1,5 @@
 import { canonicalPeriodFromTitle, reportKindFromPeriod } from './ingest-period';
+import { formatMetricFinanceAmount } from './format-finance-amount';
 import { betterKeepCandidate } from './period-dedupe';
 import { describeYoy, isAbsurdDisclosedPrior, resolveYoy } from './crawl-display';
 
@@ -58,7 +59,7 @@ export function filingType(report: Report) {
 }
 export function format(n: number | undefined, metric: MetricName) {
   if (n === undefined || !Number.isFinite(n)) return '—';
-  return currencyMetrics.has(metric) ? `${(n / 1e8).toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 亿` : `${n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}${metric === 'roe' ? '%' : ' 元'}`;
+  return formatMetricFinanceAmount(metric, n);
 }
 // Bare number for contexts that already declare the unit at block level.
 export function amount(n: number | undefined, metric: MetricName) {
@@ -89,6 +90,31 @@ export function periodKey(report: Report) {
   const p = period(report); const year = Number(p.match(/20\d{2}/)?.[0] ?? 0);
   const quarter = /FY/.test(p) ? 4 : /H1|Q2/.test(p) ? 2 : /Q3/.test(p) ? 3 : /Q1/.test(p) ? 1 : 0;
   return year * 10 + quarter;
+}
+
+/** Closest loaded report when a deep-link period is missing. Prefer same filing type. */
+export function suggestClosestReport(reports: Report[], requested: string): Report | undefined {
+  const token = requested.trim().toUpperCase();
+  if (!token || !reports.length) return undefined;
+  const year = Number(token.match(/20\d{2}/)?.[0] ?? 0);
+  const quarter = /FY/.test(token) ? 4 : /H1|Q2/.test(token) ? 2 : /Q3/.test(token) ? 3 : /Q1/.test(token) ? 1 : 0;
+  const reqKey = year * 10 + quarter;
+  const wantKind = reportKindFromPeriod(token);
+  return [...reports].map((r) => {
+    const pk = periodKey(r);
+    return {
+      r,
+      sameKind: wantKind ? filingType(r) === wantKind : true,
+      notFuture: reqKey === 0 || pk <= reqKey,
+      dist: Math.abs(pk - reqKey),
+      pk,
+    };
+  }).sort((a, b) => {
+    if (a.sameKind !== b.sameKind) return a.sameKind ? -1 : 1;
+    if (a.notFuture !== b.notFuture) return a.notFuture ? -1 : 1;
+    if (a.dist !== b.dist) return a.dist - b.dist;
+    return b.pk - a.pk;
+  })[0]?.r;
 }
 export function comparableHistory(reports: Report[], selected: Report) {
   const suffix = period(selected).replace(/20\d{2}/, '');

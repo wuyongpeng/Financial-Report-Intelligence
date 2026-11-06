@@ -309,6 +309,10 @@ export function MetricsAdminClient() {
       if (cardFilter === 'abnormal' && !row.abnormal) return false;
       if (cardFilter === 'missing' && !(row.abnormal && row.issues.includes('missing'))) return false;
       if (cardFilter === 'absurd_yoy' && !(row.abnormal && row.issues.includes('absurd_yoy'))) return false;
+      // Audit chips: keep only that opinion bucket (非标 / 标准 / 未见).
+      if (cardFilter === 'audit_non_standard' && row.auditOpinionKind !== 'non_standard') return false;
+      if (cardFilter === 'audit_standard' && row.auditOpinionKind !== 'standard') return false;
+      if (cardFilter === 'audit_none' && row.auditOpinionKind && row.auditOpinionKind !== 'none') return false;
       // Checkbox only when no card filter (card filter takes priority).
       if (!cardFilter && onlyAbnormal && !row.abnormal) return false;
       if (periodFilter && row.period !== periodFilter) return false;
@@ -731,7 +735,9 @@ export function MetricsAdminClient() {
                       rel="noopener noreferrer"
                       style={{ ...linkStyle, color: '#3a4d66' }}
                     >
-                      {row.period}
+                      <span style={{ color: row.issues.includes('period_mismatch') && !row.acked ? '#b91c1c' : undefined }} title={row.issues.includes('period_mismatch') ? '指标期次与报告全称不一致' : undefined}>
+                        {row.period}
+                      </span>
                     </Link>
                   </td>
                   <td style={{ ...s.td, ...colTitle }}>
