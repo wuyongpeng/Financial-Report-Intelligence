@@ -523,16 +523,36 @@ function isCleanLabelHit(page: string, position: number, label: string, metric: 
     const before = page.slice(Math.max(0, position - 36), position);
     if (/扣除非经常性损益/.test(before)) return false;
     if (/扣非后$/.test(before)) return false;
-    return true;
   }
+  // 变动说明表行：「基本每股收益（元/股）-本报告期 61.54」——数字是变动比例，不是指标值。
+  const afterHead = page.slice(position + label.length, position + label.length + 40);
+  if (/\-\s*(?:本报告期|年初至报告期末)/.test(afterHead)) return false;
   return true;
+}
+
+/** 「（三）主要会计数据、财务指标发生变动的情况、原因」——列是变动比例(%)，不是指标绝对值。 */
+function isVarianceExplainPage(page: string) {
+  return /发生变动的情况|变动的情况[、,，]?原因|项目名称[\s\S]{0,48}变动比例/.test(page);
+}
+
+function isSummaryMetricsPage(page: string) {
+  if (isVarianceExplainPage(page)) return false;
+  return /主要会计数据|主要财务指标|主要财务比率|报告摘要|财务摘要/.test(page);
 }
 
 function metricCandidates(pages: string[], definition: MetricDefinition) {
   const candidates: Candidate[] = [];
-  for (let pageIndex = 0; pageIndex < Math.min(pages.length, PARSE_PAGE_LIMIT); pageIndex += 1) {
-    const page = normalizePageText(pages[pageIndex]);
-    const isSummary = /主要会计数据|主要财务指标|主要财务比率|报告摘要|财务摘要/.test(page);
+  const normalizedPages = pages.slice(0, PARSE_PAGE_LIMIT).map((page) => normalizePageText(page));
+  for (let pageIndex = 0; pageIndex < normalizedPages.length; pageIndex += 1) {
+    const page = normalizedPages[pageIndex];
+    const isVarianceExplain = isVarianceExplainPage(page);
+    const isSummary = isSummaryMetricsPage(page);
+    // 季报摘要表常在首页标题、次页才出现 EPS/ROE 行（工业富联 601138）。
+    const prev = pageIndex > 0 ? normalizedPages[pageIndex - 1] : '';
+    const isSummaryContinuation = !isSummary && !isVarianceExplain && pageIndex > 0
+      && isSummaryMetricsPage(prev)
+      && /(?:基本每股收益|稀释每股收益|加权平均净资产收益率|总资产|归属于上市公司股东的所有者权益)/.test(page.slice(0, 600));
+    const summaryLike = isSummary || isSummaryContinuation;
     const balanceSheet = new Set([
       'total_assets', 'total_liabilities',
       'cash_and_equivalents', 'restricted_cash',
@@ -544,7 +564,7 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
       : definition.metric === 'non_recurring_pnl' || definition.metric === 'profit_ex_non_recurring'
         ? /非经常性损益|主要会计数据|主要财务指标|主要财务比率|报告摘要|财务摘要|合并利润表|利润表/
       : /合并利润表|利润表/;
-    const isPrimaryStatement = statement.test(page);
+    const isPrimaryStatement = statement.test(page) && !isVarianceExplain;
     const hasPageUnit = Boolean(pageCurrencyUnit(page));
     for (const [labelIndex, label] of definition.labels.entries()) {
       for (const position of allLabelPositions(page, label)) {
@@ -553,13 +573,14 @@ function metricCandidates(pages: string[], definition: MetricDefinition) {
         const parsed = candidateAfterLabel(scopedPage, label, definition, pageCurrencyUnit(page));
         if (!parsed) continue;
         let score = 0.68;
-        if (isSummary) score += 0.14;
+        if (summaryLike) score += 0.14;
         // 中行等：摘要页 EPS/ROE 必须压过后文利润表「（一）基本每股收益」。
-        if (isSummary && (definition.metric === 'eps' || definition.metric === 'roe')) score += 0.06;
+        if (summaryLike && (definition.metric === 'eps' || definition.metric === 'roe')) score += 0.06;
         if (isPrimaryStatement && definition.metric !== 'roe') score += 0.08;
         if (parsed.detectedUnit || hasPageUnit) score += 0.06;
         if (pageIndex < 30) score += 0.03;
         if (labelIndex === 0) score += 0.03;
+        if (isVarianceExplain) score -= 0.25;
         candidates.push({
           metric: definition.metric,
           value: parsed.value,
