@@ -2441,6 +2441,8 @@ export default function CrawlOverview() {
                       <Link
                         href={companyHref(item, item.period)}
                         className="co-period-link"
+                        target="_blank"
+                        rel="noopener noreferrer"
                         data-tip={periodChipTitle(period)}
                       >
                         {item.period}
