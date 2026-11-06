@@ -1138,7 +1138,7 @@ export default function ReportHome() {
         <input
           ref={searchInputRef}
           aria-label="搜索或提问：公司名称、股票代码，或自然语言问题"
-          placeholder={voiceListening ? '正在聆听…' : activePlaceholder}
+          placeholder={voiceListening ? '语音输入中…' : activePlaceholder}
           value={search}
           onChange={(e) => {
             const v = e.target.value;
@@ -1269,7 +1269,7 @@ export default function ReportHome() {
         })()}
       </form>
       {voiceListening ? (
-        /* Placeholder already says 正在聆听… — keep spacer so layout doesn't jump. */
+        /* Placeholder already says 语音输入中… — keep spacer so layout doesn't jump. */
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
       ) : voice.active ? (
         <p className="rh-search-hint" role="status">语音会话中</p>
