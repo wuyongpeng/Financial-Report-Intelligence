@@ -20,7 +20,7 @@ import {
   type OverviewRow,
   type OverviewSummary,
 } from '@/lib/metrics-overview';
-import { splitTitleAttention } from '@/lib/metrics-title-attention';
+import { splitTitleAttention, titleHasAttentionKeyword } from '@/lib/metrics-title-attention';
 import { buildBatchParseTriggerBodies, type HeadlineMetricName } from '@/lib/crawl-display';
 
 type MetricsPayload = {
@@ -43,6 +43,7 @@ export function MetricsAdminClient() {
   const [cardFilter, setCardFilter] = useState<CardFilter>(null);
   const [periodFilter, setPeriodFilter] = useState('');
   const [codeQuery, setCodeQuery] = useState('');
+  const [onlyTitleAttention, setOnlyTitleAttention] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<OverviewRow | null>(null);
   const [discardPassword, setDiscardPassword] = useState('');
   const [discardPasswordError, setDiscardPasswordError] = useState('');
@@ -314,10 +315,11 @@ export function MetricsAdminClient() {
       // Checkbox only when no card filter (card filter takes priority).
       if (!cardFilter && onlyAbnormal && !row.abnormal) return false;
       if (periodFilter && row.period !== periodFilter) return false;
+      if (onlyTitleAttention && !titleHasAttentionKeyword(row.title || '')) return false;
       if (q && !overviewRowMatchesSearch(row, q)) return false;
       return true;
     });
-  }, [payload, onlyAbnormal, cardFilter, periodFilter, codeQuery]);
+  }, [payload, onlyAbnormal, cardFilter, periodFilter, codeQuery, onlyTitleAttention]);
 
   const selectableRows = useMemo(
     () => rows.filter((row) => Boolean(row.announcementId)),
@@ -572,6 +574,14 @@ export function MetricsAdminClient() {
             }}
           />
           仅异常
+        </label>
+        <label style={{ ...s.muted, display: 'inline-flex', alignItems: 'center', gap: 6, margin: 0 }}>
+          <input
+            type="checkbox"
+            checked={onlyTitleAttention}
+            onChange={(e) => setOnlyTitleAttention(e.target.checked)}
+          />
+          标题含问询/关注函等
         </label>
         <select
           style={s.input}

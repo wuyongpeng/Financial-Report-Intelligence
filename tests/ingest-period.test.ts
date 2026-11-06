@@ -106,6 +106,34 @@ test('convertible-bond and offering titles are not full financial reports', () =
   assert.equal(isFullFinancialReport('立讯精密2025年年度报告'), true);
 });
 
+test('regulatory inquiry / reply / opinion titles are not full financial reports', () => {
+  const youfang = '有方科技：关于2025年年度报告的信息披露监管问询函的回复公告';
+  assert.equal(classifyReportTitle(youfang), 'other');
+  assert.equal(isFullFinancialReport(youfang), false);
+  assert.equal(canonicalPeriodFromTitle(youfang, '2026-05-20'), null);
+
+  const pianzihuang = '漳州片仔癀药业股份有限公司关于上海证券交易所对公司2025年年度报告的信息披露监管问询函的回复公告';
+  assert.equal(classifyReportTitle(pianzihuang), 'other');
+  assert.equal(isFullFinancialReport(pianzihuang), false);
+
+  const tongwei = '通威股份有限公司独立董事关于公司2025年年度报告信息披露监管问询函有关问题的独立意见';
+  assert.equal(classifyReportTitle(tongwei), 'other');
+  assert.equal(isFullFinancialReport(tongwei), false);
+
+  assert.equal(classifyReportTitle('某某公司关于关注函的回复公告'), 'other');
+  assert.equal(classifyReportTitle('某某公司关于年报问询函涉及事项的说明函'), 'other');
+  assert.equal(isFullFinancialReport('某某公司关于2026年半年度报告的问询函的回复'), false);
+  assert.equal(isFullFinancialReport('某某公司关于2026年第一季度报告问询函的回复公告'), false);
+
+  // Real annual / quarterly titles must stay accepted
+  assert.equal(classifyReportTitle('有方科技：2025年年度报告'), 'annual');
+  assert.equal(isFullFinancialReport('有方科技：2025年年度报告'), true);
+  assert.equal(canonicalPeriodFromTitle('有方科技：2025年年度报告', '2026-04-20'), '2025FY');
+  assert.equal(isFullFinancialReport('有方科技2025年年度报告'), true);
+  assert.equal(classifyReportTitle('片仔癀2025年年度报告'), 'annual');
+  assert.equal(classifyReportTitle('通威股份2025年年度报告'), 'annual');
+});
+
 test('titleMatchesCompanyIssuer rejects subsidiary report hung on parent code', () => {
   assert.equal(
     titleMatchesCompanyIssuer('中国平安', '中国平安：平安银行股份有限公司2026年第三季度报告'),

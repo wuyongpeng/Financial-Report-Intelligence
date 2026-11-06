@@ -33,6 +33,11 @@ export function classifyReportTitle(title: string): FilingReportType {
   if (/业绩说明会|投资者说明会|主要经营数据|经营数据公告|H股公告|责任追究|管理办法|资本管理|第三支柱/.test(t)) return 'other';
   // Earnings preannouncements / flash reports (e.g. 「前三季度业绩预」) — not full filings.
   if (/业绩预[告增减盈亏]|业绩预$|业绩快报|盈利预告|亏损预告/.test(t)) return 'other';
+  // Regulatory letters / replies / opinions that mention 年度报告/年报 in the subject — not the filing itself.
+  // Must run before annual/semiannual/quarterly matching: 「…年度报告的…问询函的回复」used to become annual.
+  if (/问询函|关注函|说明函|监管函|回函/.test(t)) return 'other';
+  if (/独立意见|专项说明|核查意见|自查报告/.test(t)) return 'other';
+  if (/(?:的回复|回复公告|回复函)/.test(t) && /年度报告|(?<!半)年报|半年度报告|半年报|中期报告|季度报告|季报/.test(t)) return 'other';
   if (/半年度报告|半年报|中期报告/.test(t)) return 'semiannual';
   // Require 报告/季报 so bare 「三季度」in 业绩预 titles cannot match.
   if (/第[一二两三123]季度报告|[一二三]季度报告|[一二三]季报|Q[1-3]报告|季度报告/.test(t)) return 'quarterly';
@@ -63,6 +68,8 @@ export function titleMatchesCompanyIssuer(companyName: string, title: string) {
 export function isFullFinancialReport(title: string) {
   const t = compactTitle(title);
   if (/摘要|取消|英文版|业绩预|业绩快报/.test(t)) return false;
+  // Belt-and-suspenders: letter/reply titles must never pass even if classify drifts.
+  if (/问询函|关注函|说明函|监管函|回函|独立意见|专项说明|核查意见/.test(t)) return false;
   return classifyReportTitle(title) !== 'other';
 }
 
@@ -135,6 +142,6 @@ export function pendingDownloadSkipReason(
 }
 
 export function pendingDownloadSkipMessage(reason: PendingDownloadSkip) {
-  if (reason === 'not-report') return '非完整财报（业绩预告/快报/说明会/经营数据/摘要/债券或增发等），跳过下载';
+  if (reason === 'not-report') return '非完整财报（问询函/关注函/回复/独立意见/业绩预告/快报/说明会/经营数据/摘要/债券或增发等），跳过下载';
   return '同期货报已从其他来源入库，跳过重复下载';
 }
