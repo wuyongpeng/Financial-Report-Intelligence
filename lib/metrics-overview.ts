@@ -126,15 +126,24 @@ export function isAbsurdYoyPct(pct: number | null | undefined): boolean {
   return pct != null && Number.isFinite(pct) && Math.abs(pct) >= ABSURD_YOY_ABS_PCT;
 }
 
+/** Same-token prior year, e.g. 2026Q3 → 2025Q3 (mirrors detail priorYear). */
+export function overviewPriorPeriodToken(period: string): string | null {
+  const year = period.match(/20\d{2}/)?.[0];
+  if (!year) return null;
+  return period.replace(year, String(Number(year) - 1));
+}
+
 export function buildMetricCell(
   metric: HeadlineMetricName,
   row: OverviewDbMetric | null | undefined,
+  crossReportPrior?: number | null,
 ): OverviewMetricCell {
   if (!row || !Number.isFinite(row.value)) return emptyCell(metric);
 
   const yoy: ResolvedYoy | undefined = resolveYoy(row.value, {
     disclosedPrior: row.prior_value,
     disclosedYoyPct: row.yoy_pct,
+    crossReportPrior: crossReportPrior ?? null,
     metric,
   });
   const yoyText = formatYoyBadge(yoy, 1);
@@ -259,8 +268,13 @@ export function buildOverviewRows(
   for (const bucket of byKey.values()) {
     const metrics = {} as Record<HeadlineMetricName, OverviewMetricCell>;
     const issueSet = new Set<OverviewIssue>();
+    const priorPeriod = overviewPriorPeriodToken(bucket.period);
+    const priorBucket = priorPeriod ? byKey.get(`${bucket.code}:${priorPeriod}`) : undefined;
     for (const metric of OVERVIEW_METRICS) {
-      const cell = buildMetricCell(metric, bucket.metrics.get(metric));
+      const priorRow = priorBucket?.metrics.get(metric);
+      const crossPrior = priorRow && Number.isFinite(priorRow.value) ? priorRow.value : null;
+      // Align with detail: disclosed first, else same filing prior-year level.
+      const cell = buildMetricCell(metric, bucket.metrics.get(metric), crossPrior);
       metrics[metric] = cell;
       for (const issue of cell.issues) issueSet.add(issue);
     }

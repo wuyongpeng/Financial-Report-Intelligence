@@ -5,6 +5,7 @@ import {
   buildMetricCell,
   buildOverviewRows,
   isAbsurdYoyPct,
+  overviewPriorPeriodToken,
   type OverviewDbMetric,
 } from '../lib/metrics-overview';
 
@@ -344,3 +345,44 @@ test('period_mismatch: title 2025半年度 without 年 does not false-flag 2025H
   assert.equal(rows[0].abnormal, false);
 });
 
+test('overviewPriorPeriodToken shifts year only', () => {
+  assert.equal(overviewPriorPeriodToken('2026Q3'), '2025Q3');
+  assert.equal(overviewPriorPeriodToken('2026H1'), '2025H1');
+  assert.equal(overviewPriorPeriodToken('2025FY'), '2024FY');
+  assert.equal(overviewPriorPeriodToken('Q3'), null);
+});
+
+test('crossReportPrior fills 暂无同比 when disclosed YoY missing (平安银行 ROE)', () => {
+  const { rows } = buildOverviewRows([
+    {
+      code: '000001', name: '平安银行', title: '平安银行：2026年三季度报告',
+      announcement_id: 'pab-2026q3', period: '2026Q3', metric: 'roe',
+      value: 2.85, unit: '%', source_page: 3, prior_value: null, yoy_pct: null,
+    },
+    {
+      code: '000001', name: '平安银行', title: '平安银行：2025年三季度报告',
+      announcement_id: 'pab-2025q3', period: '2025Q3', metric: 'roe',
+      value: 3.03, unit: '%', source_page: 3, prior_value: null, yoy_pct: null,
+    },
+    // pad other cores so row is not 缺核
+    {
+      code: '000001', name: '平安银行', title: '平安银行：2026年三季度报告',
+      announcement_id: 'pab-2026q3', period: '2026Q3', metric: 'revenue',
+      value: 1e10, unit: '元', source_page: 3, prior_value: null, yoy_pct: 3.8,
+    },
+    {
+      code: '000001', name: '平安银行', title: '平安银行：2026年三季度报告',
+      announcement_id: 'pab-2026q3', period: '2026Q3', metric: 'net_profit',
+      value: 1e9, unit: '元', source_page: 3, prior_value: null, yoy_pct: 0.2,
+    },
+    {
+      code: '000001', name: '平安银行', title: '平安银行：2026年三季度报告',
+      announcement_id: 'pab-2026q3', period: '2026Q3', metric: 'eps',
+      value: 0.7, unit: '元', source_page: 3, prior_value: null, yoy_pct: 1.4,
+    },
+  ]);
+  const row = rows.find((r) => r.period === '2026Q3');
+  assert.ok(row);
+  assert.match(row!.metrics.roe.yoyText, /下降/);
+  assert.ok(!row!.metrics.roe.yoyText.includes('暂无同比'));
+});
