@@ -125,7 +125,7 @@ export function parseAuditOpinionPages(pages: string[]): ParsedAuditOpinion {
       // 保留意见 but not 无保留意见 / 标准无保留意见
       { re: /(?<!无)(?<!标准无)保留意见/g, type: 'qualified', label: '保留意见', base: 0.66 },
       {
-        re: /标准无保留意见|(?:出具了?|发表了?)(?:了)?标准?无保留意见|无保留意见的审计报告/g,
+        re: /标准(?:的)?无保留意见|(?:出具了?|发表了?)(?:了)?标准?无保留意见|无保留意见的审计报告/g,
         type: 'unqualified',
         label: '标准无保留意见',
         base: 0.55,

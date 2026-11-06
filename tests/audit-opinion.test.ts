@@ -72,3 +72,13 @@ test('parser export still extracts metrics alongside opinion helper', () => {
   const opinion = parseAuditOpinionFromPages(pages);
   assert.equal(opinion.kind, 'standard');
 });
+
+
+test('标准的无保留意见 is clean, including formal report wording beside generic templates', () => {
+  const result = parseAuditOpinionPages([
+    '审计报告：我们认为公司财务报表公允反映财务状况，出具标准的无保留意见。',
+    '非无保留意见审计报告的说明：不适用。',
+  ]);
+  assert.equal(result.kind, 'standard');
+  assert.equal(result.type, 'unqualified');
+});

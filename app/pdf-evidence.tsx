@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const normalized = (s: string) => s.replace(/\s/g, '');
+import { measurePdfPages, normalizePdfText as normalized, pdfJumpScrollTop, pdfQuoteIndex, resolvePdfQuotePage } from '../lib/pdf/evidence-navigation';
 const SCALE = 1.5;
 const BUFFER = 4; // pages above/below viewport to keep rendered
 
@@ -13,6 +13,8 @@ type PageSlot = {
   boxes: TextBox[];
   rendered: boolean;
   error?: string;
+  paintKey?: string;
+  highlightY?: number | null;
 };
 
 type PdfProxy = Awaited<ReturnType<typeof import('unpdf').getDocumentProxy>>;
@@ -25,7 +27,7 @@ function PageCanvas({
   searchQuote,
   searchPage,
   zoom = 1,
-  onHighlightY,
+  paintKey,
   onReady,
 }: {
   pdf: PdfProxy;
@@ -36,7 +38,7 @@ function PageCanvas({
   searchPage: number;
   /** Multiplier on base pdf.js SCALE so zoom-in stays sharp. */
   zoom?: number;
-  onHighlightY: (page: number, y: number | null) => void;
+  paintKey: string;
   onReady: (page: number, patch: Partial<PageSlot>) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -47,6 +49,7 @@ function PageCanvas({
 
   useEffect(() => {
     let active = true;
+    let renderTask: { cancel: () => void } | undefined;
     const canvas = canvasRef.current;
     if (!canvas) return;
     // Already painted this slot once — keep canvas via remount avoidance; re-draw if needed.
@@ -62,7 +65,9 @@ function PageCanvas({
         canvas.height = viewport.height;
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('no 2d');
-        await source.render({ canvas, canvasContext: ctx, viewport }).promise;
+        const task = source.render({ canvas, canvasContext: ctx, viewport });
+        renderTask = task;
+        await task.promise;
         if (!active) return;
         const content = await source.getTextContent();
         if (!active) return;
@@ -73,21 +78,20 @@ function PageCanvas({
           const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
           const h = Math.max(Math.abs(item.height) * viewport.scale, 8);
           const w = Math.max(Math.abs(item.width) * viewport.scale, 4);
-          nextBoxes.push({ str: item.str, left: x, top: y - h, width: w, height: h * 1.25 });
+          nextBoxes.push({ str: item.str, left: x / zoomSafe, top: (y - h) / zoomSafe, width: w / zoomSafe, height: h * 1.25 / zoomSafe });
         }
         let firstHighlightY: number | null = null;
         const full = items.map((item) => normalized(item.str)).join('');
-        const paintHits = (rawNeedle: string, color: string, recordY: boolean) => {
-          const needle = normalized(rawNeedle);
+        const paintHits = (rawNeedle: string, color: string, recordY: boolean, cite = false) => {
+          const fullNeedle = normalized(rawNeedle);
+          const needle = cite && pdfQuoteIndex(full, fullNeedle) < 0 ? fullNeedle.slice(0, 40) : fullNeedle;
           if (!needle) return;
-          const at = full.indexOf(needle);
+          const at = pdfQuoteIndex(full, needle, cite);
           let offset = 0;
           ctx.fillStyle = color;
           for (const item of items) {
             const str = normalized(item.str);
-            const hit = at >= 0
-              ? offset < at + needle.length && offset + str.length > at
-              : str.length >= 2 && needle.includes(str);
+            const hit = at >= 0 && offset < at + needle.length && offset + str.length > at;
             offset += str.length;
             if (!hit) continue;
             const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
@@ -101,14 +105,13 @@ function PageCanvas({
         const citeActive = Boolean(highlightQuote && slot.page === highlightPage);
         const searchActive = Boolean(searchQuote && slot.page === searchPage);
         if (searchActive) paintHits(searchQuote, 'rgba(48, 100, 219, 0.28)', !citeActive);
-        if (citeActive) paintHits(highlightQuote, 'rgba(255, 194, 38, 0.35)', true);
+        if (citeActive) paintHits(highlightQuote, 'rgba(255, 194, 38, 0.35)', true, true);
         if (!active) return;
         setBoxes(nextBoxes);
-        onHighlightY(slot.page, firstHighlightY);
         onReady(slot.page, {
-          width: viewport.width,
-          height: viewport.height,
           boxes: nextBoxes,
+          paintKey,
+          highlightY: firstHighlightY,
           rendered: true,
           error: undefined,
         });
@@ -117,25 +120,26 @@ function PageCanvas({
         if (!active) return;
         setError('本页暂时无法渲染');
         setBusy(false);
-        onReady(slot.page, { rendered: true, error: '本页暂时无法渲染' });
+        onReady(slot.page, { rendered: true, error: '本页暂时无法渲染', paintKey, highlightY: null });
       }
     })();
-    return () => { active = false; };
+    return () => { active = false; renderTask?.cancel(); };
     // Re-render when cite/search highlight or zoom changes — not when toolbar page follows scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdf, slot.page, zoom, highlightQuote, highlightQuote ? highlightPage : 0, searchQuote, searchQuote ? searchPage : 0]);
+  }, [pdf, slot.page, zoom, highlightQuote, highlightQuote ? highlightPage : 0, searchQuote, searchQuote ? searchPage : 0, paintKey]);
 
   const w = slot.width > 0 ? slot.width : 1;
   const h = slot.height > 0 ? slot.height : 1;
 
   return (
     <div className="cd-pdf-page cd-pdf-page-continuous" data-pdf-page={slot.page} aria-busy={busy}>
-      {busy && !slot.rendered && <p className="cd-pdf-page-status">正在渲染 PDF 第 {slot.page} 页…</p>}
-      {error && <p className="cd-pdf-page-status" role="status">{error}</p>}
-      <div className="cd-pdf-stage" style={{ width: '100%', display: error && !slot.rendered ? 'none' : 'block' }}>
+      <div className="cd-pdf-stage" style={{ width: '100%', aspectRatio: `${w} / ${h}` }}>
+        {/* Status must not change slot height while a page paints. */}
+        {(busy || error) && <p className="cd-pdf-page-status" role="status" style={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none' }}>{error || `正在渲染 PDF 第 ${slot.page} 页…`}</p>}
         <canvas
           ref={canvasRef}
           className="cd-pdf-canvas"
+          style={{ position: 'absolute', inset: 0 }}
           aria-label={`PDF 第 ${slot.page} 页${highlightQuote && slot.page === highlightPage ? '，黄色区域为引用原文' : ''}${searchQuote && slot.page === searchPage ? '，蓝色区域为页内搜索命中' : ''}`}
         />
         <div
@@ -184,30 +188,28 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
   const [slots, setSlots] = useState<PageSlot[]>([]);
   const [visible, setVisible] = useState<Set<number>>(() => new Set([page]));
   const [shifted, setShifted] = useState<number | null>(null);
-  const highlightY = useRef<{ page: number; y: number } | null>(null);
+  const [pendingJump, setPendingJump] = useState<{ reportId: string; nonce: number; target: number } | null>(null);
+  const resolvingJump = useRef(true);
+  // Tag a shift to its jump: it can never leak into a later request.
+  const [shiftNonce, setShiftNonce] = useState(jumpNonce);
+  if (shiftNonce !== jumpNonce) {
+    setShiftNonce(jumpNonce);
+    setShifted(null);
+  }
   const resolveRef = useRef(onResolvePage);
   const pickRef = useRef(onTextPick);
   const visiblePageRef = useRef(onVisiblePage);
   const pageRef = useRef(page);
   const shiftedRef = useRef(shifted);
   const quoteRef = useRef(quote);
-  const citeKey = useRef('');
   const suppressVisibleUntil = useRef(0);
   const lastReportedPage = useRef<number | null>(null);
-  const lockedCitePage = useRef(page);
-  const jumpSigRef = useRef(`${jumpNonce}::${shifted ?? 'none'}`);
-  pageRef.current = page;
-  shiftedRef.current = shifted;
-  quoteRef.current = quote;
-  // Lock paint page on intentional jump / shift only — quote-only pre-highlight keeps current page.
-  const jumpSig = `${jumpNonce}::${shifted ?? 'none'}`;
-  if (jumpSigRef.current !== jumpSig) {
-    jumpSigRef.current = jumpSig;
-    lockedCitePage.current = shifted ?? page;
-  } else if (!shifted) {
-    // Stay aligned with toolbar page while reader scrolls (paint-without-jump).
-    lockedCitePage.current = page;
-  }
+  // Event/async readers follow toolbar state, without using refs to drive rendering.
+  useEffect(() => {
+    pageRef.current = page;
+    shiftedRef.current = shifted;
+    quoteRef.current = quote;
+  }, [page, shifted, quote]);
   const [docKey, setDocKey] = useState(reportId);
   if (reportId !== docKey) {
     setDocKey(reportId);
@@ -232,7 +234,6 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
     let active = true;
     let dispose: (() => void) | undefined;
     const abort = new AbortController();
-    highlightY.current = null;
     void (async () => {
       try {
         const { getDocumentProxy } = await import('unpdf');
@@ -242,23 +243,17 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
         dispose = () => { void proxy.loadingTask.destroy(); };
         if (!active) { dispose(); return; }
         const total = proxy.numPages;
-        // Probe first page for default aspect; placeholders use A4-ish ratio until measured.
-        let defaultW = 595 * SCALE;
-        let defaultH = 842 * SCALE;
-        try {
-          const first = await proxy.getPage(1);
-          if (!active) return;
-          const vp = first.getViewport({ scale: SCALE });
-          defaultW = vp.width;
-          defaultH = vp.height;
-        } catch { /* keep defaults */ }
+        // Page metadata is cheap; canvas rendering stays virtualized. Measuring only
+        // page 1 made offscreen placeholders differ from mounted pages (e.g. covers).
+        const sizes = await measurePdfPages(total, async (pageNo) => {
+          if (!active) throw new Error('cancelled');
+          const source = await proxy.getPage(pageNo);
+          const vp = source.getViewport({ scale: SCALE });
+          return { width: vp.width, height: vp.height };
+        });
         if (!active) return;
-        const next: PageSlot[] = Array.from({ length: total }, (_, i) => ({
-          page: i + 1,
-          width: defaultW,
-          height: defaultH,
-          boxes: [],
-          rendered: false,
+        const next: PageSlot[] = sizes.map((size, i) => ({
+          page: i + 1, ...size, boxes: [], rendered: false,
         }));
         setNumPages(total);
         setSlots(next);
@@ -281,43 +276,20 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
     if (!pdf || !numPages) return;
     let active = true;
     const requested = pageRef.current;
-    const key = String(jumpNonce);
-    if (citeKey.current === key) {
-      const around = shiftedRef.current ?? requested;
-      const id = window.setTimeout(() => {
-        if (!active) return;
-        setVisible((prev) => {
-          const next = new Set(prev);
-          for (let p = Math.max(1, around - BUFFER); p <= Math.min(numPages, around + BUFFER); p++) next.add(p);
-          return next;
-        });
-      }, 0);
-      return () => { active = false; window.clearTimeout(id); };
-    }
-    citeKey.current = key;
+    resolvingJump.current = true;
+    suppressVisibleUntil.current = Infinity;
     void (async () => {
-      const needle = normalized(quoteRef.current).slice(0, 40);
-      const candidates = needle.length >= 4
-        ? [requested, requested - 1, requested + 1, requested - 2, requested + 2].filter((p, i, all) => p >= 1 && p <= numPages && all.indexOf(p) === i)
-        : [Math.min(Math.max(1, requested), numPages)];
-      let target = Math.min(Math.max(1, requested), numPages);
-      for (const candidate of candidates) {
-        try {
-          const source = await pdf.getPage(candidate);
-          if (!active) return;
-          const content = await source.getTextContent();
-          const list = content.items.filter((item): item is Extract<typeof item, { str: string }> => 'str' in item);
-          const full = list.map((item) => normalized(item.str)).join('');
-          if (full.includes(needle) || candidates.length === 1) { target = candidate; break; }
-        } catch { /* try next */ }
-      }
+      const target = await resolvePdfQuotePage(requested, numPages, quoteRef.current, async (candidate) => {
+        if (!active) throw new Error('cancelled');
+        const source = await pdf.getPage(candidate);
+        const content = await source.getTextContent();
+        return content.items.filter((item): item is Extract<typeof item, { str: string }> => 'str' in item)
+          .map((item) => item.str).join('');
+      });
       if (!active) return;
-      if (target !== requested) {
-        setShifted(target);
-        resolveRef.current?.(target);
-      } else {
-        setShifted(null);
-      }
+      setShifted(target !== requested ? target : null);
+      setPendingJump({ reportId, nonce: jumpNonce, target });
+      resolveRef.current?.(target);
       setVisible((prev) => {
         const next = new Set(prev);
         for (let p = Math.max(1, target - BUFFER); p <= Math.min(numPages, target + BUFFER); p++) next.add(p);
@@ -325,7 +297,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
       });
     })();
     return () => { active = false; };
-  }, [pdf, numPages, jumpNonce]);
+  }, [pdf, numPages, jumpNonce, reportId]);
 
   // Track ALL currently intersecting slots. IO only reports deltas — rebuilding from
   // the latest batch alone unmounts on-screen pages and paints the gray placeholders.
@@ -339,7 +311,7 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
     intersectingRef.current = new Set();
 
     const reportVisible = () => {
-      if (Date.now() < suppressVisibleUntil.current) return;
+      if (resolvingJump.current || Date.now() < suppressVisibleUntil.current) return;
       const live = intersectingRef.current;
       if (!live.size) return;
       const rootRect = root.getBoundingClientRect();
@@ -417,41 +389,32 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
     // unmounts offscreen pages and the viewport jumps up while the wheel is moving.
   }, [numPages, slots.length]);
 
-  // Scroll into view only for intentional jumps (jumpNonce) or quote-resolve page shift.
-  // Do NOT depend on `quote` alone — ask() pre-highlight paints without yanking the viewport.
-  const scrollJumpRef = useRef(jumpNonce);
-  const scrollShiftRef = useRef(shifted);
+  const paintKey = `${reportId}:${jumpNonce}:${zoom}:${quote}:${searchQuote}:${searchQuote ? searchPage : 0}:${quote ? (shifted ?? page) : 0}`;
+  // One transaction: resolve final page -> mount/paint it -> committed geometry ->
+  // one instant scroll. Never scroll requested first, or race a 60ms timer against PDF.js.
   useEffect(() => {
-    if (busy || error || !slots.length) return;
-    const jumpChanged = scrollJumpRef.current !== jumpNonce;
-    const shiftChanged = scrollShiftRef.current !== shifted;
-    scrollJumpRef.current = jumpNonce;
-    scrollShiftRef.current = shifted;
-    if (!jumpChanged && !shiftChanged) return;
-    const focus = shifted ?? pageRef.current;
-    const timer = window.setTimeout(() => {
+    if (!pendingJump || pendingJump.reportId !== reportId || pendingJump.nonce !== jumpNonce) return;
+    const slot = slots[pendingJump.target - 1];
+    if (!slot || slot.paintKey !== paintKey) return;
+    const frame = requestAnimationFrame(() => {
       const stack = stackRef.current;
       const scroller = stack?.closest('.cd-source-scroll');
       if (!(scroller instanceof HTMLElement) || !stack) return;
-      const node = stack.querySelector<HTMLElement>(`.cd-pdf-slot[data-pdf-page="${focus}"]`);
+      const node = stack.querySelector<HTMLElement>(`.cd-pdf-slot[data-pdf-page="${pendingJump.target}"]`);
       if (!node) return;
-      suppressVisibleUntil.current = Date.now() + 800;
-      const hy = highlightY.current;
-      if (hy && hy.page === focus && hy.y !== null) {
-        const canvas = node.querySelector('canvas');
-        if (canvas && canvas.height > 0) {
-          const scale = canvas.clientHeight / canvas.height;
-          const canvasTop = canvas.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-          const target = canvasTop + hy.y * scale - scroller.clientHeight * 0.32;
-          scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
-          return;
-        }
-      }
-      const top = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - 12;
-      scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-    }, 60);
-    return () => window.clearTimeout(timer);
-  }, [busy, error, shifted, jumpNonce, slots.length]);
+      const canvas = node.querySelector('canvas');
+      const hasHighlight = slot.highlightY != null && canvas && canvas.height > 0;
+      const anchor = hasHighlight ? canvas : node;
+      const top = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const y = hasHighlight ? slot.highlightY! * canvas.clientHeight / canvas.height : null;
+      scroller.scrollTo({ top: pdfJumpScrollTop(top, scroller.clientHeight, y), behavior: 'auto' });
+      lastReportedPage.current = pendingJump.target;
+      resolvingJump.current = false;
+      suppressVisibleUntil.current = Date.now() + 200;
+      setPendingJump(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingJump, reportId, jumpNonce, slots, paintKey]);
 
   // Text-layer划词 → parent pick bar (delegation on stack).
   useEffect(() => {
@@ -483,11 +446,6 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
 
   const onReady = useCallback((pageNo: number, patch: Partial<PageSlot>) => {
     setSlots((prev) => prev.map((s) => (s.page === pageNo ? { ...s, ...patch } : s)));
-  }, []);
-
-  const onHighlightY = useCallback((pageNo: number, y: number | null) => {
-    if (y === null) return;
-    highlightY.current = { page: pageNo, y };
   }, []);
 
   if (error) {
@@ -523,17 +481,17 @@ export default function PdfEvidence({ reportId, page, quote, jumpNonce = 0, sear
                 pdf={pdf}
                 slot={slot}
                 highlightQuote={quote}
-                highlightPage={quote ? (shifted ?? lockedCitePage.current) : 0}
+                highlightPage={quote ? (shifted ?? page) : 0}
                 searchQuote={searchQuote}
                 searchPage={searchQuote ? searchPage : 0}
                 zoom={zoomSafe}
-                onHighlightY={onHighlightY}
+                paintKey={paintKey}
                 onReady={onReady}
               />
             ) : (
               <div
                 className="cd-pdf-placeholder"
-                style={{ aspectRatio: slot.width && slot.height ? `${slot.width} / ${slot.height}` : '210 / 297' }}
+                style={{ aspectRatio: slot.width && slot.height ? `${slot.width} / ${slot.height}` : '210 / 297', minHeight: 0 }}
                 aria-hidden="true"
               />
             )}
