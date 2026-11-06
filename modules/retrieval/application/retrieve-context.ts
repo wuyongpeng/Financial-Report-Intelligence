@@ -298,20 +298,24 @@ export async function retrieveContext(input: {
   const fallback = decision.directAnswer ?? (plan.outOfScope
     ? outOfScopeReply(plan.outOfScopeKind)
     : (() => {
-      const scopedFacts = plan.metricNames.length && !plan.needsHistory && !plan.needsPeers
+      // Default: only current-report facts. Peers/history lines only when explicitly needed.
+      const scopedFacts = (!plan.needsHistory && !plan.needsPeers)
         ? factLines.filter(fact => fact.metric.reportId === input.reportId)
-        : factLines;
-      const factCap = plan.needsPeers ? 24 : (plan.metricNames.length ? 6 : 0);
-      const passageCap = plan.metricNames.length ? 3 : 6;
+        : plan.needsPeers
+          ? factLines
+          : factLines.filter(fact => reportById.get(fact.metric.reportId)?.code === target.code);
+      const factCap = plan.needsPeers ? 12 : (plan.metricNames.length || plan.needsHistory ? 6 : 0);
+      const passageCap = plan.metricNames.length ? 3 : 4;
+      const currentPassages = passages.filter(p => p.reportId === input.reportId);
       const lines = [
-        scopedFacts.length || passages.length
+        scopedFacts.length || currentPassages.length
           ? (scopedFacts.length
             ? '当前返回可核验的数据与原文摘录，尚未完成 AI 归纳：'
             : '当前返回与问题相关的原文摘录，尚未完成 AI 归纳：')
           : '暂无法回答：当前报告中没有足够的已解析指标或原文证据。',
         ...scopedFacts.slice(0, factCap).map(fact => fact.line),
-        ...(plan.wantsChangeCalculation ? calculations : []),
-        ...passages.slice(0, passageCap).map(passage => `${passage.quote}【${passage.id}】`),
+        ...(plan.wantsChangeCalculation ? calculations.slice(0, 4) : []),
+        ...currentPassages.slice(0, passageCap).map(passage => `${passage.quote}【${passage.id}】`),
       ].filter(Boolean);
       return lines.join('\n');
     })());

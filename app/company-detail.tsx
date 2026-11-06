@@ -27,10 +27,8 @@ import { clientUuid } from '@/lib/client-uuid';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import {
   clampAttributionTitle,
-  depthAttributionLead,
   expandAttributionModulePool,
   industryAttributionModules,
-  industrySkillUserFacing,
   selectDisplayAttributionModules,
 } from '@/lib/industry-skills-ui';
 import { isCanonicalPeriod } from '@/lib/ingest-period';
@@ -240,17 +238,6 @@ async function waitForParsedReport(code: string, id: string, signal: AbortSignal
 }
 
 
-function industrySkillBadge(industry: string | null | undefined) {
-  const skillUi = industrySkillUserFacing(industry);
-  if (!skillUi) return null;
-  // Always show a unified label; hover carries the industry-specific lead.
-  return (
-    <span className="cd-industry-skill-badge" title={depthAttributionLead(industry)}>
-      产业视角
-    </span>
-  );
-}
-
 export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null, preferredCite = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null; preferredCite?: { page: number; quote: string } | null }) {
   const [reports, setReports] = useState<Report[]>([initialReport]);
   const [selected, setSelected] = useState(initialReport);
@@ -291,9 +278,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [sourceMode, setSourceMode] = useState<'pdf' | 'text'>('pdf');
   const [metric, setMetric] = useState<HeadlineMetric>('revenue');
   const [overlay, setOverlay] = useState<HeadlineMetric | null>(null);
-  const [expanded, setExpanded] = useState<string[]>([]);
-  /** 深度归因默认展开，可点标题折叠。 */
-  const [depthOpen, setDepthOpen] = useState(true);
   const [focused, setFocused] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState('');
@@ -355,6 +339,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const sourceRef = useRef<HTMLDivElement>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  /** When false, user scrolled up — do not auto-pin to bottom until they return near bottom or send a new ask. */
+  const chatStickRef = useRef(true);
+  const typewriterTimerRef = useRef<number | null>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const asrSessionRef = useRef<AsrSession | null>(null);
   const pcmCaptureRef = useRef<PcmCapture | null>(null);
@@ -395,7 +382,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setMessages([]); setQuestion('');
     activeId.current = report.id;
     setSelected(report); onSelect(report.id); clearPendingSelection(); setPick(null); setOverviewPick(null); setAsking(false); setBaselineId(null);
-    setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setExpanded([]); setDepthOpen(false); setFocused(null);
+    setOutline(emptyOutline); setAnalysis({}); setSourcePage(1); setPdfJumpNonce(0); setHighlight(''); setCitedMetric(null); setFocused(null);
     setPdfSearch(''); setPdfSearchHits([]); setPdfSearchOpen(false); setSearchHighlight(null);
     setVerdict(null); setVerdictStatus('loading'); setVerdictError('');
   }
@@ -624,13 +611,34 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   // and never when the user has scrolled up to read earlier content.
   const chatPinKey = messages.map((m) => `${m.role}\0${m.text}`).join('\n');
   useEffect(() => {
-    if (!messages.length) return;
+    const root = chatScrollRef.current;
+    if (!root) return;
+    const onScroll = () => {
+      const distance = root.scrollHeight - root.scrollTop - root.clientHeight;
+      if (distance > 96) chatStickRef.current = false;
+      else chatStickRef.current = true;
+    };
+    const onUserScrollIntent = () => {
+      const distance = root.scrollHeight - root.scrollTop - root.clientHeight;
+      if (distance > 48) chatStickRef.current = false;
+    };
+    root.addEventListener('scroll', onScroll, { passive: true });
+    root.addEventListener('wheel', onUserScrollIntent, { passive: true });
+    root.addEventListener('touchmove', onUserScrollIntent, { passive: true });
+    return () => {
+      root.removeEventListener('scroll', onScroll);
+      root.removeEventListener('wheel', onUserScrollIntent);
+      root.removeEventListener('touchmove', onUserScrollIntent);
+    };
+  }, []);
+  useEffect(() => {
+    if (!messages.length || !chatStickRef.current) return;
     const root = chatScrollRef.current;
     if (root) {
-      const distance = root.scrollHeight - root.scrollTop - root.clientHeight;
-      if (distance > 120) return;
+      root.scrollTop = root.scrollHeight;
+    } else {
+      chatEnd.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
     }
-    chatEnd.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [chatPinKey, messages.length]);
   useEffect(() => {
     if (regenMenu == null) return;
@@ -1176,7 +1184,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   function answerSources(message: Message) {
     return uniqueAnswerSources(message.text, message.citations, pageLabel);
   }
-  function focusModule(id: string) { if (sourceDrawerOpen) closeSource(); setDepthOpen(true); setExpanded(e => e.includes(id) ? e : [...e,id]); setFocused(id); setMobilePane('dashboard'); window.setTimeout(() => document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 80); }
+  function focusModule(id: string) { if (sourceDrawerOpen) closeSource(); setFocused(id); setMobilePane('dashboard'); window.setTimeout(() => document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 80); }
   useEffect(() => { sourcePageRef.current = sourcePage; }, [sourcePage]);
   useEffect(() => {
     return () => {
@@ -2341,6 +2349,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const asked = prior.filter(m => m.role === 'user' && !m.local).map(m => m.ask?.question ?? m.text);
     const slot = replacing != null ? replacing : messages.length + 1;
     setAsking(true); setThinking(false);
+    chatStickRef.current = true;
+    if (typewriterTimerRef.current != null) { window.clearInterval(typewriterTimerRef.current); typewriterTimerRef.current = null; }
     if (replacing == null) {
       setQuestion(''); setClips([]); clearPendingSelection(); setPick(null);
       setMessages(m => [...m, { role:'user', text:display, ask:{ question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(attachNote ? { attachNote } : {}) } }, { role:'assistant', text:'' }]);
@@ -2349,11 +2359,46 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     const targetModule = moduleForQuestion(assembled); if (targetModule) focusModule(targetModule);
     let answer = '';
+    let revealed = '';
     let lastEvidence: Citation[] | undefined;
+    const clearTypewriter = () => {
+      if (typewriterTimerRef.current != null) {
+        window.clearInterval(typewriterTimerRef.current);
+        typewriterTimerRef.current = null;
+      }
+    };
+    const paint = (citations?: Citation[], force = false) => {
+      if (citations) lastEvidence = citations;
+      if (activeId.current !== id) return;
+      if (!force && controller.signal.aborted) return;
+      const cites = citations ?? lastEvidence;
+      setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:revealed, ...(cites ? { citations: cites } : {}) } : item));
+    };
+    const ensureTypewriter = () => {
+      if (typewriterTimerRef.current != null) return;
+      // ~45 CJK chars/sec with small bursts — smoother than raw SSE chunk dumps.
+      typewriterTimerRef.current = window.setInterval(() => {
+        if (revealed.length >= answer.length) {
+          clearTypewriter();
+          return;
+        }
+        const lag = answer.length - revealed.length;
+        const step = lag > 80 ? 6 : lag > 24 ? 3 : 1;
+        revealed = answer.slice(0, revealed.length + step);
+        paint();
+      }, 22);
+    };
     function update(citations?: Citation[]) {
       if (citations) lastEvidence = citations;
       if (activeId.current !== id || controller.signal.aborted) return;
-      setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:answer, ...(citations ? { citations } : {}) } : item));
+      // Voice: show full text immediately so TTS is not delayed. Typed chat uses typewriter rhythm.
+      if (voiceSpeakRef.current || voiceConvRef.current) {
+        revealed = answer;
+        paint(citations);
+      } else {
+        ensureTypewriter();
+        if (citations) paint(citations);
+      }
       // Voice session: jump to the first citation as soon as evidence appears (same path as [Pxx] chip).
       if (
         citations
@@ -2409,6 +2454,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       }
     }
     finally {
+      // Finish revealing any buffered tokens before leaving the streaming state.
+      clearTypewriter();
+      if (activeId.current === id && answer && revealed !== answer) {
+        revealed = answer;
+        paint(lastEvidence, true);
+      }
       if (activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
     }
     if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
@@ -2800,28 +2851,20 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             {overlay&&overlay!==metric&&<p className="cd-note">虚线为{labels[overlay]}，已按首期指数化到与{labels[metric]}同一刻度，只反映相对变化速度，不能读绝对值。</p>}
           </section>
 
-          <section className={`cd-more-analysis${depthOpen ? '' : ' cd-more-collapsed'}`} id="cd-more">
+          <section className="cd-more-analysis" id="cd-more">
             <div className="cd-more-title">
-              <button
-                type="button"
-                className="cd-more-toggle"
-                aria-expanded={depthOpen}
-                aria-controls="cd-more-body"
-                onClick={() => setDepthOpen((v) => !v)}
-              >
-                <div>
-                  <p className="cd-brief-kicker">深度归因{industrySkillBadge(selected.industry)} <span className="cd-more-chevron" aria-hidden="true">{depthOpen ? '▾' : '▸'}</span></p>
-                </div>
-              </button>
+              <div>
+                <p className="cd-brief-kicker">深度归因</p>
+              </div>
             </div>
-            {depthOpen && <div id="cd-more-body" className="cd-more-body">
+            <div id="cd-more-body" className="cd-more-body">
             {depthModuleDefs.map((def,index)=>{
               const id = def.id;
               const label = moduleLabel(id);
               const headline = moduleHeadline(id);
               const hasBody = moduleHasBody(id);
               const compact = industryDepthMode || compactModuleIds.has(id);
-              const open = !compact && expanded.includes(id);
+              // Always expanded — no fold/collapse for 深度归因 modules.
               const moduleQuote = [label, headline.text].filter(Boolean).join('：') || label;
               return <section
                 id={`cd-${id}`}
@@ -2843,39 +2886,23 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                   </div>
                 ) : (
                   <>
-                    <div
-                      className="cd-module-toggle"
-                      role="button"
-                      tabIndex={0}
-                      aria-expanded={open}
-                      aria-controls={`cd-content-${id}`}
-                      onClick={(e) => {
-                        if (e.detail > 1) return;
-                        setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-                        }
-                      }}
-                    >
+                    <div className="cd-module-static">
                       <span className="cd-module-number">0{index+1}</span>
                       <div>
                         <h3>{label}</h3>
                         {headline.text ? <p className="cd-module-conclusion">{renderModuleCites(headline.text, headline.sourceRef)}</p> : null}
                       </div>
                     </div>
-                    {open && <div className="cd-module-content" id={`cd-content-${id}`}>
+                    <div className="cd-module-content" id={`cd-content-${id}`}>
                       {!hasBody && !headline.text && <p className="cd-module-empty">本期该维度披露有限</p>}
                       {!industryDepthMode && id==='history' && history.length >= 2 && <div className="cd-table-scroll"><table><thead><tr><th>报告期</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{history.map(r=><tr key={r.id}><th><button onClick={()=>selectReport(r)}>{period(r)}</button></th>{metricNames.map(m=><td key={m}>{format(value(r,m),m)}</td>)}</tr>)}</tbody></table></div>}
                       {!industryDepthMode && id==='peers' && peerCodes.length > 0 && <><p className="cd-note">仅比较 {period(selected)} 同类型已入库报告，不是完整行业排名。</p><div className="cd-table-scroll"><table><thead><tr><th>公司</th>{metricNames.map(m=><th key={m}>{labels[m]}</th>)}</tr></thead><tbody>{peerCodes.map(code=><tr key={code} className={code===selected.code?'cd-self':''}><th>{peers.find(p=>p.code===code)?.company_name}{code===selected.code?' · 本公司':''}</th>{metricNames.map(m=><td key={m}>{format(peers.find(p=>p.code===code&&p.metric===m)?.value,m)}</td>)}</tr>)}</tbody></table></div></>}
-                    </div>}
+                    </div>
                   </>
                 )}
               </section>;
             })}
-            </div>}
+            </div>
           </section>
 
           <p className="cd-data-note">结论带原文，数据有出处</p>

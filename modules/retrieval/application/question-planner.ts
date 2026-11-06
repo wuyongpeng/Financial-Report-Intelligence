@@ -10,7 +10,8 @@ import {
 } from '../domain/retrieval';
 
 export function wantsCompanyHistory(query: string) {
-  return /同比|环比|上年|去年|前年|历年|历史|趋势|过去|变化|增长|下降|对比|比较|业绩|好不好|好吗|怎样|怎么样|如何|今年|改善|下滑|亮眼|疲软|20\d{2}/.test(query);
+  // Bare years (2026) alone must NOT pull cross-period dumps — focus clips / titles often contain them.
+  return /同比|环比|上年|去年|前年|历年|历史|趋势|过去|变化|增长|下降|对比|比较|业绩|好不好|好吗|怎样|怎么样|如何|今年|改善|下滑|亮眼|疲软/.test(query);
 }
 
 export function wantsPeerCompare(query: string) {
@@ -97,12 +98,26 @@ export function mentionedCompanyCodes(
       found.add(row.code);
       continue;
     }
-    if (nameVariants(row.companyName).some(variant => variant.length >= 2 && query.includes(variant))) {
+    // Prefer longer variants; skip short stems that are substrings of the *current* company name
+    // (e.g. 「平安」 inside 「平安银行」 must not pull 中国平安).
+    const currentName = companies.find(c => c.code === currentCode)?.companyName ?? '';
+    if (nameVariants(row.companyName).some(variant => {
+      if (variant.length < 2 || !query.includes(variant)) return false;
+      if (currentName && currentName.includes(variant) && variant !== row.companyName) return false;
+      return true;
+    })) {
       found.add(row.code);
     }
   }
-  for (const [alias, official] of Object.entries(WELL_KNOWN_ALIASES)) {
+  // Longest alias first so 「平安银行」wins over 「平安」.
+  for (const alias of Object.keys(WELL_KNOWN_ALIASES).sort((a, b) => b.length - a.length)) {
     if (!query.includes(alias)) continue;
+    // Skip if a longer alias that contains this one also matches (平安 ⊂ 平安银行).
+    const shadowed = Object.keys(WELL_KNOWN_ALIASES).some(
+      other => other !== alias && other.length > alias.length && other.includes(alias) && query.includes(other),
+    );
+    if (shadowed) continue;
+    const official = WELL_KNOWN_ALIASES[alias];
     const hit = companies.find(row => row.companyName === official || row.companyName.includes(official));
     if (hit && hit.code !== currentCode) found.add(hit.code);
   }
@@ -114,8 +129,12 @@ const INVESTMENT_SCOPE = /买入|卖出|推荐股票|预测.*股价|明天.*股�
 
 /** Which model / provider — answer from config, never from report metrics. */
 export function isMetaModelQuestion(question: string) {
-  const q = question.trim();
-  if (!q) return false;
+  const raw = question.trim();
+  if (!raw) return false;
+  // If focus framing was mistakenly glued on, judge the trailing user ask.
+  const q = raw.includes('当前用的哪个') || raw.includes('大语言模型') || raw.includes('什么模型')
+    ? raw
+    : raw.replace(/^用户在财报pdf中圈定并关注的信息有[\s\S]*?[。.]/, '').trim() || raw;
   if (/大语言模型|语言模型|底层模型|AI\s*模型|\bLLM\b/i.test(q)) return true;
   if (/\b(?:GPT|Claude|Gemini|DeepSeek)\b/i.test(q)) return true;
   if (/(?:哪个|什么).{0,8}(?:大)?模型/.test(q)) return true;

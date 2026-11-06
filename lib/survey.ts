@@ -15,7 +15,7 @@ export const B2_OPTIONS = ['很顺', '一般', '费劲', '没找到想看的公�
 export const B3_OPTIONS = ['分不清', '大致懂', '很清楚'] as const;
 /** Q4 体验后对财报是否更清楚 */
 export const B4_OPTIONS = ['清楚很多', '有一些', '没变化', '更糊涂了'] as const;
-/** Q5 回答里的角标 */
+/** Q5 追问栏里的角标 */
 export const B5_OPTIONS = [
   '点过,有帮助',
   '点过,一般',

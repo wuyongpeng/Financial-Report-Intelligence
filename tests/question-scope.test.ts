@@ -186,3 +186,22 @@ test('missing finance lexicon alone does not force soft-scope footer', () => {
   assert.equal(Boolean(plan.softScopeHint), false);
   assert.equal(isClearOffTopicQuestion('高铁怎么买票'), false);
 });
+
+
+test('focus framing glued onto meta-model still classifies as meta-model', () => {
+  const polluted = '用户在财报pdf中圈定并关注的信息有“证券代码：000001 证券简称：平安银行”。当前用的哪个大语言模型';
+  assert.equal(isMetaModelQuestion(polluted), true);
+  const plan = planQuestion({
+    question: polluted,
+    history: [],
+    watched: [
+      { code: '000001', companyName: '平安银行' },
+      { code: '601318', companyName: '中国平安' },
+    ],
+    currentCode: '000001',
+  });
+  assert.equal(plan.outOfScope, true);
+  assert.equal(plan.outOfScopeKind, 'meta-model');
+  assert.equal(plan.needsPeers, false);
+  assert.equal(plan.needsHistory, false);
+});
