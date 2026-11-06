@@ -105,7 +105,7 @@ test('probeVoiceGateways prefers VOICE_API_KEY and reports safe key shape', asyn
   assert.equal(report.ok, false);
   assert.equal(calls.length, 2);
   assert.ok(calls.every((c) => c.apiKey === voiceSecret));
-  assert.ok(report.entryHint.includes('WebSocket'));
+  assert.equal(report.entryHint, '');
   const dumped = JSON.stringify(report);
   assert.equal(dumped.includes(voiceSecret), false);
   assert.equal(dumped.includes(llmSecret), false);

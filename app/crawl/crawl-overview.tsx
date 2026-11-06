@@ -2609,12 +2609,6 @@ export default function CrawlOverview() {
                       <span className="co-llm-probe-host">{voiceProbe.tts.host}</span>
                       <em>{voiceProbe.tts.ok ? `正常 · ${voiceProbe.tts.ms}ms` : (voiceProbe.tts.error || '异常')}</em>
                     </li>
-                    {voiceProbe.asr.ok && voiceProbe.tts.ok && voiceProbe.entryHint ? (
-                      <li>
-                        <b>入口提示</b>
-                        <em>{voiceProbe.entryHint}</em>
-                      </li>
-                    ) : null}
                   </ul>
                 ) : null}
               </section>

@@ -21,8 +21,7 @@ export async function GET() {
       apiKeyLength: apiKey.length,
       asr: { host: voiceWsHost(resolveVoiceAsrUrl()) },
       tts: { host: voiceWsHost(resolveVoiceTtsUrl()) },
-      entryHint:
-        '上游探测成功但浏览器仍失败时，多为入口（APISIX/Caddy）未放行 /api/voice/* 的 WebSocket Upgrade',
+      entryHint: '',
     },
     { headers: { 'cache-control': 'no-store' } },
   );

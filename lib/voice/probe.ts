@@ -204,7 +204,6 @@ export async function probeVoiceGateways(opts?: {
     apiKeyLength,
     asr,
     tts,
-    entryHint:
-      '上游探测成功但浏览器仍失败时，多为入口（APISIX/Caddy）未放行 /api/voice/* 的 WebSocket Upgrade',
+    entryHint: '',
   };
 }
