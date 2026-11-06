@@ -1115,24 +1115,20 @@ export default function ReportHome() {
           e.preventDefault();
           if (submitting) return;
           const typed = search.trim();
-          const placeholderAsk = activePlaceholder?.trim() || '';
-          // Empty box + rotating recommend: send the placeholder question.
-          const payload = typed || placeholderAsk;
-          if (!payload) return;
+          if (!typed) return;
           // While listening, treat the box as the utterance (lets user correct ASR).
           if (voiceListening) {
-            voice.setPartial(typed || payload);
+            voice.setPartial(typed);
             voice.finalizeListen();
             return;
           }
           if (voice.active && searchEditedDuringVoiceRef.current) {
             searchEditedDuringVoiceRef.current = false;
             voice.setSuppressAutoListen(false);
-            void onSearchSubmit(payload, { fromVoice: true, fromPlaceholder: !typed });
+            void onSearchSubmit(typed, { fromVoice: true });
             return;
           }
-          if (!typed) setSearch(payload);
-          void onSearchSubmit(payload, { fromPlaceholder: !typed });
+          void onSearchSubmit(typed);
         }}
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
@@ -1245,33 +1241,20 @@ export default function ReportHome() {
               </button>
             );
           }
-          // Empty box: keep voice, and offer one-click send for the rotating recommend.
           return (
-            <>
-              <button
-                className="rh-search-submit rh-search-voice"
-                type="button"
-                aria-label="语音提问"
-                title="语音提问"
-                onClick={() => {
-                  searchEditedDuringVoiceRef.current = false;
-                  voice.setSuppressAutoListen(false);
-                  void voice.start();
-                }}
-              >
-                {waveGlyph}
-              </button>
-              {activePlaceholder?.trim() ? (
-                <button
-                  className="rh-search-submit rh-search-send"
-                  type="submit"
-                  aria-label="发送推荐问题"
-                  title="发送推荐问题"
-                >
-                  {sendGlyph}
-                </button>
-              ) : null}
-            </>
+            <button
+              className="rh-search-submit rh-search-voice"
+              type="button"
+              aria-label="语音提问"
+              title="语音提问"
+              onClick={() => {
+                searchEditedDuringVoiceRef.current = false;
+                voice.setSuppressAutoListen(false);
+                void voice.start();
+              }}
+            >
+              {waveGlyph}
+            </button>
           );
         })()}
       </form>
