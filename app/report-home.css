@@ -52,8 +52,16 @@
 .rh-chip.active{background:#334155;border-color:#334155;color:#f8fafc;font-weight:600}
 .rh-chip.active:hover{background:#1e293b;border-color:#1e293b;color:#fff}
 .rh-toolbar-right{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
-.rh-sort{display:flex;align-items:center;gap:8px;color:#7b8aa0;font-size:12px}
-.rh-sort select{border:1px solid #e2e8f2;background:#fff;border-radius:8px;padding:0 8px;height:32px;color:#35506f;font-size:12px}
+.rh-sort{display:flex;align-items:center;gap:8px;color:#7b8aa0;font-size:12px;flex:none;min-width:0}
+.rh-sort>span{flex:none;white-space:nowrap}
+.rh-sort select{
+  border:1px solid #e2e8f2;background:#fff;border-radius:8px;
+  height:32px;color:#35506f;font-size:12px;line-height:30px;
+  /* Fit 「添加时间」+ native chevron without stretching the toolbar. */
+  width:auto;min-width:6.75em;max-width:9.5em;
+  padding:0 22px 0 10px;box-sizing:border-box;
+  white-space:nowrap;text-overflow:clip;
+}
 .rh-view-toggle{display:inline-flex;border:1px solid #e2e8f2;border-radius:8px;overflow:hidden;background:#fff;height:32px}
 .rh-view-btn{border:0;background:transparent;color:#64748b;padding:0 8px;height:32px;display:grid;place-items:center;line-height:0}
 .rh-view-btn:hover{background:#f1f5f9;color:#334155}
