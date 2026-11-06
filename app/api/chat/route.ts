@@ -12,6 +12,7 @@ import { loadRagContext } from '@/lib/rag';
 import { generateAnswer } from '@/lib/answer';
 import { assembleFocusPrompt, focusContextBlock } from '@/lib/focus-prompt';
 import { recordClientAudit } from '@/lib/client-audit';
+import { resolveAuditReportMeta } from '@/lib/client-audit-report';
 
 export const dynamic = 'force-dynamic';
 const encoder = new TextEncoder();
@@ -35,22 +36,28 @@ export async function POST(request: Request) {
       const turn = await beginTurn(guest.owner, conversationId, reportId, requestId, question);
       history = turn.history; replay = turn.replay;
       if (!replay) lease = { owner: guest.owner, conversationId, requestId };
-      void recordClientAudit({
-        eventType: 'ask',
-        ownerKey: guest.owner,
-        reportId,
-        conversationId,
-        requestId,
-        question: input.question,
-        path: '/api/chat',
-        detail: {
-          rewrite: input.rewrite ?? null,
-          spoken: Boolean(input.spoken),
-          focusCount: focus.length,
-          streamed: Boolean(input.stream),
-          replay: Boolean(replay),
-        },
-      }, request);
+      void (async () => {
+        const reportMeta = await resolveAuditReportMeta(reportId);
+        await recordClientAudit({
+          eventType: 'ask',
+          ownerKey: guest.owner,
+          reportId,
+          companyCode: reportMeta.companyCode,
+          conversationId,
+          requestId,
+          question: input.question,
+          path: '/api/chat',
+          detail: {
+            rewrite: input.rewrite ?? null,
+            spoken: Boolean(input.spoken),
+            focusCount: focus.length,
+            streamed: Boolean(input.stream),
+            replay: Boolean(replay),
+            period: reportMeta.period,
+            reportType: reportMeta.reportType,
+          },
+        }, request);
+      })();
     }
     const context = replay ? null : await loadRagContext(reportId, question, history, input.summary);
     if (context && focus.length) {

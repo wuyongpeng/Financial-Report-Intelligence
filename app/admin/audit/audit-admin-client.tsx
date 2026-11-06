@@ -58,6 +58,15 @@ function detailSummary(ev: AuditEvent) {
   return bits.length ? bits.join(' · ') : '—';
 }
 
+function companyCell(ev: AuditEvent) {
+  const d = ev.detail || {};
+  const period = typeof d.period === 'string' && d.period.trim() ? d.period.trim() : '';
+  if (ev.company_code && period) return `${ev.company_code} · ${period}`;
+  if (ev.company_code) return ev.company_code;
+  if (period) return period;
+  return '—';
+}
+
 export function AuditAdminClient() {
   const session = useAdminSession();
   const [eventType, setEventType] = useState('');
@@ -105,6 +114,7 @@ export function AuditAdminClient() {
       fmtTime(ev.created_at),
       EVENT_LABEL[ev.event_type] ?? ev.event_type,
       ev.event_type,
+      companyCell(ev),
       ev.company_code,
       ev.ip,
       ev.owner_key,
@@ -203,7 +213,7 @@ export function AuditAdminClient() {
               <tr key={ev.id}>
                 <td style={s.td}>{fmtTime(ev.created_at)}</td>
                 <td style={s.td}>{EVENT_LABEL[ev.event_type] ?? ev.event_type}</td>
-                <td style={s.td}>{ev.company_code || '—'}</td>
+                <td style={s.td}>{companyCell(ev)}</td>
                 <td style={s.td} title={ev.owner_key ?? undefined}>{ev.ip || '—'}</td>
                 <td style={{ ...s.td, maxWidth: 320 }} title={ev.question ?? undefined}>{short(ev.question, 100)}</td>
                 <td style={{ ...s.td, maxWidth: 220 }} title={detailSummary(ev)}>{short(detailSummary(ev), 60)}</td>
