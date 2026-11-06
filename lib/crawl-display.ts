@@ -103,6 +103,8 @@ export type CrawlCompanyCoverage = {
   latestExpectedMissing?: boolean;
   popularity: number;
   rank: number;
+  /** companies.created_at — when added to the watch pool */
+  addedAt: string | null;
 };
 
 export type CrawlStats = {

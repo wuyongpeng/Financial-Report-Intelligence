@@ -68,6 +68,7 @@ test('matchCompany by name and code', () => {
       metrics: [{ metric: 'revenue', label: '营业收入', value: 1, unit: '元' }],
       recentPeriods: ['2026H1', '2025FY'],
       popularity: 100,
+      addedAt: null,
       rank: 16,
     },
   ] as CrawlCompanyCoverage[];

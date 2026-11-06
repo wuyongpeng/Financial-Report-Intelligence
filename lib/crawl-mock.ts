@@ -157,6 +157,7 @@ function buildCoverage(): CrawlCompanyCoverage[] {
       recentPeriods: covered ? pickRecentPeriods([reportPeriod, '2025FY', '2025H1'].filter(Boolean)) : [],
       popularity: company.weight,
       rank: company.rank,
+      addedAt: minutesAgoIso(lastMinutes + company.rank * 3),
     };
   });
 }

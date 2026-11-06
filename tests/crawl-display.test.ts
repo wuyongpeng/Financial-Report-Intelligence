@@ -46,6 +46,7 @@ function company(partial: Partial<CrawlCompanyCoverage> & Pick<CrawlCompanyCover
     metrics: [],
     recentPeriods: ['2026H1'],
     popularity: 1,
+    addedAt: null,
     rank: 1,
     ...partial,
   };

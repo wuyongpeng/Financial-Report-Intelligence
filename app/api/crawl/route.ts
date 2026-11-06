@@ -107,9 +107,9 @@ export async function GET() {
     await ensureBackendSchema();
     const db = getDb();
     const companies = await db<Array<{
-      code: string; name: string; exchange: 'SSE' | 'SZSE'; industry: string; rank: number; weight: number;
+      code: string; name: string; exchange: 'SSE' | 'SZSE'; industry: string; rank: number; weight: number; created_at: string | null;
     }>>`
-      SELECT code, name, exchange, industry, rank, weight
+      SELECT code, name, exchange, industry, rank, weight, created_at
       FROM companies WHERE enabled=true ORDER BY rank, code
     `;
     if (!companies.length) {
@@ -357,6 +357,7 @@ export async function GET() {
         latestExpectedMissing: periodBuilt.latestExpectedMissing,
         popularity: company.weight,
         rank: company.rank,
+        addedAt: company.created_at ?? null,
       };
     });
 

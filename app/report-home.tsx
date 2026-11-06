@@ -67,7 +67,7 @@ import {
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
 
-type SortMode = 'default' | 'popular';
+type SortMode = 'default' | 'popular' | 'added';
 type ViewMode = 'grid' | 'list';
 type ListSortKey = 'name' | 'code' | 'industry' | 'revenue' | 'net_profit' | 'eps' | 'yoy' | 'updatedAt' | 'status';
 type ListSortDir = 'asc' | 'desc';
@@ -568,6 +568,12 @@ export default function ReportHome() {
       });
     } else if (sortMode === 'popular') {
       rows.sort((a, b) => Number(hasReadableMetrics(b)) - Number(hasReadableMetrics(a)) || Number(isConnected(b)) - Number(isConnected(a)) || b.popularity - a.popularity || a.rank - b.rank);
+    } else if (sortMode === 'added') {
+      rows.sort((a, b) => {
+        const at = a.addedAt ? new Date(a.addedAt).getTime() : 0;
+        const bt = b.addedAt ? new Date(b.addedAt).getTime() : 0;
+        return bt - at || a.rank - b.rank || a.code.localeCompare(b.code);
+      });
     } else {
       rows.sort((a, b) => Number(hasReadableMetrics(b)) - Number(hasReadableMetrics(a)) || Number(isConnected(b)) - Number(isConnected(a)) || a.rank - b.rank || a.code.localeCompare(b.code));
     }
@@ -1310,6 +1316,7 @@ export default function ReportHome() {
                 >
                   <option value="default">默认</option>
                   <option value="popular">热门</option>
+                  <option value="added">添加时间</option>
                 </select>
               </label>
               <div className="rh-view-toggle" role="group" aria-label="视图切换">

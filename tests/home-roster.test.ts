@@ -42,6 +42,7 @@ function fakeCompany(partial: Partial<CrawlCompanyCoverage> & { code: string; na
     metrics: partial.metrics ?? [{ metric: 'revenue', value: 1, unit: '元', period: '2026H1' } as never],
     recentPeriods: partial.recentPeriods ?? ['2026H1'],
     popularity: partial.popularity ?? 1,
+    addedAt: partial.addedAt ?? null,
     rank: partial.rank ?? 1,
     latestExpectedMissing: partial.latestExpectedMissing,
     ...partial,
