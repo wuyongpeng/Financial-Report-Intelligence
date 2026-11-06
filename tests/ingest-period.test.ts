@@ -13,6 +13,13 @@ test('yearFromTitleOrDate accepts space before 年', () => {
   assert.equal(yearFromTitleOrDate('无年份标题', new Date('2024-08-01T00:00:00.000Z')), '2024');
 });
 
+test('yearFromTitleOrDate: 2025半年度 without 年 keeps 2025 (not publish-year fallback)', () => {
+  assert.equal(yearFromTitleOrDate('工商银行2025半年度报告', '2026-08-30'), '2025');
+  assert.equal(periodFromTitle('工商银行2025半年度报告', null), '2025H1');
+  assert.equal(canonicalPeriodFromTitle('工商银行2025半年度报告', null), '2025H1');
+  assert.equal(periodFromTitle('工商银行2026半年度报告', '2026-08-30'), '2026H1');
+});
+
 test('periodFromTitle with Date publishedAt does not throw', () => {
   assert.equal(periodFromTitle('某某公司2026 年半年度报告', new Date('2026-08-20')), '2026H1');
   assert.equal(periodFromTitle('某某公司2025年年度报告', '2026-04-01T00:00:00.000Z'), '2025FY');

@@ -319,3 +319,28 @@ test('buildOverviewRows flags period_mismatch and deep-links by title period', (
   assert.equal(rows[0].href, '/300760?period=2026Q1');
   assert.ok(summary.abnormal >= 1);
 });
+
+test('period_mismatch: title 2025半年度 without 年 does not false-flag 2025H1 metrics', () => {
+  const base = {
+    code: '601398',
+    name: '工商银行',
+    title: '工商银行2025半年度报告',
+    announcement_id: 'icbc-2025h1',
+    period: '2025H1',
+    unit: '元',
+    source_page: 1,
+    prior_value: null,
+    yoy_pct: 5,
+  } as const;
+  const { rows } = buildOverviewRows([
+    { ...base, metric: 'revenue', value: 4.27e11 },
+    { ...base, metric: 'net_profit', value: 1e11 },
+    { ...base, metric: 'eps', value: 0.5 },
+    { ...base, metric: 'roe', value: 10 },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.ok(!rows[0].issues.includes('period_mismatch'));
+  assert.deepEqual(rows[0].issues, []);
+  assert.equal(rows[0].abnormal, false);
+});
+

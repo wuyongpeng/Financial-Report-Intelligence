@@ -6,10 +6,13 @@ export function asIsoDate(value: unknown): string {
   return String(value);
 }
 
-/** Accept "2026年" and "2026 年"; fall back to published date year. */
+/** Accept "2026年" / "2026 年" / "2025半年度" (year digits without 年); else published date year. */
 export function yearFromTitleOrDate(title: string, publishedAt: unknown): string {
   const iso = asIsoDate(publishedAt);
-  return title.match(/(20\d{2})\s*年/)?.[1] ?? iso.slice(0, 4);
+  const fromTitle =
+    title.match(/(20\d{2})\s*年/)?.[1]
+    ?? title.match(/(20\d{2})\s*(?:半年度|半年报|中期报告|第[一二三两123]季度|[一二三]季度|[一二三]季报|Q[1-3]|年度报告|(?<!半)年报)/)?.[1];
+  return fromTitle ?? iso.slice(0, 4);
 }
 
 export type FilingReportType = 'annual' | 'semiannual' | 'quarterly' | 'other';
