@@ -50,7 +50,7 @@ test('audit risk mirrors banner: standard/quarterly unknown are blue; switching 
   assert.deepEqual(reports.map(hasReportAuditRisk), [true, false, false, false, false]);
 });
 
-test('eye movement has a 22-unit cap with progressive movement outside the icon', () => {
+test('eye movement has a 24-unit cap with progressive movement outside the icon', () => {
   const rect = { left: 10, top: 20, width: 100, height: 200 };
   assert.deepEqual(blobEyeOffset(52.5, 107.5, 85, 75, rect), { x: 0, y: 0 });
   const offset = blobEyeOffset(10000, -10000, 85, 75, rect);
@@ -110,4 +110,38 @@ test('rendered 44px avatar tracks left/right/up/down and keeps changing across t
   assert.ok(blobEyeOffset(x - 250, y, 52, 69, rect).x < -5);
   assert.ok(blobEyeOffset(x, y - 250, 52, 69, rect).y < -5);
   assert.ok(blobEyeOffset(x, y + 250, 52, 69, rect).y > 5);
+});
+
+
+test('right-edge response is visible from the avatar itself, including after dragging', () => {
+  const viewport = { width: 1440, height: 900 };
+  for (const rect of [
+    { left: 1120, top: 82, width: 44, height: 44 },
+    { left: 1380, top: 82, width: 44, height: 44 },
+    { left: 180, top: 500, width: 40, height: 40 },
+  ]) {
+    for (const eye of VOICE_EYES) {
+      const ex = rect.left + eye.x * rect.width / 200;
+      const ey = rect.top + eye.y * rect.height / 200;
+      const right = blobEyeOffset(1439, ey, eye.x, eye.y, rect, viewport);
+      assert.ok(right.x * rect.width / 200 > 2.5, JSON.stringify({ rect, right }));
+      assert.equal(right.y, 0);
+      const above = blobEyeOffset(ex, ey - 80, eye.x, eye.y, rect, viewport);
+      assert.ok(above.y < -8 && above.x === 0);
+      const diagonal = blobEyeOffset(ex + 80, ey + 120, eye.x, eye.y, rect, viewport);
+      assert.ok(Math.abs(diagonal.x * 120 - diagonal.y * 80) < 1e-8, 'translation keeps exact screen direction');
+    }
+  }
+});
+
+test('all tilted pill eyes remain inside the 96-unit body over the full travel envelope', () => {
+  // A 15x35 rounded capsule is the 20-unit line segment plus a 7.5 radius disk.
+  const angle = -9 * Math.PI / 180;
+  for (const eye of VOICE_EYES) {
+    for (const y of [-10, 10]) {
+      const x0 = eye.x - y * Math.sin(angle);
+      const y0 = eye.y + y * Math.cos(angle);
+      assert.ok(Math.hypot(x0 - 100, y0 - 100) + 7.5 + VOICE_EYE_TRAVEL < 96);
+    }
+  }
 });

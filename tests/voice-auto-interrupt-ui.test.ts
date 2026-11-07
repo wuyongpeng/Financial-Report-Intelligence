@@ -10,7 +10,9 @@ test('voice float has automatic-interrupt copy without a manual interrupt button
   assert.ok(!float.includes('onBargeIn'));
   assert.ok(!float.includes('说话或点「打断」'));
   assert.ok(float.includes('onClick={onEnd}'));
-  assert.ok(float.includes('onClick={onFinalize}'));
+  assert.ok(!float.includes('onFinalize') && !float.includes('说完了'));
+  assert.ok(float.includes('aria-label="结束语音"'));
+  assert.ok(float.includes('尽管提问，停顿即发送'));
   assert.ok(float.includes('onClick={onCancelArm}'));
 });
 

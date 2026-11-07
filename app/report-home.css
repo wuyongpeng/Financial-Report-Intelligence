@@ -28,8 +28,12 @@
 .rh-home-answer p{margin:0;font-size:14px;line-height:1.7;color:#334155;white-space:pre-wrap}
 .rh-home-answer-dismiss{position:absolute;top:10px;right:10px;border:0;background:transparent;color:#8494ab;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;padding:0}
 .rh-home-answer-dismiss:hover{background:#e2eaf8;color:#475569}
-.rh-eva-dock{position:fixed;top:72px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:flex-end;gap:10px;max-width:calc(100vw - 24px)}
-.rh-eva-capsule{display:flex;align-items:center;gap:16px;padding:10px 12px;background:#fff;border:1px solid #e8edf3;border-radius:999px;box-shadow:0 6px 24px #24344c12,0 1px 3px #24344c08}
+.rh-eva-dock{box-sizing:border-box;width:max-content;max-height:calc(100dvh - 16px);position:fixed;top:72px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:stretch;gap:0;max-width:calc(100vw - 24px)}
+.rh-eva-dock.is-active{overflow:hidden;background:#fff;border:1px solid #e8edf3;border-radius:999px;box-shadow:0 6px 24px #24344c12,0 1px 3px #24344c08}
+.rh-eva-dock.is-active:has(.rh-eva-notice){border-radius:28px}
+.rh-eva-dock.is-active .rh-eva-notice{max-width:none;max-height:25dvh;overflow:auto;flex-shrink:0;border:0;border-top:1px solid #edf0f4;border-radius:0;box-shadow:none}
+.rh-eva-dock.is-open{width:min(420px,calc(100vw - 24px));border-radius:28px}
+.rh-eva-capsule{touch-action:none;cursor:grab;flex-shrink:0;display:flex;align-items:center;gap:16px;padding:10px 12px;justify-content:space-between;background:transparent;border:0;box-shadow:none}
 .rh-home button.rh-eva-activity-toggle{display:flex;align-items:center;gap:12px;border:0;padding:0;background:transparent;text-align:left;color:#64748b;border-radius:999px}
 .rh-eva-status{font-size:12px;white-space:nowrap;min-width:5em}
 .rh-eva-controls{display:flex;gap:8px;align-items:center}
@@ -44,9 +48,10 @@
   .rh-eva-status{position:absolute;width:1px;height:1px;min-width:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .rh-eva-dock .eva-voice-wave{width:70px;gap:3px}
   .rh-eva-dock .eva-voice-blob{width:40px;height:40px}
+  .rh-eva-dock .rh-eva-panel{border-top:0;border-bottom:1px solid #edf0f4}
 }
-.rh-eva-panel{width:min(360px,calc(100vw - 24px));max-height:min(420px,55dvh);display:flex;flex-direction:column;background:#fff;border:1px solid #d4e2ff;border-radius:16px;box-shadow:0 12px 32px #24344c1f;overflow:hidden}
-.rh-eva-panel-log{overflow:auto;padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
+.rh-eva-panel{flex-shrink:1;min-height:0;width:100%;max-height:min(420px,55dvh);display:flex;flex-direction:column;background:transparent;border:0;border-top:1px solid #edf0f4;border-radius:0;box-shadow:none;overflow:hidden}
+.rh-eva-panel-log{min-height:0;overflow:auto;padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
 .rh-eva-panel-log p{margin:0;font-size:13px;line-height:1.55;white-space:pre-wrap}
 .rh-eva-panel-log .is-user{align-self:flex-end;max-width:92%;background:#f4f7fb;color:#334155;border-radius:12px 12px 4px 12px;padding:8px 10px}
 .rh-eva-panel-log .is-eva{align-self:flex-start;max-width:92%;background:#eef4ff;color:#1e3a5f;border-radius:12px 12px 12px 4px;padding:8px 10px}

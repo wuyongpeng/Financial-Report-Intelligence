@@ -1,11 +1,8 @@
 /** Geometry measured against the supplied circular avatar reference. */
 export const VOICE_EYES = [{ x: 52, y: 69 }, { x: 101, y: 59 }] as const;
-export const VOICE_EYE_TRAVEL = 22;
+export const VOICE_EYE_TRAVEL = 24;
 
-/**
- * Locate the eye in rendered CSS pixels. Broad viewport-relative response avoids
- * saturating immediately outside a tiny icon; result is converted to SVG travel.
- */
+/** True direction from the rendered eye, with faster response near a viewport edge. */
 export function blobEyeOffset(x: number, y: number, eyeX: number, eyeY: number,
   rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
   viewport = { width: 1000, height: 800 },
@@ -14,12 +11,19 @@ export function blobEyeOffset(x: number, y: number, eyeX: number, eyeY: number,
   if (!(scale > 0) || !Number.isFinite(x) || !Number.isFinite(y)) return { x: 0, y: 0 };
   const centerX = rect.left + (rect.width - 200 * scale) / 2 + eyeX * scale;
   const centerY = rect.top + (rect.height - 200 * scale) / 2 + eyeY * scale;
-  const rangeX = Math.max(240, rect.width * 5, viewport.width * 0.55);
-  const rangeY = Math.max(200, rect.height * 5, viewport.height * 0.55);
-  const dx = Math.tanh((x - centerX) / rangeX) * VOICE_EYE_TRAVEL;
-  const dy = Math.tanh((y - centerY) / rangeY) * VOICE_EYE_TRAVEL;
-  const factor = Math.min(1, VOICE_EYE_TRAVEL / (Math.hypot(dx, dy) || 1));
-  return { x: dx * factor, y: dy * factor };
+  const dx = x - centerX;
+  const dy = y - centerY;
+  const distance = Math.hypot(dx, dy);
+  if (!distance) return { x: 0, y: 0 };
+  const ux = dx / distance;
+  const uy = dy / distance;
+  // Ray from this eye to the viewport edge, not displacement from viewport center.
+  const edgeX = ux > 0 ? (viewport.width - centerX) / ux : ux < 0 ? -centerX / ux : Infinity;
+  const edgeY = uy > 0 ? (viewport.height - centerY) / uy : uy < 0 ? -centerY / uy : Infinity;
+  const edge = Math.max(0, Math.min(edgeX, edgeY));
+  const range = Math.max(24, Math.min(180, edge * 0.22));
+  const travel = VOICE_EYE_TRAVEL * distance / (distance + range);
+  return { x: ux * travel, y: uy * travel };
 }
 
 /** Per-mounted SVG only: no global IDs/script, listeners/timers/rAF fully released. */

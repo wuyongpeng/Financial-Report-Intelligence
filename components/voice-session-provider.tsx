@@ -55,8 +55,8 @@ type VoiceSessionApi = {
   setUtteranceHandler: (handler: VoiceUtteranceHandler | null) => void;
   /** Lexicon context for ASR homophone rewrite (company/industry/hotwords). */
   setAsrCorrectContext: (ctx: AsrCorrectContext | null) => void;
-  /** Optional float head chrome (e.g. detail auto-jump checkbox). */
-  setFloatHeadExtra: (node: ReactNode | null) => void;
+  /** Optional float footer chrome (e.g. detail auto-jump checkbox). */
+  setFloatFooterExtra: (node: ReactNode | null) => void;
   setSpeaking: (v: boolean) => void;
   setBusy: (v: boolean) => void;
   setPartial: (text: string) => void;
@@ -130,7 +130,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const suppressAutoListenRef = useRef(false);
   /** True while finalizeListen is waiting on ASR flush — block heal auto-listen. */
   const finalizingRef = useRef(false);
-  const [floatHeadExtra, setFloatHeadExtraState] = useState<ReactNode | null>(null);
+  const [floatFooterExtra, setFloatFooterExtraState] = useState<ReactNode | null>(null);
   const listenTurnRef = useRef<(barge?: boolean) => Promise<void>>(async () => undefined);
   const bargeRef = useRef<{ onInterrupt: () => void; accept?: (text: string) => boolean } | null>(null);
   const bargeArmedRef = useRef(false);
@@ -557,8 +557,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     suppressAutoListenRef.current = v;
   }, []);
 
-  const setFloatHeadExtra = useCallback((node: ReactNode | null) => {
-    setFloatHeadExtraState(node);
+  const setFloatFooterExtra = useCallback((node: ReactNode | null) => {
+    setFloatFooterExtraState(node);
   }, []);
 
   useEffect(() => {
@@ -618,7 +618,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     end,
     setUtteranceHandler,
     setAsrCorrectContext,
-    setFloatHeadExtra,
+    setFloatFooterExtra,
     setSpeaking: setSpeakingState,
     setBusy: setBusyState,
     setPartial,
@@ -633,7 +633,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     clearToast: () => setToast(null),
   }), [
     active, listening, speaking, busy, arming, partial, toast,
-    start, end, setUtteranceHandler, setAsrCorrectContext, setFloatHeadExtra,
+    start, end, setUtteranceHandler, setAsrCorrectContext, setFloatFooterExtra,
     setPartial, setSuppressAutoListen, stopMic, resumeListen, armBargeIn, finalizeListen, cancelArmedSend,
   ]);
 
@@ -656,12 +656,11 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
           hint={arming
             ? '即将发送，点取消可重说'
             : active && !listening && !speaking && !busy
-              ? '说出公司名称、代码或问题；停顿即发送'
+              ? '尽管提问，停顿即发送'
               : undefined}
           onEnd={() => end()}
           onCancelArm={arming ? () => cancelArmedSend() : undefined}
-          onFinalize={listening && !arming ? () => finalizeListen({ userInitiated: true }) : undefined}
-          headExtra={floatHeadExtra}
+          footerExtra={floatFooterExtra}
         />
       ) : null}
       {toast && !hideFloat ? (

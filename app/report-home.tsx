@@ -1,4 +1,6 @@
 'use client';
+import { shouldExpandHomeVoicePanel } from '@/lib/voice/home-panel';
+import { useVoiceFloatDrag } from '@/components/use-voice-float-drag';
 import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
@@ -315,6 +317,7 @@ export default function ReportHome() {
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [personalizedQuestions, setPersonalizedQuestions] = useState<string[]>([]);
   const voice = useVoiceSession();
+  const voiceDockRef = useVoiceFloatDrag(voice.active || Boolean(voice.toast));
   const voiceListening = voice.listening;
   const coverageRef = useRef(coverage);
   coverageRef.current = coverage;
@@ -417,6 +420,7 @@ export default function ReportHome() {
   }
 
   function endHomeVoice() {
+    setVoicePanelOpen(false);
     clearHomeResumeTimers();
     homeVoiceTurnsRef.current.cancel();
     homeSpeakingTextRef.current = '';
@@ -455,6 +459,7 @@ export default function ReportHome() {
     const pushTurn = (role: 'user' | 'assistant', content: string) => {
       appendHomeChatTurn(role, content);
       setVoiceTurns(getHomeChatTurns());
+      if (shouldExpandHomeVoicePanel(role, content, homeVoiceApiRef.current.active)) setVoicePanelOpen(true);
     };
     const speakLine = async (line: string) => {
       const spoken = sanitizeHomeAssistantText(line) || line.trim();
@@ -542,14 +547,11 @@ export default function ReportHome() {
         const compact = text.replace(/\s+/g, '');
         const fillerOnly = /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact);
         if (!fillerOnly) {
-          setVoicePanelOpen(true);
           pushTurn('user', text);
           await speakLine(homeGreetingNudge());
         }
         return { action: 'resume' };
       }
-      // A real utterance (not 嗯/啊) opens the history; the logo click folds it back.
-      setVoicePanelOpen(true);
       // Route the completed utterance first; partial ASR never mutates the user's filter.
       searchEditedDuringVoiceRef.current = false;
       voice.setBusy(true);
@@ -565,6 +567,7 @@ export default function ReportHome() {
       return { action: 'resume' };
     };
     const handler = async (text: string): Promise<VoiceUtteranceResult> => {
+      if (shouldExpandHomeVoicePanel('user', text, homeVoiceApiRef.current.active)) setVoicePanelOpen(true);
       const turn = homeVoiceTurnsRef.current.begin();
       homeSpeakingTextRef.current = '';
       try {
@@ -605,6 +608,7 @@ export default function ReportHome() {
         if (homeMountedRef.current && !homeVoiceApiRef.current.active) {
           setSubmitting(false);
           setDialogBusy(false);
+          setVoicePanelOpen(false);
         }
       });
     }
@@ -1044,6 +1048,7 @@ export default function ReportHome() {
   function pushTurn(role: 'user' | 'assistant', content: string) {
     appendHomeChatTurn(role, content);
     setVoiceTurns(getHomeChatTurns());
+    if (shouldExpandHomeVoicePanel(role, content, homeVoiceApiRef.current.active)) setVoicePanelOpen(true);
   }
 
   async function deliverHomeAnswer(answer: string, opts?: { fromVoice?: boolean }) {
@@ -1884,6 +1889,7 @@ export default function ReportHome() {
               aria-label="语音提问"
               title="语音提问"
               onClick={() => {
+                setVoicePanelOpen(false); // A fresh session never unfolds old history.
                 searchEditedDuringVoiceRef.current = false;
                 voice.setSuppressAutoListen(false);
                 void voice.start();
@@ -2469,8 +2475,9 @@ export default function ReportHome() {
         </div>
       )}
       {(voice.active || voice.toast) && (
-        <div className={`rh-eva-dock${voicePanelOpen ? ' is-open' : ''}`}>
-          {voice.active && <div className="rh-eva-capsule">
+        <div ref={voiceDockRef} className={`rh-eva-dock${voice.active ? ' is-active' : ''}${voicePanelOpen ? ' is-open' : ''}`}>
+          {voice.active && <div className="rh-eva-capsule" data-voice-drag-surface="" title="拖动可移动位置">
+            <span className="eva-voice-drag-handle" aria-hidden="true">⠿</span>
             <button
               type="button"
               className="rh-eva-activity-toggle"
@@ -2493,7 +2500,7 @@ export default function ReportHome() {
           </div>}
           {voice.toast ? <div className="rh-eva-notice" role="alert">{voice.toast}</div> : null}
           {voice.active && voicePanelOpen ? (
-            <div id="rh-eva-conversation" className="rh-eva-panel" role="dialog" aria-label="语音对话">
+            <div id="rh-eva-conversation" className="rh-eva-panel" role="region" aria-label="语音对话">
               <div className="rh-eva-panel-log">
                 {voiceTurns.length === 0 ? (
                   <p className="rh-eva-panel-empty">但说无妨...</p>
