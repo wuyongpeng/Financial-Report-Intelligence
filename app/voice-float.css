@@ -16,14 +16,8 @@
 .eva-voice-sphere{position:relative;display:grid;place-items:center;width:44px;height:44px;flex:none;overflow:hidden;border-radius:50%;background:radial-gradient(circle at 32% 25%,#70bdff 0%,#318cf7 48%,#2465da 100%);box-shadow:inset 0 0 0 1px #ffffff30,inset -3px -5px 12px #1e58c42b}
 .eva-voice-sphere>span{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffffff70,transparent 70%);transform:translate(-6px,-6px)}
 .eva-voice-wave{height:32px;width:92px;display:flex;align-items:center;justify-content:center;gap:4px}
-.eva-voice-wave i{display:block;width:4px;flex:none;border-radius:999px;background:currentColor;transform:scaleY(.55);opacity:.6}
-.eva-voice-activity.is-listening .eva-voice-wave i{animation:eva-voice-wave 1.8s ease-in-out infinite;animation-delay:var(--wave-delay)}
-.eva-voice-activity.is-speaking .eva-voice-wave i{animation:eva-voice-wave 1.25s ease-in-out infinite;animation-delay:var(--wave-delay)}
-.eva-voice-activity.is-thinking .eva-voice-wave i{transform:scaleY(.3);animation:eva-voice-think 2.4s ease-in-out infinite;animation-delay:var(--wave-delay)}
+.eva-voice-wave i{display:block;width:4px;flex:none;border-radius:999px;background:currentColor;transition:height 70ms linear,opacity 70ms linear}
 .eva-voice-activity.is-arming{color:#c58b32}
-.eva-voice-activity.is-idle .eva-voice-wave i{transform:scaleY(.25);opacity:.4}
-@keyframes eva-voice-wave{0%,100%{transform:scaleY(.55);opacity:.6}50%{transform:scaleY(.9);opacity:1}}
-@keyframes eva-voice-think{0%,100%{opacity:.3}50%{opacity:.8}}
 .eva-voice-float{box-sizing:border-box;width:min(520px,calc(100vw - 24px));min-width:0;padding:14px 16px;border-color:#e8edf3;box-shadow:0 6px 24px #24344c12}
 .eva-voice-float-head{flex-wrap:wrap}
 .eva-voice-float-text{overflow-wrap:anywhere;max-height:25vh;overflow:auto}
@@ -32,4 +26,4 @@
 .eva-voice-float-actions button:first-child{background:#eb3047;border-color:#eb3047;color:#fff}
 .eva-voice-float-actions button:focus-visible{outline:3px solid #82aaff;outline-offset:3px}
 @media(max-width:600px){.eva-voice-float{bottom:calc(12px + env(safe-area-inset-bottom,0px))}.eva-voice-float-head{gap:8px}.eva-voice-float-head .eva-voice-wave{width:70px;gap:3px}}
-@media(prefers-reduced-motion:reduce){.eva-voice-activity .eva-voice-wave i{animation:none!important;transform:scaleY(.65)}.rh-eva-control{transition:none!important}}
+@media(prefers-reduced-motion:reduce){.eva-voice-activity .eva-voice-wave i{transition:none!important}.rh-eva-control{transition:none!important}}

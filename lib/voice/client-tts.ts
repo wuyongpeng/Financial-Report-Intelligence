@@ -1,4 +1,5 @@
 import { speakableText } from './speakable';
+import { trackPlaybackLevel } from './client-playback-level';
 
 function voiceWsUrl(path: string) {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -12,6 +13,7 @@ type ActivePlayback = {
   done: boolean;
   /** True once MP3 blob is ready (even if paused before play). */
   ready: boolean;
+  stopMeter?: () => void;
 };
 
 let activePlayback: ActivePlayback | null = null;
@@ -21,6 +23,7 @@ function clearPlayback() {
   const cur = activePlayback;
   activePlayback = null;
   cur.done = true;
+  cur.stopMeter?.();
   try {
     cur.audio?.pause();
   } catch { /* ignore */ }
@@ -88,10 +91,12 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
     const finish = (err?: Error) => {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener('abort', onAbort);
       try { ws.close(); } catch { /* ignore */ }
       if (activePlayback === playback) clearPlayback();
       else {
         playback.done = true;
+        playback.stopMeter?.();
         try { playback.audio?.pause(); } catch { /* ignore */ }
         if (playback.url) {
           try { URL.revokeObjectURL(playback.url); } catch { /* ignore */ }
@@ -138,6 +143,7 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
     };
 
     async function playAndFinish() {
+      if (settled || playback.ready) return;
       if (!chunks.length) {
         finish();
         return;
@@ -153,10 +159,7 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
           finish();
           return;
         }
-        const stop = () => {
-          audio.pause();
-        };
-        signal?.addEventListener('abort', stop, { once: true });
+        playback.stopMeter = trackPlaybackLevel(audio, blob);
         audio.onended = () => {
           finish();
         };

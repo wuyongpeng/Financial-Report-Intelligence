@@ -13,6 +13,7 @@ import {
 import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer } from '@/lib/voice/client-tts';
+import { resetVoiceLevels } from '@/lib/voice/client-level';
 import { isVoiceFarewell } from '@/lib/voice/farewell-intent';
 import {
   VOICE_CANCEL_LINE,
@@ -173,6 +174,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
 
   const end = useCallback((message?: string) => {
     activeRef.current = false;
+    resetVoiceLevels();
     suppressAutoListenRef.current = false;
     finalizingRef.current = false;
     voiceEmptyTurnsRef.current = 0;
@@ -529,6 +531,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => () => {
     // Soft release IO if the whole tree goes away (HMR / leave app).
     activeRef.current = false;
+    resetVoiceLevels();
     releaseVoiceIo();
   }, [releaseVoiceIo]);
 

@@ -1,3 +1,6 @@
+import { pcmRms } from './audio-level';
+import { createVoiceLevelMeter } from './client-level';
+
 /** Capture mic as 16 kHz 16-bit mono PCM chunks (~segmentMs). */
 
 export type PcmCapture = {
@@ -51,9 +54,13 @@ export async function startPcmCapture(
   const processor = audioCtx.createScriptProcessor(4096, 1, 1);
   const samplesPerSegment = Math.floor((targetRate * segmentMs) / 1000);
   let pending = new Float32Array(0);
+  const meter = createVoiceLevelMeter('mic');
+  let stopped = false;
 
   processor.onaudioprocess = (event) => {
+    if (stopped) return;
     const input = event.inputBuffer.getChannelData(0);
+    meter.updateRms(pcmRms(input));
     const down = downsample(input, audioCtx.sampleRate, targetRate);
     const merged = new Float32Array(pending.length + down.length);
     merged.set(pending, 0);
@@ -78,8 +85,13 @@ export async function startPcmCapture(
 
   return {
     stop: () => {
+      if (stopped) return;
+      stopped = true;
+      processor.onaudioprocess = null;
+      meter.stop();
       try { processor.disconnect(); } catch { /* ignore */ }
       try { source.disconnect(); } catch { /* ignore */ }
+      try { mute.disconnect(); } catch { /* ignore */ }
       stream.getTracks().forEach((t) => t.stop());
       void audioCtx.close();
     },
