@@ -7,10 +7,12 @@ export type VoiceFloatProps = {
   listening: boolean;
   speaking?: boolean;
   busy?: boolean;
+  arming?: boolean;
   partial?: string;
   hint?: string;
   onEnd: () => void;
   onFinalize?: () => void;
+  onCancelArm?: () => void;
   onBargeIn?: () => void;
   /** Extra head controls (e.g. auto-jump checkbox on detail). */
   headExtra?: React.ReactNode;
@@ -56,10 +58,12 @@ export function VoiceFloat({
   listening,
   speaking = false,
   busy = false,
+  arming = false,
   partial = '',
   hint,
   onEnd,
   onFinalize,
+  onCancelArm,
   onBargeIn,
   headExtra,
 }: VoiceFloatProps) {
@@ -150,13 +154,15 @@ export function VoiceFloat({
     });
   };
 
-  const title = listening
-    ? '正在聆听…'
-    : speaking
-      ? '正在朗读…'
-      : busy
-        ? '思考中…'
-        : '语音';
+  const title = arming
+    ? '即将发送'
+    : listening
+      ? '正在聆听…'
+      : speaking
+        ? '正在朗读…'
+        : busy
+          ? '思考中…'
+          : '语音';
   const body =
     partial
     || hint
@@ -198,7 +204,10 @@ export function VoiceFloat({
       <div className="eva-voice-float-text">{body}</div>
       <div className="eva-voice-float-actions">
         <button type="button" onClick={onEnd}>结束语音</button>
-        {listening && onFinalize ? (
+        {arming && onCancelArm ? (
+          <button type="button" className="primary" onClick={onCancelArm}>取消</button>
+        ) : null}
+        {listening && !arming && onFinalize ? (
           <button type="button" className="primary" onClick={onFinalize}>说完了</button>
         ) : null}
         {(speaking || busy) && !listening && onBargeIn ? (

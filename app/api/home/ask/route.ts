@@ -56,6 +56,7 @@ export async function POST(request: Request) {
       rows,
       history,
       mode,
+      spoken: body.spoken === true,
     });
     return Response.json(
       { answer: result.answer, openCode: result.openCode ?? null, mode: result.mode },

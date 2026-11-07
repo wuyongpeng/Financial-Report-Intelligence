@@ -3,7 +3,11 @@
  * Company-like asks with 0 listed hits must NOT enter this path.
  */
 import { hasQuestionIntent, parseHomeQuery } from '@/lib/home-search';
+import { isHomeRosterQuestion } from '@/lib/home-roster-intent';
 import { EVA_INTRO_LINE, EVA_PRODUCT_NAME } from '@/lib/product-identity';
+import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
+import { isVoiceHowToAskIntent } from '@/lib/voice/how-to-ask-intent';
+import { isVoiceCapabilityIntent } from '@/lib/voice/meta-intent';
 
 /** Finance / report vocabulary — leftover name + these ⇒ unresolved company ask, not chitchat. */
 const FINANCE_COMPANY_ASK_RE =
@@ -59,25 +63,78 @@ export function isLikelyHomeChitchat(raw: string): boolean {
   return false;
 }
 
+/** Clear non-A-share market asks. Null when this is not a market-scope question. */
+export function homeMarketScopeAnswer(raw: string): string | null {
+  const t = raw.replace(/\s+/g, '');
+  if (!t) return null;
+  const us = /美股|纳斯达克|纽交所/.test(t);
+  const hk = /港股|港交所/.test(t);
+  if (!us && !hk) return null;
+  if (us && hk) return '我只看 A 股上市公司财报，暂不支持美股和港股。';
+  if (us) return '我只看 A 股上市公司财报，暂不支持美股。';
+  return '我只看 A 股上市公司财报，暂不支持港股。';
+}
+
+/**
+ * Home small-talk that must not filter the company grid or open a company.
+ * Greetings stay on the local nudge path (this returns false for them).
+ * 「你是谁 / 你能干啥 / 怎么问 / 美股」and other non-company asks return true.
+ */
+export function isHomeChitchatUtterance(raw: string): boolean {
+  const text = raw.trim();
+  if (!text) return false;
+  if (isVoiceGreetingOrNoise(text)) return false;
+  if (isHomeRosterQuestion(text)) return false;
+  const market = homeMarketScopeAnswer(text);
+  if (looksLikeUnresolvedCompanyAsk(text) && !market) return false;
+  if (market) return true;
+  if (isVoiceCapabilityIntent(text) || isVoiceHowToAskIntent(text)) return true;
+  return isLikelyHomeChitchat(text);
+}
+
+/** Live search box text that must leave the company grid on its default filter. */
+export function shouldIgnoreHomeCompanyFilter(raw: string): boolean {
+  const text = raw.trim();
+  if (!text) return false;
+  if (isVoiceGreetingOrNoise(text)) return true;
+  return isHomeChitchatUtterance(text);
+}
+
+const THINK_BLOCK_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
+const PLAN_RE = /用户问的是|我需要[:：]|根据我的产品定位|简短说明|思考过程/;
+
+/** Drop model thinking. Empty when the reply is only a plan or an unclosed think tag. */
+export function sanitizeHomeAssistantText(text: string): string {
+  const raw = text ?? '';
+  if (/<think\b/i.test(raw) && !/<\/think>/i.test(raw)) return '';
+  const visible = raw
+    .replace(THINK_BLOCK_RE, ' ')
+    .replace(/<\/?think\b[^>]*>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!visible) return '';
+  if (PLAN_RE.test(visible)) return '';
+  if (/^\d+[.、]/.test(visible)) return '';
+  return visible;
+}
+
 export function homeGreetingNudge(): string {
   return `${EVA_INTRO_LINE}帮你快速了解财报内容。可以说公司名或六位代码，或直接问问题。`;
 }
 
 export function homeChitchatFallback(): string {
-  return `${EVA_INTRO_LINE}我帮你快速看懂已入库财报。不做荐股；想分析哪家，直接说公司名或代码。`;
+  return '我只看 A 股上市公司财报。想看哪家，直接说公司名或代码。';
 }
 
-export function homeChitchatSystemPrompt(): string {
+export function homeChitchatSystemPrompt(spoken = false): string {
   return [
-    `你是${EVA_PRODUCT_NAME}（简称 Eva），面向 A 股上市公司财报的智能阅读与分析助手。`,
-    '产品定位：把交易所公开财报 PDF，变成可查询、可对比、可点回原文的阅读台；帮用户快速了解财报内容。',
-    '核心用法：首页搜公司/代码 → 进详情三栏（原文·概览·追问）→ 可语音连续问；不做证券买卖建议。',
-    '本轮是首页闲聊（尚未锁定具体公司）。规则：',
-    '1) 简要口语，适合语音播报，不超过 100 字；',
-    '2) 不荐股、不给买卖/目标价/「能不能买」结论；',
-    '3) 不编造具体财报数字或未提供的公司事实；',
-    '4) 题外话礼貌短答后，提醒用户可以说公司名或六位代码进入分析；',
-    '5) 不要假装已经读过某家财报。',
+    `你是${EVA_PRODUCT_NAME}（简称 Eva），只做 A 股上市公司财报阅读。`,
+    '直接对用户说话，像正常人回答，不要客服腔，不要复述问题。',
+    spoken ? '只说一句，不超过 40 字。' : '最多两句，不超过 80 字。',
+    '禁止输出思考过程，禁止 <think>，禁止“用户问的是”“我需要”，禁止编号和步骤。',
+    '做不到就直接说不做。用户问美股时回答：我只看 A 股上市公司财报，暂不支持美股。',
+    '用户问你是谁、能干啥、怎么问时，按这一句具体问题回答，不要每轮复读同一句自我介绍。',
+    '不荐股，不编造财报数字，不假装已经打开某家公司。',
   ].join('');
 }
 
@@ -92,6 +149,7 @@ export function homeChitchatUserPrompt(input: {
   return [
     hist ? `【首页近期闲聊】\n${hist}\n` : '',
     `用户说：${input.question}`,
+    '只输出你对用户说的话。',
   ].filter(Boolean).join('\n');
 }
 

@@ -15,6 +15,7 @@ import {
   homeChitchatFallback,
   homeChitchatSystemPrompt,
   homeChitchatUserPrompt,
+  sanitizeHomeAssistantText,
 } from './home-chitchat';
 import type { HomeRosterRow } from './home-roster-snapshot';
 
@@ -60,8 +61,9 @@ async function generateHomeAskLlm(opts: {
       const json = await response.json() as {
         choices?: Array<{ message?: { content?: string } }>;
       };
-      const content = json.choices?.[0]?.message?.content?.trim();
-      if (content) return clipAnswer(content, opts.clipMax);
+      const content = json.choices?.[0]?.message?.content ?? '';
+      const visible = sanitizeHomeAssistantText(content);
+      if (visible) return clipAnswer(visible, opts.clipMax);
     } catch (error) {
       console.warn('[home-ask] generation failed', { provider: provider.id, message: String(error) });
     } finally {
@@ -77,6 +79,8 @@ export async function generateHomeAskAnswer(input: {
   rows: HomeRosterRow[];
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   mode?: HomeAskMode;
+  /** Voice reply: one short spoken sentence. Typed home chat may use two. */
+  spoken?: boolean;
 }): Promise<HomeRosterAnswer> {
   const mode: HomeAskMode = input.mode === 'chitchat' ? 'chitchat' : 'roster';
 
@@ -85,11 +89,12 @@ export async function generateHomeAskAnswer(input: {
       question: input.question,
       history: input.history,
     });
+    const spoken = Boolean(input.spoken);
     const llm = await generateHomeAskLlm({
-      system: homeChitchatSystemPrompt(),
+      system: homeChitchatSystemPrompt(spoken),
       prompt,
-      maxTokens: 160,
-      clipMax: 100,
+      maxTokens: 480,
+      clipMax: spoken ? 80 : 160,
     });
     if (llm) return { answer: llm, mode: 'llm' };
     return { answer: homeChitchatFallback(), mode: 'local' };

@@ -50,8 +50,12 @@ import {
   HOME_CHITCHAT_SNAPSHOT_PLACEHOLDER,
   homeChitchatFallback,
   homeGreetingNudge,
+  homeMarketScopeAnswer,
+  isHomeChitchatUtterance,
   isLikelyHomeChitchat,
   looksLikeUnresolvedCompanyAsk,
+  sanitizeHomeAssistantText,
+  shouldIgnoreHomeCompanyFilter,
 } from '@/lib/home-chitchat';
 import { metricYoyHoverDetail, type Report } from '@/lib/detail-model';
 import { readContractJson } from '@/contracts/common';
@@ -63,8 +67,6 @@ import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-s
 import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
-import { isVoiceCapabilityIntent, voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
-import { isVoiceHowToAskIntent, voiceHowToAskSpeech } from '@/lib/voice/how-to-ask-intent';
 import { speakAnswer } from '@/lib/voice/client-tts';
 import {
   appendHomeChatTurn,
@@ -293,6 +295,8 @@ export default function ReportHome() {
   const [waitToast, setWaitToast] = useState<string | null>(null);
   /** Ephemeral home-AI reply (typed + voice); never seeds detail chat. */
   const [homeAnswer, setHomeAnswer] = useState<string | null>(null);
+  const [voiceTurns, setVoiceTurns] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
   const [starred, setStarred] = useState<string[]>(() => readStarredCodes());
   const [submitting, setSubmitting] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -368,11 +372,18 @@ export default function ReportHome() {
 
   // Global voice session: register home utterance handler; do not own ASR/float.
   useEffect(() => {
+    const pushTurn = (role: 'user' | 'assistant', content: string) => {
+      appendHomeChatTurn(role, content);
+      setVoiceTurns(getHomeChatTurns());
+    };
     const speakLine = async (line: string) => {
+      const spoken = sanitizeHomeAssistantText(line) || line.trim();
+      if (!spoken) return;
+      pushTurn('assistant', spoken);
       voice.setBusy(true);
       voice.setSpeaking(true);
       try {
-        await speakAnswer(line, undefined);
+        await speakAnswer(spoken, undefined);
       } catch { /* ignore TTS */ }
       finally {
         voice.setSpeaking(false);
@@ -453,28 +464,22 @@ export default function ReportHome() {
         await speakLine(line);
         return { action: 'end' };
       }
-      // 「你是谁 / 你能干什么」— brand one-liner, do not search.
-      if (isVoiceCapabilityIntent(text)) {
-        await speakLine(voiceCapabilitySpeech());
-        return { action: 'resume' };
-      }
-      // 「怎么问 / 问什么」— home has no company industry; nudge open + generic tips.
-      if (isVoiceHowToAskIntent(text)) {
-        await speakLine(voiceHowToAskSpeech(null, 'home'));
-        return { action: 'resume' };
-      }
       // Greetings: short product nudge. Pure filler (嗯/啊) stays silent.
+      // 「你是谁 / 你能干啥 / 怎么问」and other chitchat go to home AI below.
       if (isVoiceGreetingOrNoise(text)) {
         const compact = text.replace(/\s+/g, '');
         const fillerOnly = /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact);
+        setSearch('');
         if (!fillerOnly) {
+          pushTurn('user', text);
           await speakLine(homeGreetingNudge());
         }
         return { action: 'resume' };
       }
       // Fresh ASR utterance supersedes any prior keyboard edits on the box.
+      // Chitchat must not stay in the search box — that filters the company grid.
       searchEditedDuringVoiceRef.current = false;
-      setSearch(text);
+      setSearch(isHomeChitchatUtterance(text) ? '' : text);
       voice.setBusy(true);
       try {
         await onSearchSubmitRef.current(text, { fromVoice: true });
@@ -510,10 +515,38 @@ export default function ReportHome() {
   // Home turns stay home-only; clearing on mount avoids a prior SPA visit leaking in.
   useEffect(() => {
     clearHomeChatTurns();
+    setVoiceTurns([]);
     setSearch('');
     setHomeAnswer(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Home voice lives in the right-side Eva dock, not the bottom float.
+  useEffect(() => {
+    voice.setHideFloat(true);
+    return () => voice.setHideFloat(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mirror the live transcript into the search box unless the user is editing it.
+  useEffect(() => {
+    if (!voice.active || (!voice.listening && !voice.arming)) return;
+    if (searchEditedDuringVoiceRef.current) return;
+    setSearch(voice.partial);
+  }, [voice.active, voice.listening, voice.arming, voice.partial]);
+
+  useEffect(() => {
+    if (voice.listening) searchEditedDuringVoiceRef.current = false;
+  }, [voice.listening]);
+
+  const voiceWasActiveRef = useRef(false);
+  useEffect(() => {
+    if (voiceWasActiveRef.current && !voice.active) {
+      setVoicePanelOpen(false);
+      if (!searchEditedDuringVoiceRef.current) setSearch('');
+    }
+    voiceWasActiveRef.current = voice.active;
+  }, [voice.active]);
 
   const refreshCoverage = useCallback(async (): Promise<CrawlCompanyCoverage[]> => {
     try {
@@ -620,11 +653,12 @@ export default function ReportHome() {
     [recognizedListedCandidates],
   );
   const keyword = search.trim();
+  const ignoreCompanyFilter = shouldIgnoreHomeCompanyFilter(keyword);
   const filtered = useMemo(() => {
     let rows = coverage;
-    if (recognizedListedCandidates.length) {
+    if (!ignoreCompanyFilter && recognizedListedCandidates.length) {
       rows = coverage.filter((item) => recognizedListedCodes.has(item.code));
-    } else if (keyword) {
+    } else if (keyword && !ignoreCompanyFilter) {
       rows = coverage.filter((item) => matchKeyword(item, parsedSearch.companyQuery || keyword));
       // Free-text questions without a resolvable company keep the full card grid.
       if (parsedSearch.hasQuestionIntent && !parsedSearch.companyQuery) rows = coverage;
@@ -676,7 +710,7 @@ export default function ReportHome() {
     // Starred companies first; keep relative order within each group.
     rows.sort((a, b) => Number(starredSet.has(b.code)) - Number(starredSet.has(a.code)));
     return rows;
-  }, [coverage, keyword, industry, sortMode, listSort, viewMode, starredSet, recognizedListedCandidates, recognizedListedCodes, parsedSearch]);
+  }, [coverage, keyword, ignoreCompanyFilter, industry, sortMode, listSort, viewMode, starredSet, recognizedListedCandidates, recognizedListedCodes, parsedSearch]);
 
   const gridCols = viewMode === 'list' ? 1 : 3;
   const initialRows = 3;
@@ -772,7 +806,6 @@ export default function ReportHome() {
   }
 
   async function promptBlockingDialog(line: string) {
-    setHomeAnswer(line);
     await speakBlockingPrompt(line);
     resumeDialogListen();
   }
@@ -907,12 +940,17 @@ export default function ReportHome() {
     })();
   }
 
+  function pushTurn(role: 'user' | 'assistant', content: string) {
+    appendHomeChatTurn(role, content);
+    setVoiceTurns(getHomeChatTurns());
+  }
+
   async function deliverHomeAnswer(answer: string, opts?: { fromVoice?: boolean }) {
-    const line = answer.trim();
+    const line = sanitizeHomeAssistantText(answer);
     if (!line) return;
-    setHomeAnswer(line);
-    appendHomeChatTurn('assistant', line);
+    pushTurn('assistant', line);
     const shouldSpeak = Boolean(opts?.fromVoice || voice.active);
+    if (!shouldSpeak) setHomeAnswer(line);
     if (!shouldSpeak) return;
     voice.setBusy(true);
     voice.setSpeaking(true);
@@ -940,7 +978,7 @@ export default function ReportHome() {
       industry,
       viewMode,
     });
-    appendHomeChatTurn('user', raw);
+    pushTurn('user', raw);
     setHomeAnswer(null);
 
     const local = answerHomeRosterLocally(raw, rows);
@@ -1002,8 +1040,14 @@ export default function ReportHome() {
   }
 
   async function runHomeChitchatAsk(raw: string, opts?: { fromVoice?: boolean }) {
-    appendHomeChatTurn('user', raw);
+    pushTurn('user', raw);
+    setSearch('');
     setHomeAnswer(null);
+    const market = homeMarketScopeAnswer(raw);
+    if (market) {
+      await deliverHomeAnswer(market, opts);
+      return;
+    }
     // Local refuse for clear invest asks — no LLM needed.
     if (/买|卖|加仓|减仓|荐股|目标价|能不能买|该不该买|值得买/.test(raw)) {
       await deliverHomeAnswer(
@@ -1023,6 +1067,7 @@ export default function ReportHome() {
           rows: [],
           history: getHomeChatTurns().slice(0, -1),
           mode: 'chitchat',
+          spoken: Boolean(opts?.fromVoice || voice.active),
         }),
       });
       if (!response.ok) throw new Error(`home chitchat ${response.status}`);
@@ -1115,12 +1160,26 @@ export default function ReportHome() {
     if (!raw || submitting) return;
     const fromVoice = Boolean(opts?.fromVoice);
     const userEdited = Boolean(fromVoice && searchEditedDuringVoiceRef.current);
-    // 「怎么问」 on home: local tip, do not search / open company.
-    if (isVoiceHowToAskIntent(raw)) {
+    if (isVoiceGreetingOrNoise(raw)) {
+      const compact = raw.replace(/\s+/g, '');
+      const fillerOnly = /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact);
+      setSearch('');
+      if (fillerOnly) return;
       setSubmitting(true);
       try {
-        appendHomeChatTurn('user', raw);
-        await deliverHomeAnswer(voiceHowToAskSpeech(null, 'home'), { fromVoice });
+        pushTurn('user', raw);
+        await deliverHomeAnswer(homeGreetingNudge(), { fromVoice });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+    // Identity, capability, how-to-ask, and other non-company chat. Do not filter the grid.
+    if (isHomeChitchatUtterance(raw)) {
+      setSearch('');
+      setSubmitting(true);
+      try {
+        await runHomeChitchatAsk(raw, { fromVoice });
       } finally {
         setSubmitting(false);
       }
@@ -1501,9 +1560,11 @@ export default function ReportHome() {
     }
   }
 
-  const listedOutsidePoolCandidates = recognizedListedCandidates.filter(
-    (listed) => !coverage.some((item) => item.code === listed.code),
-  );
+  const listedOutsidePoolCandidates = ignoreCompanyFilter
+    ? []
+    : recognizedListedCandidates.filter(
+      (listed) => !coverage.some((item) => item.code === listed.code),
+    );
   const listedOutsidePool = listedOutsidePoolCandidates.length === 1
     ? listedOutsidePoolCandidates[0]
     : null;
@@ -1623,6 +1684,23 @@ export default function ReportHome() {
               </button>
             );
           }
+          if (voice.arming) {
+            return (
+              <button
+                className="rh-search-submit rh-search-cancel"
+                type="button"
+                aria-label="取消发送"
+                title="取消发送"
+                onClick={() => {
+                  searchEditedDuringVoiceRef.current = false;
+                  setSearch('');
+                  voice.cancelArmedSend();
+                }}
+              >
+                取消
+              </button>
+            );
+          }
           if (voiceListening) {
             const hasText = Boolean(search.trim() || voice.partial.trim());
             const stopLabel = hasText ? '结束并发送' : '结束语音';
@@ -1675,7 +1753,9 @@ export default function ReportHome() {
           );
         })()}
       </form>
-      {voiceListening ? (
+      {voice.arming ? (
+        <p className="rh-search-hint" role="status">即将发送</p>
+      ) : voiceListening ? (
         /* Placeholder already says 语音输入中… — keep spacer so layout doesn't jump. */
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
       ) : voice.active ? (
@@ -1684,7 +1764,7 @@ export default function ReportHome() {
         <p className="rh-search-hint rh-search-hint-spacer" aria-hidden="true" />
       )}
 
-      {homeAnswer && (
+      {homeAnswer && !voice.active && (
         <div className="rh-home-answer" role="status" aria-live="polite">
           <div className="rh-home-answer-label">Eva</div>
           <p>{homeAnswer}</p>
@@ -2245,6 +2325,36 @@ export default function ReportHome() {
               </>
             )}
           </div>
+        </div>
+      )}
+      {voice.active && (
+        <div className={`rh-eva-dock${voicePanelOpen ? ' is-open' : ''}`}>
+          {voicePanelOpen ? (
+            <div className="rh-eva-panel" role="dialog" aria-label="语音对话">
+              <div className="rh-eva-panel-head">
+                <b>Eva</b>
+                <button type="button" onClick={() => voice.end()}>结束语音</button>
+              </div>
+              <div className="rh-eva-panel-log">
+                {voiceTurns.length === 0 ? (
+                  <p className="rh-eva-panel-empty">直接说就行</p>
+                ) : voiceTurns.map((turn, index) => (
+                  <p key={`${turn.role}-${index}`} className={turn.role === 'user' ? 'is-user' : 'is-eva'}>
+                    {turn.content}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className={`rh-eva-orb${voice.listening || voice.arming ? ' is-live' : ''}${voice.speaking ? ' is-speak' : ''}`}
+            aria-label={voicePanelOpen ? '收起语音对话' : '展开语音对话'}
+            aria-expanded={voicePanelOpen}
+            onClick={() => setVoicePanelOpen((open) => !open)}
+          >
+            Eva
+          </button>
         </div>
       )}
     </section>

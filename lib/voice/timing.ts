@@ -1,5 +1,9 @@
-/** Voice conversation: partial text unchanged this long → end of utterance. */
+/** Voice conversation: partial text unchanged this long → arm send countdown. */
 export const VOICE_ENDPOINT_MS = 1600;
+/** After the utterance settles, wait this long so the user can cancel. */
+export const VOICE_SEND_COUNTDOWN_MS = 1000;
+/** Spoken after the user cancels an armed send. Mic stays in the session. */
+export const VOICE_CANCEL_LINE = '已取消，可以继续说。';
 /** Voice conversation: nothing heard this long after listen start → empty turn. */
 export const VOICE_NO_SPEECH_MS = 8000;
 /** Consecutive empty listen turns before idle-exit toast. */

@@ -12,12 +12,15 @@ import {
 } from 'react';
 import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
+import { speakAnswer } from '@/lib/voice/client-tts';
 import { isVoiceFarewell } from '@/lib/voice/farewell-intent';
 import {
+  VOICE_CANCEL_LINE,
   VOICE_ENDPOINT_MS,
   VOICE_NO_SPEECH_MS,
   VOICE_IDLE_EMPTY_TURNS,
   VOICE_IDLE_EXIT_TOAST,
+  VOICE_SEND_COUNTDOWN_MS,
   shouldQuietEndOnEmptyFinalize,
 } from '@/lib/voice/timing';
 import { VoiceFloat } from '@/components/voice-float';
@@ -38,6 +41,8 @@ type VoiceSessionApi = {
   listening: boolean;
   speaking: boolean;
   busy: boolean;
+  /** Utterance settled; send fires when the countdown ends unless cancelled. */
+  arming: boolean;
   partial: string;
   toast: string | null;
   /** Start continuous realtime voice (idempotent if already active). */
@@ -70,6 +75,10 @@ type VoiceSessionApi = {
    * empty transcript ends the session quietly (no idle toast).
    */
   finalizeListen: (opts?: { userInitiated?: boolean }) => void;
+  /** Drop the armed utterance, say a short line, keep the session listening. */
+  cancelArmedSend: () => void;
+  /** Home hides the bottom float and uses its own voice dock. */
+  setHideFloat: (hidden: boolean) => void;
   clearToast: () => void;
 };
 
@@ -93,8 +102,10 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeakingState] = useState(false);
   const [busy, setBusyState] = useState(false);
+  const [arming, setArming] = useState(false);
   const [partial, setPartialState] = useState('');
   const [toast, setToast] = useState<string | null>(null);
+  const [hideFloat, setHideFloat] = useState(false);
 
   const activeRef = useRef(false);
   const asrSessionRef = useRef<AsrSession | null>(null);
@@ -104,6 +115,9 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const voiceFinalTimerRef = useRef<number | null>(null);
   const voiceNoSpeechTimerRef = useRef<number | null>(null);
   const voiceEndpointTimerRef = useRef<number | null>(null);
+  const voiceArmTimerRef = useRef<number | null>(null);
+  const armingRef = useRef(false);
+  const armSendRef = useRef<() => void>(() => undefined);
   const voiceEmptyTurnsRef = useRef(0);
   const voiceGenRef = useRef(0);
   const handlerRef = useRef<VoiceUtteranceHandler | null>(null);
@@ -137,6 +151,17 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const clearArmTimer = useCallback(() => {
+    if (voiceArmTimerRef.current != null) {
+      window.clearTimeout(voiceArmTimerRef.current);
+      voiceArmTimerRef.current = null;
+    }
+    if (armingRef.current) {
+      armingRef.current = false;
+      setArming(false);
+    }
+  }, []);
+
   const releaseVoiceIo = useCallback(() => {
     clearVoiceFinalTimer();
     clearVoiceTurnTimers();
@@ -153,6 +178,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     voiceEmptyTurnsRef.current = 0;
     asrReconnectRef.current = 0;
     voiceGenRef.current += 1;
+    clearArmTimer();
     releaseVoiceIo();
     voicePartialRef.current = '';
     setPartialState('');
@@ -161,7 +187,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     setBusyState(false);
     setActive(false);
     if (message) setToast(message);
-  }, [releaseVoiceIo]);
+  }, [clearArmTimer, releaseVoiceIo]);
 
   const stopMic = useCallback(() => {
     voiceGenRef.current += 1;
@@ -242,6 +268,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   handleUtteranceRef.current = handleUtterance;
 
   const finalizeListen = useCallback((opts?: { userInitiated?: boolean }) => {
+    clearArmTimer();
     clearVoiceTurnTimers();
     const userInitiated = Boolean(opts?.userInitiated);
     const pendingNow = voicePartialRef.current.trim();
@@ -283,10 +310,11 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       }
       void handleUtteranceRef.current(pending);
     }, 2500);
-  }, [clearVoiceFinalTimer, clearVoiceTurnTimers, end]);
+  }, [clearArmTimer, clearVoiceFinalTimer, clearVoiceTurnTimers, end]);
 
   const listenTurn = useCallback(async () => {
     if (!activeRef.current) return;
+    clearArmTimer();
     releaseVoiceIo();
     const gen = ++voiceGenRef.current;
     voiceUtteranceHandledRef.current = false;
@@ -315,6 +343,14 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         if (gen !== voiceGenRef.current) return;
         if (ev.type === 'partial') {
           const prev = voicePartialRef.current;
+          if (armingRef.current && ev.text !== prev) {
+            if (voiceArmTimerRef.current != null) {
+              window.clearTimeout(voiceArmTimerRef.current);
+              voiceArmTimerRef.current = null;
+            }
+            armingRef.current = false;
+            setArming(false);
+          }
           voicePartialRef.current = ev.text;
           setPartialState(ev.text);
           if (ev.text.trim() && pcmCaptureRef.current) {
@@ -329,12 +365,13 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
               voiceEndpointTimerRef.current = window.setTimeout(() => {
                 voiceEndpointTimerRef.current = null;
                 if (gen !== voiceGenRef.current) return;
-                finalizeListen();
+                armSendRef.current();
               }, VOICE_ENDPOINT_MS);
             }
           }
         }
         if (ev.type === 'final') {
+          clearArmTimer();
           clearVoiceFinalTimer();
           clearVoiceTurnTimers();
           pcmCaptureRef.current?.stop();
@@ -362,9 +399,58 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       fail(err instanceof Error ? err.message : '无法使用麦克风');
     }
-  }, [clearVoiceFinalTimer, clearVoiceTurnTimers, end, finalizeListen, releaseVoiceIo]);
+  }, [clearArmTimer, clearVoiceFinalTimer, clearVoiceTurnTimers, end, finalizeListen, releaseVoiceIo]);
 
   listenTurnRef.current = listenTurn;
+
+  const armSend = useCallback(() => {
+    if (!activeRef.current) return;
+    if (!voicePartialRef.current.trim()) {
+      finalizeListen();
+      return;
+    }
+    if (armingRef.current) return;
+    armingRef.current = true;
+    setArming(true);
+    if (voiceArmTimerRef.current != null) window.clearTimeout(voiceArmTimerRef.current);
+    const gen = voiceGenRef.current;
+    voiceArmTimerRef.current = window.setTimeout(() => {
+      voiceArmTimerRef.current = null;
+      armingRef.current = false;
+      setArming(false);
+      if (gen !== voiceGenRef.current || !activeRef.current) return;
+      finalizeListen();
+    }, VOICE_SEND_COUNTDOWN_MS);
+  }, [finalizeListen]);
+
+  armSendRef.current = armSend;
+
+  const cancelArmedSend = useCallback(() => {
+    if (!activeRef.current) return;
+    voiceGenRef.current += 1;
+    if (voiceArmTimerRef.current != null) {
+      window.clearTimeout(voiceArmTimerRef.current);
+      voiceArmTimerRef.current = null;
+    }
+    armingRef.current = false;
+    setArming(false);
+    releaseVoiceIo();
+    voicePartialRef.current = '';
+    setPartialState('');
+    setListening(false);
+    setSpeakingState(true);
+    setBusyState(true);
+    void (async () => {
+      try {
+        await speakAnswer(VOICE_CANCEL_LINE);
+      } catch { /* ignore TTS */ }
+      finally {
+        setSpeakingState(false);
+        setBusyState(false);
+        if (activeRef.current) void listenTurnRef.current();
+      }
+    })();
+  }, [releaseVoiceIo]);
 
   const resumeListen = useCallback(() => {
     if (!activeRef.current) return;
@@ -430,6 +516,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     if (!active || listening || speaking || busy) return;
     const t = window.setTimeout(() => {
       if (!activeRef.current) return;
+      if (armingRef.current) return;
       if (suppressAutoListenRef.current) return;
       if (finalizingRef.current) return;
       if (asrSessionRef.current || pcmCaptureRef.current) return;
@@ -450,6 +537,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     listening,
     speaking,
     busy,
+    arming,
     partial,
     toast,
     start,
@@ -465,16 +553,19 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     stopMic,
     resumeListen,
     finalizeListen,
+    cancelArmedSend,
+    setHideFloat,
     clearToast: () => setToast(null),
   }), [
-    active, listening, speaking, busy, partial, toast,
+    active, listening, speaking, busy, arming, partial, toast,
     start, end, setUtteranceHandler, setAsrCorrectContext, setBargeInHandler, setFloatHeadExtra,
-    setPartial, setSuppressAutoListen, stopMic, resumeListen, finalizeListen,
+    setPartial, setSuppressAutoListen, stopMic, resumeListen, finalizeListen, cancelArmedSend,
   ]);
 
   // Typed ask sets busy via detail page — must NOT open the float.
   // Float only after explicit voice.start() (waveform / voice logo).
-  const showFloat = active;
+  // Home hides it and uses the right-side Eva dock instead.
+  const showFloat = active && !hideFloat;
 
   return (
     <VoiceSessionContext.Provider value={api}>
@@ -484,12 +575,16 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
           listening={listening}
           speaking={speaking}
           busy={busy}
+          arming={arming}
           partial={partial}
-          hint={active && !listening && !speaking && !busy
-            ? '说出公司名称、代码或问题；停顿即发送'
-            : undefined}
+          hint={arming
+            ? '即将发送，点取消可重说'
+            : active && !listening && !speaking && !busy
+              ? '说出公司名称、代码或问题；停顿即发送'
+              : undefined}
           onEnd={() => end()}
-          onFinalize={listening ? () => finalizeListen({ userInitiated: true }) : undefined}
+          onCancelArm={arming ? () => cancelArmedSend() : undefined}
+          onFinalize={listening && !arming ? () => finalizeListen({ userInitiated: true }) : undefined}
           onBargeIn={(speaking || busy) && !listening
             ? () => {
                 const h = bargeInHandlerRef.current;
