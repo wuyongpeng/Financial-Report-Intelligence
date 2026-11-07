@@ -71,8 +71,8 @@ type Message = {
   followupBusy?: boolean;
   feedback?: 'up' | 'down';
   feedbackDone?: boolean;
-  /** attachNote: user-selected clips only; soft-merged current page never shows here. */
-  ask?: { question: string; focus?: FocusItem[]; attachNote?: string };
+  /** attachNote: count line. shownFocus: clips the user actually attached, never the silent current-page merge. */
+  ask?: { question: string; focus?: FocusItem[]; shownFocus?: FocusItem[]; attachNote?: string };
   /** Local command echo (翻页 / 缩放 / 回首页 …): no AI answer, no vote / regenerate. */
   local?: boolean;
 };
@@ -241,6 +241,45 @@ async function waitForParsedReport(code: string, id: string, signal: AbortSignal
   return reports.find((item) => item.id === id && reportIsParsed(item)) ?? null;
 }
 
+
+function focusKindLabel(kind: FocusKind) {
+  return kind === 'pdf' || kind === 'text' ? '原文' : '概览';
+}
+
+function FocusShown({ note, items }: { note: string; items: FocusItem[] }) {
+  const [open, setOpen] = useState(false);
+  const [full, setFull] = useState<number | null>(null);
+  return (
+    <div className="cd-msg-attach">
+      <button type="button" className="cd-msg-attach-sum" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        {note}
+      </button>
+      {open && items.length > 0 && (
+        <ul className="cd-msg-attach-list">
+          {items.map((item, index) => {
+            const text = item.text.replace(/\s+/g, ' ').trim();
+            const head = [focusKindLabel(item.kind), item.page ? `第${item.page}页` : '', item.title || ''].filter(Boolean).join(' · ');
+            const expanded = full === index;
+            const short = text.length > 48 ? `${text.slice(0, 48)}…` : text;
+            return (
+              <li key={`${item.kind}-${index}`}>
+                <button
+                  type="button"
+                  title={text.slice(0, 240)}
+                  aria-expanded={expanded}
+                  onClick={() => setFull(expanded ? null : index)}
+                >
+                  <b>{head}</b>
+                  <span>{expanded ? text : short}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null, preferredCite = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null; preferredCite?: { page: number; quote: string } | null }) {
   const [reports, setReports] = useState<Report[]>([initialReport]);
@@ -2491,7 +2530,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // Bubble shows the typed question only — never append 「已带上 N 段原文」.
     // Auto soft-merged current page stays in focusPayload for the API, not in the visible text.
     const display = displayFocusPrompt(question, userFocus);
-    const attachNote = focusAttachNote(liveSel ? mergeLiveSelectionFocus(userFocus, liveSel) : userFocus);
+    const shownFocus = liveSel ? mergeLiveSelectionFocus(userFocus, liveSel) : userFocus;
+    const attachNote = focusAttachNote(shownFocus);
     setRegenMenu(null);
     const prior = replacing != null ? messages.slice(0, replacing - 1) : messages;
     const asked = prior.filter(m => m.role === 'user' && !m.local).map(m => m.ask?.question ?? m.text);
@@ -2501,7 +2541,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (typewriterTimerRef.current != null) { window.clearInterval(typewriterTimerRef.current); typewriterTimerRef.current = null; }
     if (replacing == null) {
       setQuestion(''); setClips([]); clearPendingSelection(); setPick(null);
-      setMessages(m => [...m, { role:'user', text:display, ask:{ question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(attachNote ? { attachNote } : {}) } }, { role:'assistant', text:'' }]);
+      setMessages(m => [...m, { role:'user', text:display, ask:{ question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(shownFocus.length ? { shownFocus } : {}), ...(attachNote ? { attachNote } : {}) } }, { role:'assistant', text:'' }]);
     } else {
       setMessages(m => [...m.slice(0, replacing), { role:'assistant', text:'' }]);
     }
@@ -3133,7 +3173,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                     </>
                   : <div className="cd-user-turn">
                       <p>{m.text}</p>
-                      {m.ask?.attachNote ? <small className="cd-msg-attach">{m.ask.attachNote}</small> : null}
+                      {m.ask?.attachNote ? <FocusShown note={m.ask.attachNote} items={m.ask.shownFocus ?? []} /> : null}
                     </div>}
               {m.role==='assistant' && m.text.trim() && !streaming && !m.local && <div className="cd-answer-tools">
                 <div className="cd-actions">
