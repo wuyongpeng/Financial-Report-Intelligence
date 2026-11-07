@@ -1,4 +1,6 @@
 'use client';
+import { requestAssistantTurn, FEEDBACK_REVIEW_LINE } from '@/lib/assistant-turn';
+import { requestFeedbackDraft, subscribeFeedbackState, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import { shouldExpandHomeVoicePanel } from '@/lib/voice/home-panel';
 import { useVoiceFloatDrag } from '@/components/use-voice-float-drag';
 import Link from 'next/link';
@@ -53,8 +55,6 @@ import {
 import {
   HOME_CHITCHAT_SNAPSHOT_PLACEHOLDER,
   homeChitchatFallback,
-  homeGreetingNudge,
-  homeMarketScopeAnswer,
   isHomeChitchatUtterance,
   isLikelyHomeChitchat,
   looksLikeUnresolvedCompanyAsk,
@@ -546,11 +546,7 @@ export default function ReportHome() {
       if (isVoiceGreetingOrNoise(text)) {
         const compact = text.replace(/\s+/g, '');
         const fillerOnly = /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact);
-        if (!fillerOnly) {
-          pushTurn('user', text);
-          await speakLine(homeGreetingNudge());
-        }
-        return { action: 'resume' };
+        if (fillerOnly) return { action: 'resume' };
       }
       // Route the completed utterance first; partial ASR never mutates the user's filter.
       searchEditedDuringVoiceRef.current = false;
@@ -567,6 +563,7 @@ export default function ReportHome() {
       return { action: 'resume' };
     };
     const handler = async (text: string): Promise<VoiceUtteranceResult> => {
+      if (isFeedbackDrawerOpen()) return { action: 'hold' };
       if (shouldExpandHomeVoicePanel('user', text, homeVoiceApiRef.current.active)) setVoicePanelOpen(true);
       const turn = homeVoiceTurnsRef.current.begin();
       homeSpeakingTextRef.current = '';
@@ -613,6 +610,19 @@ export default function ReportHome() {
       });
     }
   }, [voice.active]);
+
+  useEffect(() => subscribeFeedbackState((open) => {
+    homeVoiceTurnsRef.current.cancel();
+    clearHomeResumeTimers();
+    const api = homeVoiceApiRef.current;
+    api.stopMic(); api.setBusy(false); api.setSpeaking(false);
+    api.setSuppressAutoListen(open);
+    setSubmitting(false); setDialogBusy(false);
+    if (open && api.active) {
+      homeVoiceTurnsRef.current.begin();
+      void homeSpeakRef.current(FEEDBACK_REVIEW_LINE).catch(() => undefined);
+    } else if (!open && api.active) api.resumeListen();
+  }), []);
 
   // If we landed on home while a session is already active (detail → 返回主页), resume listen.
   useEffect(() => {
@@ -1154,11 +1164,6 @@ export default function ReportHome() {
     pushTurn('user', raw);
     if (!opts?.fromVoice) setSearch('');
     setHomeAnswer(null);
-    const market = homeMarketScopeAnswer(raw);
-    if (market) {
-      await deliverHomeAnswer(market, opts);
-      return;
-    }
     // Local refuse for clear invest asks — no LLM needed.
     if (/买|卖|加仓|减仓|荐股|目标价|能不能买|该不该买|值得买/.test(raw)) {
       await deliverHomeAnswer(
@@ -1290,6 +1295,30 @@ export default function ReportHome() {
     assertHomeVoiceTurn(turn);
     const raw = (override ?? search).trim();
     if (!raw || (submitting && !opts?.fromVoice)) return;
+    if (isFeedbackDrawerOpen()) return;
+    const compact = raw.replace(/\s+/g, '');
+    if (isVoiceGreetingOrNoise(raw) && /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact)) return;
+    setSubmitting(true);
+    if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);
+    armHomeInterrupt(turn);
+    try {
+      const semantic = await requestAssistantTurn({ question: raw, surface: 'home', history: getHomeChatTurns().slice(-8) }, turn?.signal ?? new AbortController().signal);
+      assertHomeVoiceTurn(turn);
+      if (semantic.kind !== 'domain') {
+        pushTurn('user', raw);
+        if (!opts?.fromVoice) setSearch('');
+        if (semantic.kind === 'feedback') {
+          pushTurn('assistant', FEEDBACK_REVIEW_LINE);
+          requestFeedbackDraft(semantic.action, () => homeMountedRef.current && homeVoiceTurnsRef.current.owns(turn) && !isFeedbackDrawerOpen());
+        } else await deliverHomeAnswer(semantic.answer, { fromVoice: opts?.fromVoice });
+        return;
+      }
+    } finally {
+      if (homeVoiceTurnsRef.current.owns(turn)) {
+        setSubmitting(false);
+        homeVoiceApiRef.current.setBusy(false);
+      }
+    }
     const fromVoice = Boolean(opts?.fromVoice);
     const userEdited = Boolean(fromVoice && searchEditedDuringVoiceRef.current);
     const commitMatchedVoiceSearch = (matchedCount: number) => {
@@ -1303,8 +1332,7 @@ export default function ReportHome() {
       if (fillerOnly) return;
       setSubmitting(true);
       try {
-        pushTurn('user', raw);
-        await deliverHomeAnswer(homeGreetingNudge(), { fromVoice });
+        await runHomeChitchatAsk(raw, { fromVoice });
       } finally {
         if (homeVoiceTurnsRef.current.owns(turn)) setSubmitting(false);
       }

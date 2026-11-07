@@ -66,13 +66,13 @@ test('isVoiceHowToAskIntent rejects finance asks and other intents', () => {
   }
 });
 
-test('parseLocalCommand routes how-to-ask without stealing capability/farewell', () => {
-  assert.deepEqual(parseLocalCommand('我该怎么提问', noWindow), { kind: 'how-to-ask' });
-  assert.deepEqual(parseLocalCommand('可以问什么', noWindow), { kind: 'how-to-ask' });
-  assert.deepEqual(parseLocalCommand('问什么好', noWindow), { kind: 'how-to-ask' });
-  assert.deepEqual(parseLocalCommand('你能干什么', noWindow), { kind: 'capability' });
-  assert.deepEqual(parseLocalCommand('你能干啥？', noWindow), { kind: 'capability' });
-  assert.deepEqual(parseLocalCommand('你会干啥', noWindow), { kind: 'capability' });
+test('consultation goes to AI while explicit farewell stays deterministic', () => {
+  assert.deepEqual(parseLocalCommand('我该怎么提问', noWindow), null);
+  assert.deepEqual(parseLocalCommand('可以问什么', noWindow), null);
+  assert.deepEqual(parseLocalCommand('问什么好', noWindow), null);
+  assert.deepEqual(parseLocalCommand('你能干什么', noWindow), null);
+  assert.deepEqual(parseLocalCommand('你能干啥？', noWindow), null);
+  assert.deepEqual(parseLocalCommand('你会干啥', noWindow), null);
   assert.deepEqual(parseLocalCommand('再见', noWindow), { kind: 'farewell' });
   assert.equal(parseLocalCommand('营业收入是多少', noWindow), null);
 

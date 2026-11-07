@@ -8,6 +8,7 @@ import {
   type FeedbackCategory,
 } from '@/lib/feedback-input';
 import './home-overflow-menu.css';
+import { preserveFeedbackDraft, publishFeedbackState, subscribeFeedbackDraft, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 
 export type HomeOverflowMenuProps = {
   /** Home shows 数据采集; detail hides it. Default true. */
@@ -25,13 +26,20 @@ export default function HomeOverflowMenu({
 }: HomeOverflowMenuProps) {
   const [open, setOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const draftRef = useRef({ text: '', edited: false });
+  const sendingRef = useRef(false);
+  const [voiceDraftHint, setVoiceDraftHint] = useState('');
+  function changeFeedbackOpen(next: boolean) {
+    setFeedbackOpen(next);
+    publishFeedbackState(next);
+  }
   const [aboutOpen, setAboutOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('feedback') === '1') {
-      setFeedbackOpen(true);
+      changeFeedbackOpen(true);
       params.delete('feedback');
       const next = `${window.location.pathname}${params.toString() ? `?${params}` : ''}${window.location.hash}`;
       window.history.replaceState({}, '', next);
@@ -87,6 +95,25 @@ export default function HomeOverflowMenu({
     };
   }, [catOpen]);
 
+  useEffect(() => {
+    const unsubscribe = subscribeFeedbackDraft((request) => {
+      if (!request.isCurrent()) return;
+      if (!sendingRef.current) {
+        const merged = preserveFeedbackDraft(draftRef.current, request.action.draft);
+        if (!merged.preserved) {
+          draftRef.current = { text: merged.text, edited: false };
+          setMessage(merged.text);
+          setCategory(request.action.category);
+        }
+        setVoiceDraftHint(merged.preserved ? '已有未提交内容，已保留原稿。请确认内容，没问题后再点击发送。' : '已根据你的话整理草稿。请确认内容，没问题后再点击发送。');
+      }
+      request.accepted = true;
+      setOpen(false);
+      changeFeedbackOpen(true);
+    });
+    return () => { unsubscribe(); if (isFeedbackDrawerOpen()) publishFeedbackState(false); };
+  }, []);
+
   async function copyPageLink() {
     setOpen(false);
     const href = typeof window !== 'undefined' ? window.location.href : '';
@@ -122,6 +149,7 @@ export default function HomeOverflowMenu({
       setError('请填写反馈内容');
       return;
     }
+    sendingRef.current = true;
     setSending(true);
     setError('');
     try {
@@ -141,15 +169,18 @@ export default function HomeOverflowMenu({
       });
       const body = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) throw new Error(body.error || '发送失败');
+      draftRef.current = { text: '', edited: false };
       setMessage('');
+      setVoiceDraftHint('');
       setContact('');
       setCategory(DEFAULT_FEEDBACK_CATEGORY);
       setCatOpen(false);
-      setFeedbackOpen(false);
+      changeFeedbackOpen(false);
       setToast('感谢反馈，已收到');
     } catch (e) {
       setError(e instanceof Error ? e.message : '发送失败');
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }
@@ -185,7 +216,7 @@ export default function HomeOverflowMenu({
             type="button"
             role="menuitem"
             className="hom-item"
-            onClick={() => { setOpen(false); setFeedbackOpen(true); setError(''); }}
+            onClick={() => { setOpen(false); changeFeedbackOpen(true); setError(''); }}
           >
             发送反馈
           </button>
@@ -221,7 +252,7 @@ export default function HomeOverflowMenu({
       ) : null}
 
       {feedbackOpen ? (
-        <div className="hom-drawer-backdrop" onClick={() => !sending && setFeedbackOpen(false)}>
+        <div className="hom-drawer-backdrop" onClick={() => !sending && changeFeedbackOpen(false)}>
           <aside
             className="hom-drawer"
             role="dialog"
@@ -230,6 +261,7 @@ export default function HomeOverflowMenu({
             onClick={(e) => e.stopPropagation()}
           >
             <h2 id="hom-feedback-title">发送反馈</h2>
+            {voiceDraftHint ? <p className="hom-desc" role="status">{voiceDraftHint}</p> : null}
             {pageLabel?.trim() ? (
               <p className="hom-context">关于：{pageLabel.trim()}</p>
             ) : null}
@@ -283,7 +315,7 @@ export default function HomeOverflowMenu({
               rows={7}
               value={message}
               disabled={sending}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => { draftRef.current = { text: e.target.value, edited: true }; setMessage(e.target.value); }}
               placeholder="例如：希望支持某类指标、某处看不懂…"
             />
             <label className="hom-label" htmlFor="hom-feedback-contact">
@@ -303,7 +335,7 @@ export default function HomeOverflowMenu({
             />
             {error ? <p className="hom-error">{error}</p> : null}
             <div className="hom-drawer-actions">
-              <button type="button" className="hom-btn-ghost" disabled={sending} onClick={() => { setCatOpen(false); setFeedbackOpen(false); }}>
+              <button type="button" className="hom-btn-ghost" disabled={sending} onClick={() => { setCatOpen(false); changeFeedbackOpen(false); }}>
                 取消
               </button>
               <button type="button" className="hom-btn" disabled={sending} onClick={() => void submitFeedback()}>

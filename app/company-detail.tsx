@@ -1,5 +1,7 @@
 'use client';
 
+import { requestAssistantTurn, FEEDBACK_REVIEW_LINE } from '@/lib/assistant-turn';
+import { requestFeedbackDraft, subscribeFeedbackState, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { amount, anomaliesConclusion, attributionConclusion, comparableHistory, sequentialHistory, filingType, format, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, suggestClosestReport, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
@@ -40,8 +42,6 @@ import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT, VOICE_PDF_ZOOM_MIN, VOICE_PDF_ZOOM_MAX } from '@/lib/voice/zoom-intent';
 import { VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
 import { voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
-import { voiceCapabilitySpeech } from '@/lib/voice/meta-intent';
-import { voiceHowToAskSpeech } from '@/lib/voice/how-to-ask-intent';
 import HomeOverflowMenu from './home-overflow-menu';
 import { findTocPage, matchSection, buildSectionReadChunks } from '@/lib/voice/section-match';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
@@ -290,6 +290,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const pageEnter = useRef<'start' | 'next' | 'prev'>('start');
   const [asking, setAsking] = useState(false);
   const voice = useVoiceSession();
+  const voiceApiRef = useRef(voice);
+  const voiceRequestRef = useRef<AbortController | null>(null);
+  const feedbackStateHandlerRef = useRef<(open: boolean) => void>(() => undefined);
   /** Mirror global realtime voice — float/ASR live in VoiceSessionProvider. */
   const voiceSession = voice.active;
   const voiceListening = voice.listening;
@@ -1281,6 +1284,18 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voice.setBusy(Boolean(voiceSession && asking));
   }, [asking, voiceSession, voice]);
 
+  useLayoutEffect(() => {
+    const wasActive = voiceApiRef.current.active;
+    voiceApiRef.current = voice;
+    if (wasActive && !voice.active) {
+      voiceConvRef.current = false;
+      voiceRequestRef.current?.abort();
+      voiceTtsAbortRef.current?.abort();
+      voiceTtsAbortRef.current = null;
+      releaseVoiceIo();
+    }
+  });
+
   // Current report only; same warning predicate as the red audit banner below.
   useLayoutEffect(() => {
     voice.setReportAuditRisk(hasReportAuditRisk(selected));
@@ -1305,6 +1320,32 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceAutoJump]);
+
+  function onFeedbackState(open: boolean) {
+    if (open) {
+      requestRef.current?.abort();
+      voiceTtsAbortRef.current?.abort();
+      voiceTtsAbortRef.current = null;
+      voiceSpeakRef.current = false;
+      voiceGenRef.current += 1;
+      stopVoiceSession();
+      voice.stopMic();
+      voice.setSpeaking(false);
+      voice.setBusy(false);
+      voice.setSuppressAutoListen(true);
+      busyRef.current = false;
+      setAsking(false);
+      setJumpAsk(null);
+    } else {
+      voiceTtsAbortRef.current?.abort();
+      voiceTtsAbortRef.current = null;
+      voice.setSpeaking(false);
+      voice.setSuppressAutoListen(false);
+      if (voiceConvRef.current) resumeVoiceConversation();
+    }
+  }
+  useLayoutEffect(() => { feedbackStateHandlerRef.current = onFeedbackState; });
+  useEffect(() => subscribeFeedbackState(open => feedbackStateHandlerRef.current(open)), []);
 
   // ASR homophone lexicon from current report company / industry.
   useEffect(() => {
@@ -1436,11 +1477,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
 
   /** After a turn (answer read / nav / empty): listen again while the conversation is on. */
   function resumeVoiceConversation() {
-    if (!voiceConvRef.current || !voice.active) {
+    if (isFeedbackDrawerOpen()) return;
+    if (!voiceConvRef.current || !voiceApiRef.current.active) {
       endVoiceMode();
       return;
     }
-    voice.resumeListen();
+    voiceApiRef.current.resumeListen();
   }
 
 
@@ -1457,7 +1499,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
 
   /** Same path as clicking an in-answer [Pxx] / 参考来源 chip. */
-  function revealVoiceCitation(c: Citation) {
+  function revealVoiceCitation(c: Citation, allowCrossReport = false) {
+    if (isFeedbackDrawerOpen()) return;
+    if (c.reportId && c.reportId !== activeId.current && !allowCrossReport) {
+      setVoiceJumpHint(c); // Automatic evidence may suggest a source, never open a cross-report dialog.
+      return;
+    }
     lastVoiceCiteRef.current = c;
     setSourceMode('pdf');
     setSourceCollapsed(false);
@@ -1479,7 +1526,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
 
   /** Short confirm TTS that keeps the continuous voice session listening afterward. */
-  function speakVoiceConfirm(line: string, opts?: { resume?: boolean }) {
+  function speakVoiceConfirm(line: string, opts?: { resume?: boolean; listen?: boolean }) {
     const resume = opts?.resume !== false;
     const prior = voiceTtsAbortRef.current;
     voiceTtsAbortRef.current = null;
@@ -1488,7 +1535,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voiceTtsAbortRef.current = abort;
     voiceSpeakRef.current = false;
     setVoiceSpeaking(true);
-    if (voiceConvRef.current) {
+    if (voiceConvRef.current && opts?.listen !== false && !isFeedbackDrawerOpen()) {
       voice.stopMic();
       void armBargeInAsr('speaking');
     }
@@ -1499,6 +1546,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         voiceTtsAbortRef.current = null;
         setVoiceSpeaking(false);
         stopVoiceSession(); // drop armed barge ASR before provider listen
+        if (isFeedbackDrawerOpen()) { voice.setSuppressAutoListen(true); return; }
         if (resume && voiceConvRef.current) resumeVoiceConversation();
       });
   }
@@ -1654,16 +1702,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     };
 
     switch (cmd.kind) {
-      case 'capability': {
-        cancelSectionRead();
-        out(voiceCapabilitySpeech(), { chat: true, speak: true });
-        return;
-      }
-      case 'how-to-ask': {
-        cancelSectionRead();
-        out(voiceHowToAskSpeech(selected.industry, 'detail'), { chat: true, speak: true });
-        return;
-      }
       case 'tts-pause': {
         const ok = pauseVoiceTts();
         const line = ok ? '已暂停朗读' : '现在没有在朗读';
@@ -1742,7 +1780,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       case 'cite': {
         const citeTarget = lastVoiceCiteRef.current ?? voiceJumpHint;
         if (citeTarget?.page) {
-          revealVoiceCitation(citeTarget);
+          revealVoiceCitation(citeTarget, true);
           out(`出处在第 ${citeTarget.page} 页`, { toast: true, resume: true });
         } else {
           out(VOICE_CITE_MISSING_LINE, { speak: true });
@@ -1901,6 +1939,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voiceEmptyTurnsRef.current = 0;
 
     // —— Shared local command pack (same dispatcher as typed input) ——
+    if (isFeedbackDrawerOpen()) return;
     const cmd = parseLocalCommand(text, {
       lastPageNav: lastVoicePageNavRef.current,
       ttsPaused: isVoiceTtsPaused(),
@@ -1973,7 +2012,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
    * and becomes the next utterance. Restores barge-in lost in the app-global session refactor.
    */
   async function armBargeInAsr(_mode: 'speaking' | 'asking') {
-    if (!voiceConvRef.current) return;
+    if (!voiceConvRef.current || isFeedbackDrawerOpen()) return;
     clearVoiceFinalTimer();
     clearVoiceTurnTimers();
     pcmCaptureRef.current?.stop();
@@ -2327,6 +2366,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   async function ask(text: string, extra?: { replaceAt?: number; focus?: FocusItem[]; rewrite?: 'detailed' | 'brief' | 'retry'; spoken?: boolean }) {
     const replacing = extra?.replaceAt;
     const typed = text.trim();
+    if (isFeedbackDrawerOpen()) return;
     // Typed input goes through the SAME local command dispatcher as voice (翻页 / 缩放 / 目录 /
     // 回首页 / 退下 …): no AI call, no TTS and no float unless a voice session is already running.
     // Runs before the busy guard so 翻页 / 缩放 still work mid-answer; leaving the page does not.
@@ -2344,6 +2384,36 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (replacing != null) {
       if (busyRef.current || !memoryReady.current) return;
     } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
+    const controller = new AbortController(); requestRef.current = controller; busyRef.current = true;
+    const id = selected.id;
+    if (extra?.spoken || voiceConvRef.current) voiceRequestRef.current = controller;
+    const releasePreflight = () => {
+      if (requestRef.current === controller && activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
+    };
+    const ownsTurn = () => requestRef.current === controller && activeId.current === id && !controller.signal.aborted && !isFeedbackDrawerOpen();
+    setAsking(true);
+    if (typed && replacing == null) {
+      try {
+        const turn = await requestAssistantTurn({ question: typed, surface: 'report', context: `${selected.company_name} ${period(selected)}`, history: messages.slice(-8).map(row => ({ role: row.role, content: row.text })) }, controller.signal);
+        if (!ownsTurn()) { releasePreflight(); return; }
+        if (turn.kind !== 'domain') {
+          const line = turn.kind === 'feedback' ? FEEDBACK_REVIEW_LINE : turn.answer;
+          setQuestion('');
+          setMessages(current => [...current, { role: 'user', text: typed, local: true }, { role: 'assistant', text: line, local: true }]);
+          busyRef.current = false; setAsking(false); setThinking(false);
+          setChatCollapsed(false);
+          if (turn.kind === 'feedback') {
+            const opened = requestFeedbackDraft(turn.action, ownsTurn);
+            if (opened && voiceConvRef.current) speakVoiceConfirm(line, { resume: false, listen: false });
+          } else if (extra?.spoken || voiceConvRef.current) speakVoiceConfirm(line);
+          return;
+        }
+      } catch {
+        if (!ownsTurn()) { releasePreflight(); return; }
+        // Transient classification failure never relaxes the evidence policy.
+      }
+    }
+    if (!ownsTurn()) { releasePreflight(); return; }
     // Explicit clips / caller focus; live selections get a badge too, auto page text does not.
     const userFocus: FocusItem[] = extra?.focus ?? (replacing != null ? [] : clips.map(c => ({
       kind: c.kind,
@@ -2416,8 +2486,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const display = displayFocusPrompt(question, userFocus);
     const attachNote = focusAttachNote(liveSel ? mergeLiveSelectionFocus(userFocus, liveSel) : userFocus);
     setRegenMenu(null);
-    const controller = new AbortController(); requestRef.current = controller; busyRef.current = true;
-    const id = selected.id;
     const prior = replacing != null ? messages.slice(0, replacing - 1) : messages;
     const asked = prior.filter(m => m.role === 'user' && !m.local).map(m => m.ask?.question ?? m.text);
     const slot = replacing != null ? replacing : messages.length + 1;
@@ -2441,6 +2509,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     let revealed = '';
     let lastEvidence: Citation[] | undefined;
     const clearTypewriter = () => {
+      if (requestRef.current !== controller) return;
       if (typewriterTimerRef.current != null) {
         window.clearInterval(typewriterTimerRef.current);
         typewriterTimerRef.current = null;
@@ -2448,7 +2517,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     };
     const paint = (citations?: Citation[], force = false) => {
       if (citations) lastEvidence = citations;
-      if (activeId.current !== id) return;
+      if (requestRef.current !== controller || activeId.current !== id) return;
       if (!force && controller.signal.aborted) return;
       const cites = citations ?? lastEvidence;
       setMessages(m => m.map((item,i) => i === m.length-1 ? { ...item, text:revealed, ...(cites ? { citations: cites } : {}) } : item));
@@ -2472,7 +2541,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     };
     function update(citations?: Citation[]) {
       if (citations) lastEvidence = citations;
-      if (activeId.current !== id || controller.signal.aborted) return;
+      if (requestRef.current !== controller || activeId.current !== id || controller.signal.aborted) return;
       // Voice: show full text immediately so TTS is not delayed. Typed chat uses typewriter rhythm.
       if (voiceSpeakRef.current || voiceConvRef.current) {
         revealed = answer;
@@ -2517,7 +2586,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
-        const {done,value:chunk} = await reader.read(); buffer += decoder.decode(chunk ?? new Uint8Array(), {stream:!done});
+        const {done,value:chunk} = await reader.read();
+        if (!ownsTurn()) { await reader.cancel().catch(() => undefined); break; }
+        buffer += decoder.decode(chunk ?? new Uint8Array(), {stream:!done});
         const events = buffer.split('\n\n'); buffer = events.pop() ?? '';
         for (const event of events) { const raw = event.split('\n').find(l=>l.startsWith('data: '))?.slice(6); if (!raw || raw==='[DONE]') continue; const p = JSON.parse(raw) as ChatStreamEvent; if('status' in p && p.status==='reasoning') setThinking(true); if('content' in p||'result' in p) setThinking(false); answer = 'result' in p ? p.result.answer : answer + ('content' in p ? p.content : ''); if('error' in p) answer=p.error; update('result' in p ? p.result.evidence : 'evidence' in p ? p.evidence : undefined); }
         if(done) break;
@@ -2525,7 +2596,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (!answer && !controller.signal.aborted) { answer='暂无法回答：未返回足够证据。可尝试询问本期营业收入或净利润。'; update(); }
     } catch (error) {
       if (controller.signal.aborted) {
-        if (activeId.current === id) {
+        if (requestRef.current === controller && activeId.current === id) {
           setMessages(m => m.map((item,i) => i === m.length-1 && item.role === 'assistant'
             ? { ...item, text: answer || '已停止生成' }
             : item));
@@ -2538,16 +2609,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     finally {
       // Finish revealing any buffered tokens before leaving the streaming state.
       clearTypewriter();
-      if (activeId.current === id && answer && revealed !== answer) {
+      if (requestRef.current === controller && activeId.current === id && answer && revealed !== answer) {
         revealed = answer;
         paint(lastEvidence, true);
       }
-      if (activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
+      if (requestRef.current === controller && activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
     }
-    if (activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
+    if (requestRef.current === controller && activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
     /* Typed ask: jump/highlight first in-report cite so「营收是多少」paints 营业收入 without a click. */
     if (
-      activeId.current === id
+      requestRef.current === controller && activeId.current === id
       && !controller.signal.aborted
       && answer
       && lastEvidence?.length
@@ -2559,9 +2630,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (target?.page) { lastVoiceCiteRef.current = target; jumpCitation(target); }
     }
     /* voice-after-ask: jump via the same path as clicking an answer [Pxx] chip */
-    if (voiceSpeakRef.current) {
+    if (requestRef.current === controller && voiceSpeakRef.current) {
       voiceSpeakRef.current = false;
-      if (activeId.current === id && !controller.signal.aborted && answer) {
+      if (requestRef.current === controller && activeId.current === id && !controller.signal.aborted && answer) {
         const fromMarks = uniqueAnswerSources(answer, lastEvidence, pageLabel);
         const withQuote = lastEvidence?.find(e => e.page && (e.quote ?? '').trim());
         const target = fromMarks[0] ?? withQuote ?? lastEvidence?.[0];
@@ -3217,7 +3288,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         type="button"
         className="cd-voice-jump"
         onClick={() => {
-          revealVoiceCitation(voiceJumpHint);
+          revealVoiceCitation(voiceJumpHint, true);
           setVoiceJumpHint(null);
         }}
       >

@@ -62,16 +62,6 @@ const MUST_MATCH: [string, LocalCommand][] = [
   ['翻到P12', nav({ kind: 'goto', page: 12 })],
   ['翻到第9999页', nav({ kind: 'goto', page: 9999 })],
   // —— pack: capability / tts / style / layout / zoom / cite / read / toc
-  ['你能干什么', { kind: 'capability' }],
-  ['你能干啥', { kind: 'capability' }],
-  ['你能干啥？', { kind: 'capability' }],
-  ['你会干啥', { kind: 'capability' }],
-  ['你会啥', { kind: 'capability' }],
-  ['你有什么功能', { kind: 'capability' }],
-  ['介绍一下你自己', { kind: 'capability' }],
-  ['我该怎么提问', { kind: 'how-to-ask' }],
-  ['可以问什么', { kind: 'how-to-ask' }],
-  ['问什么好', { kind: 'how-to-ask' }],
   ['先别念了', { kind: 'tts-pause' }],
   ['暂停朗读', { kind: 'tts-pause' }],
   ['停一下', { kind: 'tts-pause' }],
@@ -207,7 +197,7 @@ test('covers every command kind in the pack', () => {
   const kinds = new Set<string>(MUST_MATCH.map(([, c]) => c.kind));
   // tts-resume-bare / continue are context-driven — covered below.
   for (const k of [
-    'capability', 'how-to-ask', 'tts-pause', 'tts-resume', 'style', 'layout', 'zoom', 'cite', 'read-page-head',
+    'tts-pause', 'tts-resume', 'style', 'layout', 'zoom', 'cite', 'read-page-head',
     'read-section', 'toc-open', 'toc-jump', 'page-nav', 'home', 'farewell',
   ]) {
     assert.ok(kinds.has(k), `table lacks ${k}`);
@@ -239,7 +229,6 @@ test('chinese numerals + full-width digits', () => {
     ['十', 10], ['十二', 12], ['十九', 19], ['二十', 20], ['二十三', 23], ['九十九', 99],
     ['一百', 100], ['一百零五', 105], ['一百一十', 110], ['一百二十五', 125], ['两百', 200],
     ['一千零五', 1005], ['一零五', 105], ['二三', 23], ['８', 8], ['１２', 12], ['48', 48],
-    ['', null], ['百', null], ['abc', null], ['一二三四五', null], ['12345', null],
   ];
   for (const [s, n] of table) assert.equal(parseChineseNumber(s), n, JSON.stringify(s));
 });

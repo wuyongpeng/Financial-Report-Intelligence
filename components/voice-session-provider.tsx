@@ -1,5 +1,6 @@
 'use client';
 
+import { isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import {
   createContext,
   useCallback,
@@ -332,7 +333,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   }, [clearArmTimer, clearVoiceFinalTimer, clearVoiceTurnTimers, end]);
 
   const listenTurn = useCallback(async (barge = false) => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || isFeedbackDrawerOpen()) return;
     systemTtsAbortRef.current?.abort();
     systemTtsAbortRef.current = null;
     clearArmTimer();
@@ -461,7 +462,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   listenTurnRef.current = listenTurn;
 
   const armSend = useCallback(() => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || isFeedbackDrawerOpen()) return;
     if (!voicePartialRef.current.trim()) {
       finalizeListen();
       return;
@@ -483,7 +484,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   armSendRef.current = armSend;
 
   const cancelArmedSend = useCallback(() => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || isFeedbackDrawerOpen()) return;
     voiceGenRef.current += 1;
     if (voiceArmTimerRef.current != null) {
       window.clearTimeout(voiceArmTimerRef.current);
@@ -515,14 +516,14 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   }, [releaseVoiceIo]);
 
   const resumeListen = useCallback(() => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || isFeedbackDrawerOpen()) return;
     bargeRef.current = null;
     bargeArmedRef.current = false;
     void listenTurn();
   }, [listenTurn]);
 
   const armBargeIn = useCallback((onInterrupt: () => void, accept?: (text: string) => boolean) => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || isFeedbackDrawerOpen()) return;
     bargeRef.current = { onInterrupt, accept };
     if (bargeArmedRef.current && (asrSessionRef.current || captureOpeningRef.current)) return;
     void listenTurn(true);
@@ -582,7 +583,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!active || listening || speaking || busy) return;
     const t = window.setTimeout(() => {
-      if (!activeRef.current) return;
+      if (!activeRef.current || isFeedbackDrawerOpen()) return;
       if (armingRef.current) return;
       if (suppressAutoListenRef.current) return;
       if (finalizingRef.current) return;
