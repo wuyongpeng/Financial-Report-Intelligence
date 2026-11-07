@@ -28,15 +28,15 @@
 .rh-home-answer p{margin:0;font-size:14px;line-height:1.7;color:#334155;white-space:pre-wrap}
 .rh-home-answer-dismiss{position:absolute;top:10px;right:10px;border:0;background:transparent;color:#8494ab;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;padding:0}
 .rh-home-answer-dismiss:hover{background:#e2eaf8;color:#475569}
-.rh-eva-dock{box-sizing:border-box;width:max-content;max-height:calc(100dvh - 16px);position:fixed;top:72px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:stretch;gap:0;max-width:calc(100vw - 24px)}
+.rh-eva-dock{box-sizing:border-box;width:min(400px,calc(100vw - 24px));min-width:0;max-height:calc(100dvh - 16px);position:fixed;top:72px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:stretch;gap:0;max-width:calc(100vw - 24px)}
 .rh-eva-dock.is-active{overflow:hidden;background:#fff;border:1px solid #e8edf3;border-radius:999px;box-shadow:0 6px 24px #24344c12,0 1px 3px #24344c08}
 .rh-eva-dock.is-active:has(.rh-eva-notice){border-radius:28px}
 .rh-eva-dock.is-active .rh-eva-notice{contain:inline-size;box-sizing:border-box;min-width:0;width:100%;overflow-wrap:anywhere;max-width:none;max-height:25dvh;overflow:auto;flex-shrink:0;border:0;border-top:1px solid #edf0f4;border-radius:0;box-shadow:none}
 .rh-eva-dock.is-open{border-radius:28px}
-.rh-eva-capsule{touch-action:none;cursor:grab;flex-shrink:0;display:flex;align-items:center;gap:16px;padding:10px 12px;justify-content:space-between;background:transparent;border:0;box-shadow:none}
-.rh-home button.rh-eva-activity-toggle{display:flex;align-items:center;gap:12px;border:0;padding:0;background:transparent;text-align:left;color:#64748b;border-radius:999px}
-.rh-eva-status{font-size:12px;white-space:nowrap;min-width:5em}
-.rh-eva-controls{display:flex;gap:8px;align-items:center}
+.rh-eva-capsule{box-sizing:border-box;width:100%;min-width:0;touch-action:none;cursor:grab;flex-shrink:0;display:flex;align-items:center;gap:16px;padding:10px 12px;justify-content:space-between;background:transparent;border:0;box-shadow:none}
+.rh-home button.rh-eva-activity-toggle{flex:1;min-width:0;overflow:hidden;display:flex;align-items:center;gap:12px;border:0;padding:0;background:transparent;text-align:left;color:#64748b;border-radius:999px}
+.rh-eva-status{font-size:12px;white-space:nowrap;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis}
+.rh-eva-controls{flex:none;display:flex;gap:8px;align-items:center}
 .rh-home button.rh-eva-control{display:grid;place-items:center;width:44px;height:44px;flex:none;padding:0;border:0;border-radius:50%;background:#f1f3f6;color:#637084;transition:background .18s,color .18s}
 .rh-eva-control svg{width:22px;height:22px}
 .rh-home button.rh-eva-control:hover{background:#e6ebf2;color:#3064db}

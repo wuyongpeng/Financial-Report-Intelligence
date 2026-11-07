@@ -52,3 +52,20 @@ test('header and questions live inside one draggable styled shell, not separate 
   assert.ok(rule('.rh-eva-panel-log').includes('overflow-wrap:anywhere'));
   assert.ok(rule('.rh-eva-panel-log').includes('overflow:auto'));
 });
+
+
+test('all voice phases use one fixed viewport-bounded width, never intrinsic text or open-state width', () => {
+  const css = source('../app/report-home.css');
+  const rule = (selector: string) => css.split('\n').find(line => line.startsWith(selector + '{')) || '';
+  assert.ok(rule('.rh-eva-dock').includes('width:min(400px,calc(100vw - 24px))'));
+  assert.ok(!rule('.rh-eva-dock').includes('max-content'));
+  assert.ok(!rule('.rh-eva-dock.is-open').includes('width:'));
+  assert.ok(rule('.rh-eva-capsule').includes('width:100%'));
+  assert.ok(rule('.rh-home button.rh-eva-activity-toggle').includes('min-width:0'));
+  assert.ok(rule('.rh-eva-status').includes('text-overflow:ellipsis'));
+  assert.ok(rule('.rh-eva-controls').includes('flex:none'));
+  assert.ok(rule('.rh-eva-panel-log').includes('overflow-wrap:anywhere'));
+  const drag = source('../lib/voice/float-drag.ts');
+  assert.ok(!drag.includes("width: `${"), 'drag only moves the shell; it cannot size it from content');
+
+});
