@@ -83,7 +83,6 @@ type ListSortDir = 'asc' | 'desc';
 type VoicePickCandidate = ListedNameCode & { inPool: boolean };
 
 type DialogState =
-  | { kind: 'unrecognized'; query: string; suggestedCode?: string; fromVoice?: boolean }
   | { kind: 'missing-company'; listed: { code: string; name: string }; query?: string; fromVoice?: boolean }
   | { kind: 'missing-report'; company: CrawlCompanyCoverage; period: ParsedPeriod; fromVoice?: boolean }
   | {
@@ -290,8 +289,7 @@ export default function ReportHome() {
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [crawlingCodes, setCrawlingCodes] = useState<string[]>([]);
-  const [joinCode, setJoinCode] = useState('');
-  const [joinName, setJoinName] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
   /** Card grid: show 3 rows first, then reveal one-by-one as user scrolls. */
   const [visibleCardCount, setVisibleCardCount] = useState(9);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -414,7 +412,7 @@ export default function ReportHome() {
         return { action: 'hold' };
       }
       if (openDialog) {
-        // missing-company / unrecognized / missing-report: keep mic held
+        // missing-company / missing-report / voice-confirm / voice-pick: keep mic held
         return { action: 'hold' };
       }
 
@@ -545,14 +543,6 @@ export default function ReportHome() {
     })();
     return () => { cancelled = true; };
   }, []);
-
-  const joinDialogKey = dialog?.kind === 'unrecognized' ? `${dialog.suggestedCode ?? ''}|${dialog.query}` : '';
-  const [joinSyncedKey, setJoinSyncedKey] = useState(joinDialogKey);
-  if (dialog?.kind === 'unrecognized' && joinDialogKey !== joinSyncedKey) {
-    setJoinSyncedKey(joinDialogKey);
-    setJoinCode(dialog.suggestedCode ?? dialog.query.match(/(?<!\d)(\d{6})(?!\d)/)?.[1] ?? '');
-    setJoinName('');
-  }
 
   const setView = useCallback((mode: ViewMode) => {
     setViewMode(mode);
@@ -1073,7 +1063,8 @@ export default function ReportHome() {
         openBlockingDialog({ kind: 'missing-company', listed, query: raw, fromVoice });
         return;
       }
-      openBlockingDialog({ kind: 'unrecognized', query: raw, suggestedCode: raw, fromVoice });
+      // 名录外无效六位码：与短串一致，滚到公司区空态（不弹阻塞框）
+      document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
 
@@ -1144,7 +1135,8 @@ export default function ReportHome() {
       const listedAll = resolveListedCompanies(raw);
       const listedCandidates = listedAll.length ? listedAll : resolveListedCompanies(parsed.companyQuery || raw);
       if (!listedCandidates.length) {
-        openBlockingDialog({ kind: 'unrecognized', query: raw, fromVoice });
+        // 有问句意图但名录 0 命中：不弹「没有识别到上市公司」，滚到空态；不把自由文本交给 AI
+        document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
       if (listedCandidates.length > 1) {
@@ -1369,65 +1361,16 @@ export default function ReportHome() {
     router.push(`/sources?focus=${encodeURIComponent(item.code)}`);
   }
 
-  async function joinByCodeFromDialog() {
-    if (!dialog || dialog.kind !== 'unrecognized') return;
-    const code = joinCode.trim();
-    const name = joinName.trim();
-    const pendingQuery = dialog.query;
-    const fromVoice = Boolean(dialog.fromVoice);
-    if (!/^\d{6}$/.test(code)) {
-      setWaitToast('请填写有效的六位股票代码');
-      return;
-    }
-    setDialogBusy(true);
-    try {
-      const response = await fetch('/api/companies/watch', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code, ...(name ? { name } : {}) }),
-      });
-      const payload = await response.json() as {
-        ok?: boolean;
-        error?: string;
-        note?: string;
-        needName?: boolean;
-      };
-      if (!response.ok) {
-        setWaitToast(payload.error ?? '加入监控池失败');
-        if (payload.needName) {
-          /* keep dialog open for name */
-        }
-        return;
-      }
-      setWaitToast(payload.note ?? `已将 ${code} 加入监控池`);
-      dialogRef.current = null;
-      setDialog(null);
-      setSearch('');
-      const companies = await refreshCoverage();
-      await afterJoinContinue({
-        code,
-        name: name || code,
-        query: pendingQuery,
-        fromVoice,
-        companies,
-      });
-    } finally {
-      setDialogBusy(false);
-    }
-  }
-
-  async function reportMissingToAdmin() {
-    if (!dialog || dialog.kind !== 'unrecognized') return;
-    setDialogBusy(true);
+  /** Empty-state light entry: report current search for admin roster backfill (no blocking dialog). */
+  async function reportCurrentSearchMissing() {
+    const query = search.trim();
+    if (!query || reportBusy) return;
+    setReportBusy(true);
     try {
       const response = await fetch('/api/companies/report-missing', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          query: dialog.query,
-          ...(joinCode.trim() ? { code: joinCode.trim() } : {}),
-          ...(joinName.trim() ? { name: joinName.trim() } : {}),
-        }),
+        body: JSON.stringify({ query }),
       });
       const payload = await response.json() as { ok?: boolean; error?: string; note?: string };
       if (!response.ok) {
@@ -1435,14 +1378,10 @@ export default function ReportHome() {
         return;
       }
       setWaitToast(payload.note ?? '已上报给管理员');
-      dialogRef.current = null;
-      setDialog(null);
-      voice.setSuppressAutoListen(false);
-      if (voice.active) {
-        window.setTimeout(() => voice.resumeListen(), 200);
-      }
+    } catch (err) {
+      setWaitToast(`网络异常：${String(err)}`);
     } finally {
-      setDialogBusy(false);
+      setReportBusy(false);
     }
   }
 
@@ -2054,16 +1993,32 @@ export default function ReportHome() {
               </>
             ) : (
               <>
-                <p>试试调整行业，或换一个公司简称 / 六位代码；完整问题请点发送走追问路径。</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearch('');
-                    setIndustry('全部');
-                  }}
-                >
-                  清除筛选
-                </button>
+                <p>
+                  {keyword
+                    ? '未匹配到监控池或识别名录中的公司。可换简称 / 六位代码；名录缺漏可上报管理员。'
+                    : '试试调整行业，或换一个公司简称 / 六位代码；完整问题请点发送走追问路径。'}
+                </p>
+                <div className="rh-empty-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      setIndustry('全部');
+                    }}
+                  >
+                    清除筛选
+                  </button>
+                  {keyword ? (
+                    <button
+                      type="button"
+                      className="rh-empty-report"
+                      disabled={reportBusy}
+                      onClick={() => void reportCurrentSearchMissing()}
+                    >
+                      {reportBusy ? '上报中…' : '上报管理员'}
+                    </button>
+                  ) : null}
+                </div>
               </>
             )}
           </div>
@@ -2091,53 +2046,7 @@ export default function ReportHome() {
             aria-labelledby="rh-dialog-title"
             onClick={(e) => e.stopPropagation()}
           >
-            {dialog.kind === 'unrecognized' ? (
-              <>
-                <h2 id="rh-dialog-title">没有识别到上市公司</h2>
-                <p>
-                  未能从「{dialog.query}」匹配到 A 股公司。不会把自由文本当成公司名交给 AI。
-                  若已知六位代码，可填写后加入监控池；也可上报管理员补全识别名录。
-                </p>
-                <div className="rh-dialog-fields">
-                  <label>
-                    <span>六位代码</span>
-                    <input
-                      inputMode="numeric"
-                      maxLength={6}
-                      placeholder="例如 688802"
-                      value={joinCode}
-                      disabled={dialogBusy}
-                      onChange={(e) => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    />
-                  </label>
-                  <label>
-                    <span>公司简称（可选）</span>
-                    <input
-                      placeholder="例如 沐曦股份"
-                      value={joinName}
-                      disabled={dialogBusy}
-                      onChange={(e) => setJoinName(e.target.value)}
-                    />
-                  </label>
-                </div>
-                <div className="rh-dialog-actions rh-dialog-actions-wrap">
-                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => closeBlockingDialog({ resumeListen: true })}>
-                    取消
-                  </button>
-                  <button type="button" className="rh-dialog-secondary" disabled={dialogBusy} onClick={() => void reportMissingToAdmin()}>
-                    {dialogBusy ? '上报中…' : '上报管理员'}
-                  </button>
-                  <button
-                    type="button"
-                    className="rh-dialog-confirm"
-                    disabled={dialogBusy || !/^\d{6}$/.test(joinCode.trim())}
-                    onClick={() => void joinByCodeFromDialog()}
-                  >
-                    {dialogBusy ? '加入中…' : '填写代码加入'}
-                  </button>
-                </div>
-              </>
-            ) : dialog.kind === 'missing-company' ? (
+            {dialog.kind === 'missing-company' ? (
               <>
                 <h2 id="rh-dialog-title">加入监控池</h2>
                 <p>

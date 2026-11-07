@@ -208,3 +208,16 @@ test('东鹏最近业绩好不好 → question + both 东鹏 companies', () => {
   const hits = resolveListedCompanies(q.companyQuery || q.raw);
   assert.deepEqual(hits.map((h) => h.code).sort(), ['003012', '605499'].sort());
 });
+
+
+test('former unrecognized-dialog inputs resolve to 0 listed (home uses empty-state, not blocking dialog)', () => {
+  // Pure invalid code / free-text ask with no A-share hit: UI scrolls to empty state + optional report.
+  assert.equal(resolveListedCompanies('999999').length, 0);
+  assert.equal(resolveListedCompany('999999'), null);
+  assert.equal(hasQuestionIntent('xxxxx多少'), true);
+  assert.equal(resolveListedCompanies('xxxxx多少').length, 0);
+  assert.equal(resolveListedCompanies(parseHomeQuery('xxxxx多少').companyQuery || 'xxxxx多少').length, 0);
+  assert.equal(hasQuestionIntent('完全不存在的公司xyz增长如何'), true);
+  assert.equal(resolveListedCompany('完全不存在的公司xyz增长如何'), null);
+});
+

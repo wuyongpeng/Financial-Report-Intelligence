@@ -57,7 +57,7 @@ export function parseHomeRosterOpenQuery(text: string): string | null {
 
 /**
  * True when the utterance should stay on the home AI path with roster context,
- * instead of company-detail handoff / unrecognized-join dialogs.
+ * instead of company-detail handoff / missing-company join dialogs.
  */
 export function isHomeRosterQuestion(text: string): boolean {
   const q = normalizeVoiceText(text);

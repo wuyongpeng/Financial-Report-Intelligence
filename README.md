@@ -127,7 +127,7 @@ npm run worker
 
 - **识别名录**：用于把「三一重工」「三一重工(600031)」等解析成代码；不代表已在抓取。
 - **监控池**：真正启用采集与首页卡片列表；未在池内时会提示「已识别…加入监控池」，确认后 `POST /api/companies/watch`。
-- **新上市 / 名录外**：`POST /api/companies/watch` 接受 `{ code, name? }`；六位代码合法且提供简称（或交易所 best-effort 查名）时可 upsert 入库，即使不在 `ashare-universe.json`。未识别搜索可「填写六位代码加入」或「上报管理员」（写入 `data/missing-company-reports.json`）。
+- **新上市 / 名录外**：`POST /api/companies/watch` 接受 `{ code, name? }`；六位代码合法且提供简称（或交易所 best-effort 查名）时可 upsert 入库，即使不在 `ashare-universe.json`。名录未命中时首页走公司区空态（不弹阻塞框）；空态可「上报管理员」（`POST /api/companies/report-missing` → `data/missing-company-reports.json`），已知代码可直接搜六位码再走「加入监控池」。
 
 刷新识别名录（优先拉取上交所公开列表，深交所可达时合并；失败则保留本地种子并确保 essentials）：
 
