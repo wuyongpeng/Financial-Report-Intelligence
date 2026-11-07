@@ -1,14 +1,11 @@
 import { redirect } from 'next/navigation';
+import { adminSourcesTarget, type AdminSearchParams } from '@/lib/admin-route';
 
-/** Legacy /sources → unified ops console crawl tab (keep ?focus=). */
-export default async function SourcesPage({
+/** Compatibility entry; keep all query parameters when entering data operations. */
+export default async function SourcesRedirectPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<AdminSearchParams>;
 }) {
-  const params = await searchParams;
-  const focusRaw = params.focus;
-  const focus = Array.isArray(focusRaw) ? focusRaw[0] : focusRaw;
-  const qs = focus ? `?focus=${encodeURIComponent(focus)}` : '';
-  redirect(`/admin/crawl${qs}`);
+  redirect(adminSourcesTarget(await searchParams));
 }

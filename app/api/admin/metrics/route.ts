@@ -29,7 +29,7 @@ type RawMetricRow = {
   audit_opinion_page: number | null;
 };
 
-/** Open read for demo ops console; mutate routes (ack/flag) still require admin. */
+/** Open read for operations console; deletion has a separate server-side password gate. */
 export async function GET(_request: Request) {
   try {
     await ensureBackendSchema();

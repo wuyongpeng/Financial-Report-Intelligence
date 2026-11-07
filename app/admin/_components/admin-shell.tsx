@@ -1,22 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import './admin-shell.css';
 
 /** Unified ops console: data loop (crawl/parse) + user loop (audit/survey/feedback). */
 export const ADMIN_NAV_GROUPS = [
   {
     id: 'data',
-    label: '数据侧',
+    label: '数据管理',
     items: [
-      { href: '/admin/crawl', label: '数据采集' },
+      { href: '/admin/sources', label: '数据采集' },
       { href: '/admin/metrics', label: '解析总览' },
       { href: '/admin/check', label: '指标核对' },
     ],
   },
   {
     id: 'user',
-    label: '用户侧',
+    label: '用户运营',
     items: [
       { href: '/admin/audit', label: '访问审计' },
       { href: '/admin/survey', label: '用户调研' },
@@ -25,147 +26,23 @@ export const ADMIN_NAV_GROUPS = [
   },
 ] as const;
 
-/** Pages that must show the admin password gate. Crawl/metrics/check stay open for demo. */
-export const ADMIN_SENSITIVE_HREFS = new Set<string>([
-  '/admin/audit',
-  '/admin/survey',
-  '/admin/feedback',
-]);
-
-export function useAdminSession() {
-  const [ready, setReady] = useState(false);
-  const [admin, setAdmin] = useState(false);
-  const [loginError, setLoginError] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
-  const [password, setPassword] = useState('');
-
-  const refreshSession = useCallback(async () => {
-    const res = await fetch('/api/auth/session', { cache: 'no-store', credentials: 'same-origin' });
-    const body = await res.json().catch(() => ({})) as { admin?: boolean };
-    setAdmin(Boolean(body.admin));
-    setReady(true);
-  }, []);
-
-  useEffect(() => { void refreshSession(); }, [refreshSession]);
-
-  const loginWithPassword = useCallback(async (pwd: string) => {
-    setLoggingIn(true);
-    setLoginError('');
-    try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ password: pwd }),
-      });
-      const body = await res.json().catch(() => ({})) as { error?: string };
-      if (!res.ok) {
-        setLoginError(body.error || '登录失败');
-        return false;
-      }
-      setAdmin(true);
-      return true;
-    } catch {
-      setLoginError('登录失败');
-      return false;
-    } finally {
-      setLoggingIn(false);
-    }
-  }, []);
-
-  const submitLogin = useCallback(async () => {
-    if (!password.trim()) {
-      setLoginError('请输入管理员密码');
-      return;
-    }
-    const ok = await loginWithPassword(password);
-    if (ok) setPassword('');
-  }, [loginWithPassword, password]);
-
-  const logout = useCallback(async () => {
-    await fetch('/api/admin/login', { method: 'DELETE', credentials: 'same-origin' });
-    setAdmin(false);
-    setPassword('');
-  }, []);
-
-  return {
-    ready, admin, loginError, loggingIn, password, setPassword,
-    submitLogin, logout, setAdmin,
-  };
-}
-
-export function AdminLoginForm({
-  title,
-  hint,
-  password,
-  setPassword,
-  loginError,
-  loggingIn,
-  onSubmit,
-}: {
-  title: string;
-  hint: string;
-  password: string;
-  setPassword: (v: string) => void;
-  loginError: string;
-  loggingIn: boolean;
-  onSubmit: () => void;
-}) {
-  return (
-    <main style={wrap}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <h1 style={{ ...h1, margin: 0 }}>{title}</h1>
-        <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
-      </div>
-      <p style={{ ...muted, marginTop: 8 }}>{hint}</p>
-      {loginError ? <p style={err}>{loginError}</p> : null}
-      <form
-        style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}
-        onSubmit={(e) => { e.preventDefault(); onSubmit(); }}
-      >
-        <label style={{ ...muted, margin: 0 }} htmlFor="admin-gate-password">管理员密码</label>
-        <input
-          id="admin-gate-password"
-          type="password"
-          name="password"
-          autoComplete="current-password"
-          autoFocus
-          style={input}
-          value={password}
-          disabled={loggingIn}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="请输入密码"
-        />
-        <button type="submit" style={btn} disabled={loggingIn}>
-          {loggingIn ? '登录中…' : '登录'}
-        </button>
-      </form>
-    </main>
-  );
-}
-
 export function AdminHeader({
   title,
   subtitle,
   activeHref,
-  onLogout,
-  showLogout = true,
   children,
 }: {
   title: string;
   subtitle?: string;
   activeHref: string;
-  onLogout?: () => void;
-  /** Open pages (crawl/metrics/check) hide logout until an admin session exists. */
-  showLogout?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <header style={headSticky} aria-label={title}>
+    <header className="admin-header" style={headSticky} aria-label={title}>
       <div style={{ minWidth: 0, flex: 1 }}>
         <h1 style={brand}>Eva 数据运营</h1>
         {subtitle ? <p style={{ ...muted, margin: '4px 0 0' }}>{subtitle}</p> : null}
-        <nav style={nav} aria-label="数据运营">
+        <nav className="admin-nav" style={nav} aria-label="数据运营">
           {ADMIN_NAV_GROUPS.map((group, gi) => (
             <span key={group.id} style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
               {gi > 0 ? <span style={navDivider} aria-hidden="true" /> : null}
@@ -174,6 +51,8 @@ export function AdminHeader({
                 <Link
                   key={item.href}
                   href={item.href}
+                  className="admin-nav-link"
+                  aria-current={item.href === activeHref ? 'page' : undefined}
                   style={{
                     ...navLink,
                     ...(item.href === activeHref ? navLinkActive : null),
@@ -189,9 +68,6 @@ export function AdminHeader({
       </div>
       <div style={{ display: 'flex', flexShrink: 0, gap: 8, alignItems: 'center' }}>
         <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
-        {showLogout && onLogout ? (
-          <button type="button" style={btnGhost} onClick={onLogout}>退出</button>
-        ) : null}
       </div>
     </header>
   );
@@ -239,7 +115,7 @@ const wrap: CSSProperties = {
   fontFamily: 'system-ui, -apple-system, sans-serif', color: '#203047',
 };
 const wrapWide: CSSProperties = {
-  maxWidth: 1400, width: '100%', margin: '24px auto 48px', padding: '0 16px',
+  maxWidth: 1400, width: '100%', margin: '8px auto 32px', padding: '0 16px',
   boxSizing: 'border-box',
   fontFamily: 'system-ui, -apple-system, sans-serif', color: '#203047',
 };
@@ -280,11 +156,11 @@ const headSticky: CSSProperties = {
   position: 'sticky',
   top: 0,
   zIndex: 40,
-  marginBottom: 12,
+  marginBottom: 8,
   marginLeft: -16,
   marginRight: -16,
-  paddingTop: 8,
-  paddingBottom: 10,
+  paddingTop: 6,
+  paddingBottom: 6,
   paddingLeft: 16,
   paddingRight: 16,
   background: 'var(--bg, #f4f6f9)',
@@ -305,19 +181,20 @@ const td: CSSProperties = {
 const brand: CSSProperties = {
   margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: '0.01em', color: '#203047', lineHeight: 1.25,
 };
-const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' };
+const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 6, alignItems: 'center' };
 const navGroupLabel: CSSProperties = {
-  fontSize: 11, color: '#8b97a9', fontWeight: 600, letterSpacing: '0.04em', marginRight: 2,
+  fontSize: 12, color: '#3d5270', fontWeight: 600, letterSpacing: '0.04em', marginRight: 2,
 };
 const navDivider: CSSProperties = {
-  width: 1, height: 18, background: '#d5dde8', margin: '0 4px',
+  width: 1, height: 24, background: '#d5dde8', margin: '0 4px',
 };
 const navLink: CSSProperties = {
   fontSize: 12, color: '#5b6d86', textDecoration: 'none',
-  padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff',
+  display: 'inline-flex', alignItems: 'center', height: 32, padding: '0 12px',
+  borderRadius: 6, border: '1px solid transparent', background: 'transparent', fontWeight: 400,
 };
 const navLinkActive: CSSProperties = {
-  color: '#1f4fad', borderColor: '#aec4ef', background: '#edf3ff', fontWeight: 600,
+  color: '#fff', borderColor: '#3064db', background: '#3064db', fontWeight: 600,
 };
 const cardRow: CSSProperties = {
   display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 12,

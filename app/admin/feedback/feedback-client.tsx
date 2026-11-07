@@ -4,10 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AdminHeader,
   AdminHelpTip,
-  AdminLoginForm,
   AdminMain,
   adminStyles as s,
-  useAdminSession,
 } from '../_components/admin-shell';
 import { AiSummarizePanel } from '../_components/ai-summarize-card';
 import { matchesQuickSearch } from '@/lib/admin-table-search';
@@ -30,7 +28,6 @@ function fmtTime(iso: string) {
 }
 
 export function FeedbackAdminClient() {
-  const session = useAdminSession();
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -48,8 +45,7 @@ export function FeedbackAdminClient() {
         credentials: 'same-origin',
       });
       if (res.status === 401) {
-        session.setAdmin(false);
-        setError('管理员登录已失效，请重新登录');
+        setError('请求未授权，请刷新后重试');
         return;
       }
       if (!res.ok) {
@@ -63,11 +59,11 @@ export function FeedbackAdminClient() {
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  }, []);
 
   useEffect(() => {
-    if (session.admin) void load();
-  }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps
+    void load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredItems = useMemo(() => {
     const q = search.trim();
@@ -85,35 +81,15 @@ export function FeedbackAdminClient() {
 
   const lastId = items.length ? items[items.length - 1].id : null;
 
-  if (!session.ready) {
-    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
-  }
-
-  if (!session.admin) {
-    return (
-      <AdminLoginForm
-        title="反馈收集"
-        hint="需要管理员密码后才能查看用户反馈。"
-        password={session.password}
-        setPassword={session.setPassword}
-        loginError={session.loginError}
-        loggingIn={session.loggingIn}
-        onSubmit={() => { void session.submitLogin(); }}
-      />
-    );
-  }
-
   return (
     <AdminMain>
       <AdminHeader
         title="反馈收集"
         activeHref="/admin/feedback"
-        onLogout={() => { void session.logout(); }}
       />
       {error ? <p style={s.err}>{error}</p> : null}
       <AiSummarizePanel
         scope="feedback"
-        onSessionExpired={() => session.setAdmin(false)}
       />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
         <input

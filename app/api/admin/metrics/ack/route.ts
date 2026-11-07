@@ -1,4 +1,3 @@
-import { requireAdmin } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
@@ -8,11 +7,9 @@ export const dynamic = 'force-dynamic';
 /**
  * Mark a metrics overview row as human-acked (true surge / fixed after flag).
  * Clears flagged state (mutual exclusive). Hides from异常筛选.
- * Admin session only — no EVA password (unlike discard).
+ * Open operations console; deletion remains password-protected in /api/crawl/discard.
  */
 export async function POST(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
 
   let body: {
     announcementId?: unknown;

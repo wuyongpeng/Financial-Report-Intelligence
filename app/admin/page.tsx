@@ -1,6 +1,11 @@
 import { redirect } from 'next/navigation';
+import { adminSourcesTarget, type AdminSearchParams } from '@/lib/admin-route';
 
-/** Unified ops console lands on data collection (demo-friendly first tab). */
-export default function AdminPage() {
-  redirect('/admin/crawl');
+/** Compatibility entry; keep all query parameters when entering data operations. */
+export default async function SourcesRedirectPage({
+  searchParams,
+}: {
+  searchParams: Promise<AdminSearchParams>;
+}) {
+  redirect(adminSourcesTarget(await searchParams));
 }

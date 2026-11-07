@@ -1,9 +1,6 @@
-import { requireAdmin } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
   const { id } = await context.params;
   const body = await request.json().catch(() => ({})) as { action?: string; note?: string };
   if (!['approve', 'reject'].includes(body.action ?? '')) return Response.json({ error: 'action 必须为 approve 或 reject' }, { status: 400 });

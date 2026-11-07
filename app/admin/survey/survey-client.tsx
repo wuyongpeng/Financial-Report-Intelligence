@@ -4,10 +4,8 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import {
   AdminHeader,
   AdminHelpTip,
-  AdminLoginForm,
   AdminMain,
   adminStyles as s,
-  useAdminSession,
 } from '../_components/admin-shell';
 import { AiSummarizePanel } from '../_components/ai-summarize-card';
 import { formatSurveyBasicLine, formatSurveyDeepLine, type SurveyBasic, type SurveyDeep } from '@/lib/survey';
@@ -139,7 +137,6 @@ const noteInput: CSSProperties = {
 };
 
 export function SurveyAdminClient() {
-  const session = useAdminSession();
   const [tab, setTab] = useState<TabKey>('invites');
   const [invites, setInvites] = useState<Invite[]>([]);
   const [responses, setResponses] = useState<ResponseItem[]>([]);
@@ -160,8 +157,7 @@ export function SurveyAdminClient() {
     try {
       const res = await fetch('/api/admin/survey', { cache: 'no-store', credentials: 'same-origin' });
       if (res.status === 401) {
-        session.setAdmin(false);
-        setError('管理员登录已失效，请重新登录');
+        setError('请求未授权，请刷新后重试');
         return;
       }
       if (!res.ok) {
@@ -190,11 +186,11 @@ export function SurveyAdminClient() {
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  }, []);
 
   useEffect(() => {
-    if (session.admin) void load();
-  }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps
+    void load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createInvite = useCallback(async () => {
     setBusy(true);
@@ -207,8 +203,7 @@ export function SurveyAdminClient() {
         body: JSON.stringify({}),
       });
       if (res.status === 401) {
-        session.setAdmin(false);
-        setError('管理员登录已失效，请重新登录');
+        setError('请求未授权，请刷新后重试');
         return;
       }
       if (!res.ok) {
@@ -221,7 +216,7 @@ export function SurveyAdminClient() {
     } finally {
       setBusy(false);
     }
-  }, [load, session]);
+  }, [load]);
 
   const setActive = useCallback(async (token: string, active: boolean) => {
     setBusy(true);
@@ -234,8 +229,7 @@ export function SurveyAdminClient() {
         body: JSON.stringify({ token, active }),
       });
       if (res.status === 401) {
-        session.setAdmin(false);
-        setError('管理员登录已失效，请重新登录');
+        setError('请求未授权，请刷新后重试');
         return;
       }
       if (!res.ok) {
@@ -248,7 +242,7 @@ export function SurveyAdminClient() {
     } finally {
       setBusy(false);
     }
-  }, [load, session]);
+  }, [load]);
 
   const saveNote = useCallback(async (token: string) => {
     const note = (noteDrafts[token] ?? '').trim();
@@ -262,8 +256,7 @@ export function SurveyAdminClient() {
         body: JSON.stringify({ token, note }),
       });
       if (res.status === 401) {
-        session.setAdmin(false);
-        setError('管理员登录已失效，请重新登录');
+        setError('请求未授权，请刷新后重试');
         return;
       }
       if (!res.ok) {
@@ -281,7 +274,7 @@ export function SurveyAdminClient() {
     } finally {
       setSavingNote('');
     }
-  }, [noteDrafts, session]);
+  }, [noteDrafts]);
 
   const copyUrl = useCallback(async (path: string, token: string) => {
     const url = inviteUrl(path);
@@ -340,30 +333,11 @@ export function SurveyAdminClient() {
     ]));
   }, [responses, responseSearch]);
 
-  if (!session.ready) {
-    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
-  }
-
-  if (!session.admin) {
-    return (
-      <AdminLoginForm
-        title="用户调研"
-        hint="需要管理员密码后才能查看调研结果。"
-        password={session.password}
-        setPassword={session.setPassword}
-        loginError={session.loginError}
-        loggingIn={session.loggingIn}
-        onSubmit={() => { void session.submitLogin(); }}
-      />
-    );
-  }
-
   return (
     <AdminMain>
       <AdminHeader
         title="用户调研"
         activeHref="/admin/survey"
-        onLogout={() => { void session.logout(); }}
       />
       {error ? <p style={s.err}>{error}</p> : null}
 
@@ -396,7 +370,6 @@ export function SurveyAdminClient() {
       <AiSummarizePanel
         scope="survey"
         active={tab === 'results'}
-        onSessionExpired={() => session.setAdmin(false)}
       />
 
       {tab === 'invites' ? (

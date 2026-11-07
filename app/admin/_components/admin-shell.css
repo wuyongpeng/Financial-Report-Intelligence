@@ -1,0 +1,7 @@
+/* Simple two-group navigation, no hover motion or extra layout layers. */
+.admin-nav-link{transition:color .12s ease,background-color .12s ease,border-color .12s ease}
+.admin-nav-link:not([aria-current="page"]):hover{background-color:#e8eef8!important;color:#1f4fad!important}
+@media(max-width:640px){
+  .admin-header{gap:8px!important}
+  .admin-nav{gap:6px!important}
+}

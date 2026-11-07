@@ -80,10 +80,9 @@ type Props = {
   active?: boolean;
   /** Sit beside filters: first-run button on that row; summary card (collapsed or expanded) always full width. */
   inline?: boolean;
-  onSessionExpired?: () => void;
 };
 
-export function AiSummarizePanel({ scope, active = true, inline = false, onSessionExpired }: Props) {
+export function AiSummarizePanel({ scope, active = true, inline = false }: Props) {
   const [summary, setSummary] = useState<SummaryRecord | null>(null);
   const [hasNewData, setHasNewData] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -102,8 +101,7 @@ export function AiSummarizePanel({ scope, active = true, inline = false, onSessi
         credentials: 'same-origin',
       });
       if (res.status === 401) {
-        onSessionExpired?.();
-        setError('管理员登录已失效，请重新登录');
+        setError('请求未授权，请刷新后重试');
         return;
       }
       if (!res.ok) {
@@ -124,7 +122,7 @@ export function AiSummarizePanel({ scope, active = true, inline = false, onSessi
     } finally {
       setLoading(false);
     }
-  }, [active, onSessionExpired, scope]);
+  }, [active, scope]);
 
   useEffect(() => {
     if (active) void loadStatus();
@@ -142,8 +140,7 @@ export function AiSummarizePanel({ scope, active = true, inline = false, onSessi
         body: JSON.stringify({ scope }),
       });
       if (res.status === 401) {
-        onSessionExpired?.();
-        setError('管理员登录已失效，请重新登录');
+        setError('请求未授权，请刷新后重试');
         return;
       }
       const body = await res.json().catch(() => ({})) as {
@@ -163,7 +160,7 @@ export function AiSummarizePanel({ scope, active = true, inline = false, onSessi
     } finally {
       setRunning(false);
     }
-  }, [onSessionExpired, running, scope]);
+  }, [running, scope]);
 
   if (!active) return null;
 

@@ -1451,7 +1451,7 @@ export default function ReportHome() {
     e?.preventDefault();
     e?.stopPropagation();
     if (crawlingCodes.includes(item.code)) {
-      router.push(`/admin/crawl?focus=${encodeURIComponent(item.code)}`);
+      router.push(`/admin/sources?focus=${encodeURIComponent(item.code)}`);
       return;
     }
     setCrawlingCodes((prev) => (prev.includes(item.code) ? prev : [...prev, item.code]));
@@ -1474,7 +1474,7 @@ export default function ReportHome() {
       setWaitToast(`网络异常：${String(err)}`);
       return;
     }
-    router.push(`/admin/crawl?focus=${encodeURIComponent(item.code)}`);
+    router.push(`/admin/sources?focus=${encodeURIComponent(item.code)}`);
   }
 
   /** Empty-state light entry: report current search for admin roster backfill (no blocking dialog). */
@@ -1945,7 +1945,7 @@ export default function ReportHome() {
                 >
                   {parseFailed ? (
                     <Link
-                      href={`/admin/crawl?focus=${item.code}`}
+                      href={`/admin/sources?focus=${item.code}`}
                       className="rh-connected-badge rh-connected-badge-failed"
                       title="打开数据运营·采集处理解析失败"
                       onClick={(e) => e.stopPropagation()}

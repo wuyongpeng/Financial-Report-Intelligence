@@ -1,4 +1,3 @@
-import { requireAdmin } from '@/lib/auth';
 import { ApiError, apiError, readObject } from '@/lib/api';
 import {
   getAdminSummarizeStatus,
@@ -17,8 +16,6 @@ function parseScope(raw: unknown): AdminSummarizeScope {
 }
 
 export async function GET(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
   try {
     const url = new URL(request.url);
     const scope = parseScope(url.searchParams.get('scope'));
@@ -34,8 +31,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
   try {
     if (!llmConfigured()) throw new ApiError(503, 'LLM 未配置');
     const body = await readObject(request);

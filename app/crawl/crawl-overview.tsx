@@ -26,7 +26,6 @@ import {
 } from '@/lib/crawl-display';
 import { parseHomeQuery, queryMatchesCompany } from '@/lib/home-search';
 import { formatParseElapsed } from '@/lib/parse-queue';
-import { DISCARD_CONFIRM_PASSWORD } from '@/lib/discard-password';
 import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { Icon } from '../ui-icons';
 import './crawl-overview.css';
@@ -1432,8 +1431,8 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
     if (!actionConfirm) return;
     const { mode, code, name, period, periodStatus } = actionConfirm;
     if (mode === 'discard') {
-      if (discardPassword !== DISCARD_CONFIRM_PASSWORD) {
-        setDiscardPasswordError('删除密码错误');
+      if (!discardPassword) {
+        setDiscardPasswordError('请输入删除密码');
         return;
       }
       const password = discardPassword;
@@ -2262,7 +2261,7 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
               <button
                 type="button"
                 className={`co-confirm-ok${actionConfirm.mode === 'discard' ? ' danger' : ''}`}
-                disabled={actionConfirm.mode === 'discard' && discardPassword !== DISCARD_CONFIRM_PASSWORD}
+                disabled={actionConfirm.mode === 'discard' && !discardPassword}
                 onClick={() => void confirmAction()}
               >{actionConfirm.okLabel}</button>
             </div>

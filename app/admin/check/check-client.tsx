@@ -7,7 +7,6 @@ import {
   AdminHelpTip,
   AdminMain,
   adminStyles as s,
-  useAdminSession,
 } from '../_components/admin-shell';
 import {
   CHECK_METRICS,
@@ -27,7 +26,6 @@ type CheckPayload = {
 };
 
 export function CheckAdminClient() {
-  const session = useAdminSession();
   const [payload, setPayload] = useState<CheckPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -41,7 +39,6 @@ export function CheckAdminClient() {
     try {
       const res = await fetch('/api/admin/check', { cache: 'no-store', credentials: 'same-origin' });
       if (res.status === 401) {
-        session.setAdmin(false);
         setError('加载失败：未授权');
         return;
       }
@@ -55,11 +52,11 @@ export function CheckAdminClient() {
     } finally {
       setLoading(false);
     }
-  }, [session]);
+  }, []);
 
   useEffect(() => {
-    if (session.ready) void load();
-  }, [session.ready]); // eslint-disable-line react-hooks/exhaustive-deps
+    void load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(() => {
     if (!payload) return [];
@@ -72,18 +69,11 @@ export function CheckAdminClient() {
     });
   }, [payload, onlyMismatch, metricFilter, codeQuery]);
 
-  if (!session.ready) {
-    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
-  }
-
   return (
     <AdminMain>
       <AdminHeader
         title="指标核对"
-        subtitle="第三方对照（只读开放）"
         activeHref="/admin/check"
-        showLogout={session.admin}
-        onLogout={session.admin ? () => { void session.logout(); } : undefined}
       />
 
       {error ? <p style={s.err}>{error}</p> : null}

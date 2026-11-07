@@ -1,4 +1,3 @@
-import { requireAdmin } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
@@ -6,8 +5,6 @@ import { getDb } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const url = new URL(request.url);

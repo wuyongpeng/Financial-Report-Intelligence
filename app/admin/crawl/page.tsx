@@ -1,10 +1,11 @@
-import { CrawlAdminClient } from './crawl-admin-client';
+import { redirect } from 'next/navigation';
+import { adminSourcesTarget, type AdminSearchParams } from '@/lib/admin-route';
 
-export const metadata = {
-  title: '数据采集 · Eva 数据运营',
-  description: '公告发现、抓取覆盖与解析/智析队列。',
-};
-
-export default function AdminCrawlPage() {
-  return <CrawlAdminClient />;
+/** Compatibility entry; keep all query parameters when entering data operations. */
+export default async function SourcesRedirectPage({
+  searchParams,
+}: {
+  searchParams: Promise<AdminSearchParams>;
+}) {
+  redirect(adminSourcesTarget(await searchParams));
 }

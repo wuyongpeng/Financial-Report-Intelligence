@@ -556,5 +556,5 @@
 
 /* Embedded under /admin/crawl: drop duplicate page chrome */
 .co-shell-embedded{min-height:0}
-.co-shell-embedded .co-page{padding-top:0}
+.co-shell-embedded .co-page{width:100%;max-width:none;margin:0;padding:0 0 24px}
 .co-shell-embedded .co-title-row{margin-top:4px}

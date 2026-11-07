@@ -4,10 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AdminHeader,
   AdminHelpTip,
-  AdminLoginForm,
   AdminMain,
   adminStyles as s,
-  useAdminSession,
 } from '../_components/admin-shell';
 import { AiSummarizePanel } from '../_components/ai-summarize-card';
 import { matchesQuickSearch } from '@/lib/admin-table-search';
@@ -68,7 +66,6 @@ function companyCell(ev: AuditEvent) {
 }
 
 export function AuditAdminClient() {
-  const session = useAdminSession();
   const [eventType, setEventType] = useState('');
   const [q, setQ] = useState('');
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -86,8 +83,7 @@ export function AuditAdminClient() {
       if (opts?.beforeId) params.set('beforeId', String(opts.beforeId));
       const res = await fetch(`/api/admin/audit?${params}`, { cache: 'no-store', credentials: 'same-origin' });
       if (res.status === 401) {
-        session.setAdmin(false);
-        setError('管理员登录已失效，请重新登录');
+        setError('请求未授权，请刷新后重试');
         return;
       }
       if (!res.ok) {
@@ -101,11 +97,11 @@ export function AuditAdminClient() {
     } finally {
       setLoading(false);
     }
-  }, [eventType, q, session]);
+  }, [eventType, q]);
 
   useEffect(() => {
-    if (session.admin) void load();
-  }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps -- initial load after login
+    void load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- initial load
 
   const filteredEvents = useMemo(() => {
     const query = q.trim();
@@ -132,33 +128,11 @@ export function AuditAdminClient() {
 
   const lastId = events.length ? events[events.length - 1].id : null;
 
-  if (!session.ready) {
-    return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
-  }
-
-  if (!session.admin) {
-    return (
-      <AdminLoginForm
-        title="访问审计"
-        hint="需要管理员密码后才能查看访问、提问与反馈记录。"
-        password={session.password}
-        setPassword={session.setPassword}
-        loginError={session.loginError}
-        loggingIn={session.loggingIn}
-        onSubmit={() => { void session.submitLogin(); }}
-      />
-    );
-  }
-
   return (
     <AdminMain>
       <AdminHeader
         title="访问审计"
         activeHref="/admin/audit"
-        onLogout={() => {
-          setEvents([]);
-          void session.logout();
-        }}
       />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -186,7 +160,6 @@ export function AuditAdminClient() {
         <AiSummarizePanel
           scope="audit"
           inline
-          onSessionExpired={() => session.setAdmin(false)}
         />
       </div>
 

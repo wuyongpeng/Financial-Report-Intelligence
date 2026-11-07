@@ -1,5 +1,4 @@
 import { randomBytes } from 'node:crypto';
-import { requireAdmin } from '@/lib/auth';
 import { ApiError, apiError, readObject } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
@@ -32,8 +31,6 @@ type ResponseRow = {
 };
 
 export async function GET(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const db = getDb();
@@ -127,8 +124,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const body = await readObject(request);
@@ -182,8 +177,6 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const body = await readObject(request);

@@ -173,7 +173,7 @@ export default function HomeOverflowMenu({
             <Link
               role="menuitem"
               className="hom-item"
-              href="/admin/crawl"
+              href="/admin/sources"
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setOpen(false)}
