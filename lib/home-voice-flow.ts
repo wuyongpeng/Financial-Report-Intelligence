@@ -173,3 +173,15 @@ export function buildVoiceJoinPrompt(listed: ListedNameCode): string {
 export function buildVoiceConfirmPrompt(listed: ListedNameCode): string {
   return `是${listed.name}（${listed.code}）吗？可以说确定或不是。`;
 }
+
+
+/** Only an already-routed, successfully matched voice query may replace search. */
+export function matchedVoiceSearchText(raw: string, fromVoice: boolean, matchedCount: number): string | null {
+  return fromVoice && matchedCount > 0 && raw.trim() ? raw.trim() : null;
+}
+
+
+/** Old search filters must not overwrite the current mic utterance on finalize. */
+export function homeVoiceFinalizeText(partial: string, search: string, userEdited: boolean): string {
+  return (userEdited ? search : partial).trim();
+}

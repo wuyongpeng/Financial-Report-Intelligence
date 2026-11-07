@@ -80,6 +80,7 @@ type VoiceSessionApi = {
   cancelArmedSend: () => void;
   /** Home hides the bottom float and uses its own voice dock. */
   setHideFloat: (hidden: boolean) => void;
+  setReportAuditRisk: (risk: boolean) => void;
   clearToast: () => void;
 };
 
@@ -107,6 +108,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const [partial, setPartialState] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [hideFloat, setHideFloat] = useState(false);
+  const [reportAuditRisk, setReportAuditRisk] = useState(false);
 
   const activeRef = useRef(false);
   const asrSessionRef = useRef<AsrSession | null>(null);
@@ -558,6 +560,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     finalizeListen,
     cancelArmedSend,
     setHideFloat,
+    setReportAuditRisk,
     clearToast: () => setToast(null),
   }), [
     active, listening, speaking, busy, arming, partial, toast,
@@ -575,6 +578,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       {children}
       {showFloat ? (
         <VoiceFloat
+          reportAuditRisk={reportAuditRisk}
           listening={listening}
           speaking={speaking}
           busy={busy}
@@ -602,7 +606,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
           headExtra={floatHeadExtra}
         />
       ) : null}
-      {toast ? (
+      {toast && !hideFloat ? (
         <div
           className="eva-voice-toast"
           role="status"

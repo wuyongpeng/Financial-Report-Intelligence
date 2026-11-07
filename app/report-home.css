@@ -43,7 +43,7 @@
   .rh-eva-capsule{gap:10px;padding:8px 10px}
   .rh-eva-status{position:absolute;width:1px;height:1px;min-width:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .rh-eva-dock .eva-voice-wave{width:70px;gap:3px}
-  .rh-eva-dock .eva-voice-sphere{width:40px;height:40px}
+  .rh-eva-dock .eva-voice-blob{width:40px;height:40px}
 }
 .rh-eva-panel{width:min(360px,calc(100vw - 24px));max-height:min(420px,55dvh);display:flex;flex-direction:column;background:#fff;border:1px solid #d4e2ff;border-radius:16px;box-shadow:0 12px 32px #24344c1f;overflow:hidden}
 .rh-eva-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #e6eefc}
@@ -278,3 +278,5 @@ font-size:11px!important;font-weight:600!important;line-height:1!important;lette
 .rh-dialog-pick-list{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:8px;max-height:240px;overflow:auto}
 .rh-dialog-pick-list button{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;border:1px solid #dce2eb;background:#f8fafc;border-radius:8px;padding:10px 12px;cursor:pointer;color:#203047}
 .rh-dialog-pick-list button:hover{border-color:#93c5fd;background:#eff6ff}
+
+.rh-eva-notice{max-width:min(360px,calc(100vw - 24px));padding:10px 14px;border:1px solid #d4e2ff;border-radius:16px;background:#f5f8ff;color:#415e8c;font-size:13px;line-height:1.5;box-shadow:0 4px 16px #24344c0d}

@@ -50,6 +50,7 @@ import { VOICE_ENDPOINT_MS, VOICE_IDLE_EMPTY_TURNS, VOICE_IDLE_EXIT_TOAST, isMea
 import { extractQuestionTokens, findPageLocalHighlight } from '@/lib/pdf/page-local-highlight';
 import { effectivePaneFlex, paneCollapseGate } from '@/lib/pane-collapse';
 import { openAsrSession, type AsrSession } from '@/lib/voice/client-asr';
+import { hasReportAuditRisk } from '@/lib/voice/report-audit-risk';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer, pauseVoiceTts, resumeVoiceTts, isVoiceTtsPaused, hasVoiceTtsPlayback } from '@/lib/voice/client-tts';
 import './company-detail.css';
@@ -1280,6 +1281,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   useEffect(() => {
     voice.setBusy(Boolean(voiceSession && asking));
   }, [asking, voiceSession, voice]);
+
+  // Current report only; same warning predicate as the red audit banner below.
+  useLayoutEffect(() => {
+    voice.setReportAuditRisk(hasReportAuditRisk(selected));
+    return () => voice.setReportAuditRisk(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected.id, selected.audit_opinion_kind]);
 
   // Global float: barge-in + auto-jump chrome (page-owned; cleared on leave).
   useEffect(() => {
@@ -2751,7 +2759,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const paneFlex = effectivePaneFlex(colRatios, { middleCollapsed });
   return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''} ${middleCollapsed?'cd-middle-collapsed':''}`} >
     <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions">{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}<HomeOverflowMenu showSources={false} showCopyLink pageLabel={`${selected.company_name} ${period(selected)}`} /></div></header>
-    {selected.audit_opinion_kind === 'non_standard' ? (
+    {hasReportAuditRisk(selected) ? (
       <button
         type="button"
         className="cd-audit-warn"

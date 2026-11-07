@@ -13,8 +13,7 @@
 
 /* Shared rounded voice identity; never replaces the product logo. */
 .eva-voice-activity{display:inline-flex;align-items:center;gap:14px;flex:none;color:#2784f5}
-.eva-voice-sphere{position:relative;display:grid;place-items:center;width:44px;height:44px;flex:none;overflow:hidden;border-radius:50%;background:radial-gradient(circle at 32% 25%,#70bdff 0%,#318cf7 48%,#2465da 100%);box-shadow:inset 0 0 0 1px #ffffff30,inset -3px -5px 12px #1e58c42b}
-.eva-voice-sphere>span{width:22px;height:22px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffffff70,transparent 70%);transform:translate(-6px,-6px)}
+.eva-voice-blob{display:block;width:44px;height:44px;flex:none;overflow:visible}
 .eva-voice-wave{height:32px;width:92px;display:flex;align-items:center;justify-content:center;gap:4px}
 .eva-voice-wave i{display:block;width:4px;flex:none;border-radius:999px;background:currentColor;transition:height 70ms linear,opacity 70ms linear}
 .eva-voice-activity.is-arming{color:#c58b32}

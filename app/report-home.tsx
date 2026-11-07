@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   freshnessAt,
@@ -42,6 +42,8 @@ import {
   buildVoiceJoinPrompt,
   buildVoicePickPrompt,
   needsVoiceCompanyConfirm,
+  matchedVoiceSearchText,
+  homeVoiceFinalizeText,
   parseVoiceConfirmReply,
   parseVoiceJoinReply,
   parseVoicePickChoice,
@@ -471,7 +473,6 @@ export default function ReportHome() {
       if (isVoiceGreetingOrNoise(text)) {
         const compact = text.replace(/\s+/g, '');
         const fillerOnly = /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact);
-        setSearch('');
         if (!fillerOnly) {
           setVoicePanelOpen(true);
           pushTurn('user', text);
@@ -481,10 +482,8 @@ export default function ReportHome() {
       }
       // A real utterance (not 嗯/啊) opens the history; the logo click folds it back.
       setVoicePanelOpen(true);
-      // Fresh ASR utterance supersedes any prior keyboard edits on the box.
-      // Chitchat must not stay in the search box — that filters the company grid.
+      // Route the completed utterance first; partial ASR never mutates the user's filter.
       searchEditedDuringVoiceRef.current = false;
-      setSearch(isHomeChitchatUtterance(text) ? '' : text);
       voice.setBusy(true);
       try {
         await onSearchSubmitRef.current(text, { fromVoice: true });
@@ -526,24 +525,16 @@ export default function ReportHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Mirror the live transcript into the search box unless the user is editing it.
-  useEffect(() => {
-    if (!voice.active || (!voice.listening && !voice.arming)) return;
-    if (searchEditedDuringVoiceRef.current) return;
-    setSearch(voice.partial);
-  }, [voice.active, voice.listening, voice.arming, voice.partial]);
+  // Home owns the right-side dock; route errors there too, not a duplicate global toast.
+  useLayoutEffect(() => {
+    voice.setHideFloat(true);
+    return () => voice.setHideFloat(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (voice.listening) searchEditedDuringVoiceRef.current = false;
   }, [voice.listening]);
-
-  const voiceWasActiveRef = useRef(false);
-  useEffect(() => {
-    if (voiceWasActiveRef.current && !voice.active) {
-      if (!searchEditedDuringVoiceRef.current) setSearch('');
-    }
-    voiceWasActiveRef.current = voice.active;
-  }, [voice.active]);
 
   const refreshCoverage = useCallback(async (): Promise<CrawlCompanyCoverage[]> => {
     try {
@@ -1038,7 +1029,7 @@ export default function ReportHome() {
 
   async function runHomeChitchatAsk(raw: string, opts?: { fromVoice?: boolean }) {
     pushTurn('user', raw);
-    setSearch('');
+    if (!opts?.fromVoice) setSearch('');
     setHomeAnswer(null);
     const market = homeMarketScopeAnswer(raw);
     if (market) {
@@ -1157,10 +1148,14 @@ export default function ReportHome() {
     if (!raw || submitting) return;
     const fromVoice = Boolean(opts?.fromVoice);
     const userEdited = Boolean(fromVoice && searchEditedDuringVoiceRef.current);
+    const commitMatchedVoiceSearch = (matchedCount: number) => {
+      const next = matchedVoiceSearchText(raw, fromVoice, matchedCount);
+      if (next !== null) setSearch(next);
+    };
     if (isVoiceGreetingOrNoise(raw)) {
       const compact = raw.replace(/\s+/g, '');
       const fillerOnly = /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact);
-      setSearch('');
+      if (!fromVoice) setSearch('');
       if (fillerOnly) return;
       setSubmitting(true);
       try {
@@ -1173,7 +1168,7 @@ export default function ReportHome() {
     }
     // Identity, capability, how-to-ask, and other non-company chat. Do not filter the grid.
     if (isHomeChitchatUtterance(raw)) {
-      setSearch('');
+      if (!fromVoice) setSearch('');
       setSubmitting(true);
       try {
         await runHomeChitchatAsk(raw, { fromVoice });
@@ -1211,11 +1206,13 @@ export default function ReportHome() {
     if (/^\d{6}$/.test(raw) && !parsed.hasQuestionIntent) {
       const hit = matchCompany(raw, coverage);
       if (hit) {
+        commitMatchedVoiceSearch(1);
         goCompany(hit.code);
         return;
       }
       const listed = resolveListedCompany(raw);
       if (listed) {
+        commitMatchedVoiceSearch(1);
         await openMissingCompanyDialog({ listed, query: raw, fromVoice });
         return;
       }
@@ -1228,6 +1225,7 @@ export default function ReportHome() {
     if (!parsed.hasQuestionIntent) {
       const poolHits = matchCompanies(parsed.companyQuery || raw, coverage);
       const poolHitsRaw = poolHits.length ? poolHits : matchCompanies(raw, coverage);
+      if (poolHitsRaw.length) commitMatchedVoiceSearch(poolHitsRaw.length);
       if (poolHitsRaw.length === 1) {
         await maybeConfirmOrProceed({
           listed: { code: poolHitsRaw[0].code, name: poolHitsRaw[0].name },
@@ -1255,6 +1253,7 @@ export default function ReportHome() {
       }
       const listedAll = resolveListedCompanies(raw);
       const listedFallback = listedAll.length ? listedAll : resolveListedCompanies(parsed.companyQuery || raw);
+      if (listedFallback.length) commitMatchedVoiceSearch(listedFallback.length);
       if (listedFallback.length === 1) {
         await maybeConfirmOrProceed({
           listed: listedFallback[0],
@@ -1313,6 +1312,7 @@ export default function ReportHome() {
         document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
+      commitMatchedVoiceSearch(listedCandidates.length);
       if (listedCandidates.length > 1) {
         if (fromVoice) {
           // 「东鹏最近业绩好不好」→ never silent preferred; keep full utterance for later ask.
@@ -1580,13 +1580,13 @@ export default function ReportHome() {
           e.preventDefault();
           if (submitting) return;
           const typed = search.trim();
-          if (!typed) return;
-          // While listening, treat the box as the utterance (lets user correct ASR).
+          // Unrelated saved search is not the live utterance. Explicit edits still win.
           if (voiceListening) {
-            voice.setPartial(typed);
+            if (searchEditedDuringVoiceRef.current) voice.setPartial(typed);
             voice.finalizeListen({ userInitiated: true });
             return;
           }
+          if (!typed) return;
           if (voice.active && searchEditedDuringVoiceRef.current) {
             searchEditedDuringVoiceRef.current = false;
             voice.setSuppressAutoListen(false);
@@ -1690,7 +1690,6 @@ export default function ReportHome() {
                 title="取消发送"
                 onClick={() => {
                   searchEditedDuringVoiceRef.current = false;
-                  setSearch('');
                   voice.cancelArmedSend();
                 }}
               >
@@ -1699,7 +1698,8 @@ export default function ReportHome() {
             );
           }
           if (voiceListening) {
-            const hasText = Boolean(search.trim() || voice.partial.trim());
+            const pendingText = homeVoiceFinalizeText(voice.partial, search, searchEditedDuringVoiceRef.current);
+            const hasText = Boolean(pendingText);
             const stopLabel = hasText ? '结束并发送' : '结束语音';
             return (
               <button
@@ -1713,7 +1713,7 @@ export default function ReportHome() {
                     voice.end();
                     return;
                   }
-                  if (search.trim()) voice.setPartial(search.trim());
+                  if (searchEditedDuringVoiceRef.current) voice.setPartial(pendingText);
                   voice.finalizeListen({ userInitiated: true });
                 }}
               >
@@ -2324,9 +2324,9 @@ export default function ReportHome() {
           </div>
         </div>
       )}
-      {voice.active && (
+      {(voice.active || voice.toast) && (
         <div className={`rh-eva-dock${voicePanelOpen ? ' is-open' : ''}`}>
-          <div className="rh-eva-capsule">
+          {voice.active && <div className="rh-eva-capsule">
             <button
               type="button"
               className="rh-eva-activity-toggle"
@@ -2346,8 +2346,9 @@ export default function ReportHome() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
-          </div>
-          {voicePanelOpen ? (
+          </div>}
+          {voice.toast ? <div className="rh-eva-notice" role="alert">{voice.toast}</div> : null}
+          {voice.active && voicePanelOpen ? (
             <div id="rh-eva-conversation" className="rh-eva-panel" role="dialog" aria-label="语音对话">
               <div className="rh-eva-panel-head">
                 <b>语音</b>

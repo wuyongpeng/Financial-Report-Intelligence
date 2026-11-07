@@ -6,6 +6,7 @@ import { VoiceActivity, voiceActivityState } from '@/components/voice-activity';
 
 export type VoiceFloatProps = {
   listening: boolean;
+  reportAuditRisk?: boolean;
   speaking?: boolean;
   busy?: boolean;
   arming?: boolean;
@@ -57,6 +58,7 @@ function writeStoredPos(pos: Pos | null) {
 
 export function VoiceFloat({
   listening,
+  reportAuditRisk = false,
   speaking = false,
   busy = false,
   arming = false,
@@ -199,7 +201,7 @@ export function VoiceFloat({
         onPointerDown={onPointerDownHead}
         title="拖动可移动位置"
       >
-        <VoiceActivity state={voiceActivityState({ listening, speaking, busy, arming })} />
+        <VoiceActivity state={voiceActivityState({ listening, speaking, busy, arming })} risk={reportAuditRisk} />
         <b>{title}</b>
         {headExtra}
       </div>
