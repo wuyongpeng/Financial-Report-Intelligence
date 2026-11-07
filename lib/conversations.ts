@@ -55,6 +55,12 @@ export async function readConversation(owner: string, id: string) {
   return { conversation, messages };
 }
 
+export async function deleteAllConversations(owner: string) {
+  await ensureBackendSchema();
+  const rows = await getDb()`DELETE FROM chat_conversations WHERE owner_key=${owner} RETURNING id`;
+  return rows.length;
+}
+
 export async function deleteConversation(owner: string, id: string) {
   await ensureBackendSchema();
   const rows = await getDb()`DELETE FROM chat_conversations WHERE id=${id} AND owner_key=${owner} RETURNING id`;

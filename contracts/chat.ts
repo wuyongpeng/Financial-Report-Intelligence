@@ -3,6 +3,7 @@ import { ApiError, requiredText, uuid } from '@/lib/api';
 import { parseAnswerRewrite, type AnswerRewrite } from '@/lib/answer';
 import type { AnswerResult, Evidence } from '@/lib/conversations';
 import { parseFocus, QUESTION_MAX, type FocusItem } from '@/lib/focus-prompt';
+import { sanitizeModelId, sanitizeReadingLevel, type ReadingLevel } from '@/lib/reader-prefs';
 import { optionalBoolean } from './common';
 
 export type ChatRequest = {
@@ -16,6 +17,9 @@ export type ChatRequest = {
   rewrite?: AnswerRewrite;
   /** Realtime voice / spoken TTS path — answers must stay very short. */
   spoken?: boolean;
+  readingLevel?: ReadingLevel;
+  /** Pin one configured provider id. Omit for automatic failover. */
+  modelId?: string;
 };
 
 export type ChatResponse = AnswerResult & {
@@ -43,6 +47,16 @@ export function parseChatRequest(body: Record<string, unknown>): ChatRequest {
   if (body.rewrite !== undefined && parseAnswerRewrite(body.rewrite) === undefined) {
     throw new ApiError(400, 'rewrite 参数无效');
   }
+  let readingLevel: ReadingLevel | undefined;
+  if (body.readingLevel !== undefined && body.readingLevel !== null && body.readingLevel !== '') {
+    readingLevel = sanitizeReadingLevel(body.readingLevel);
+    if (!readingLevel) throw new ApiError(400, 'readingLevel 参数无效');
+  }
+  let modelId: string | undefined;
+  if (body.modelId !== undefined && body.modelId !== null && body.modelId !== '' && body.modelId !== 'auto') {
+    modelId = sanitizeModelId(body.modelId);
+    if (!modelId) throw new ApiError(400, 'modelId 参数无效');
+  }
   return {
     reportId,
     question,
@@ -53,6 +67,8 @@ export function parseChatRequest(body: Record<string, unknown>): ChatRequest {
     conversationId,
     rewrite: parseAnswerRewrite(body.rewrite),
     spoken: optionalBoolean(body.spoken, 'spoken') ?? false,
+    readingLevel,
+    modelId,
   };
 }
 

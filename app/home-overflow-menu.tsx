@@ -9,6 +9,7 @@ import {
 } from '@/lib/feedback-input';
 import './home-overflow-menu.css';
 import { preserveFeedbackDraft, publishFeedbackState, subscribeFeedbackDraft, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
+import ReaderPrefsDialog from './reader-prefs-dialog';
 
 export type HomeOverflowMenuProps = {
   /** Home shows 数据采集; detail hides it. Default true. */
@@ -34,6 +35,7 @@ export default function HomeOverflowMenu({
     publishFeedbackState(next);
   }
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -244,6 +246,14 @@ export default function HomeOverflowMenu({
             type="button"
             role="menuitem"
             className="hom-item"
+            onClick={() => { setOpen(false); setPrefsOpen(true); }}
+          >
+            偏好设置
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="hom-item"
             onClick={() => { setOpen(false); setAboutOpen(true); }}
           >
             关于 Eva
@@ -345,6 +355,8 @@ export default function HomeOverflowMenu({
           </aside>
         </div>
       ) : null}
+
+      {prefsOpen ? <ReaderPrefsDialog onClose={() => setPrefsOpen(false)} /> : null}
 
       {aboutOpen ? (
         <div className="hom-about-backdrop" onClick={() => setAboutOpen(false)}>

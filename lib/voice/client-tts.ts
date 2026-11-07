@@ -1,3 +1,4 @@
+import { readReaderPrefs } from '@/lib/reader-prefs-client';
 import { speakableText } from './speakable';
 import { trackPlaybackLevel } from './client-playback-level';
 
@@ -152,6 +153,8 @@ export function speakAnswer(raw: string, signal?: AbortSignal): Promise<void> {
         const blob = new Blob(chunks, { type: 'audio/mpeg' });
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
+        audio.playbackRate = readReaderPrefs().speechRate;
+        audio.preservesPitch = true;
         playback.url = url;
         playback.audio = audio;
         playback.ready = true;

@@ -1,3 +1,6 @@
+import { sanitizeModelId } from '@/lib/reader-prefs';
+import { readReaderPrefs } from '@/lib/reader-prefs-client';
+
 /** Shared, client-safe semantic response contract. No arbitrary model tools. */
 export type FeedbackDraftAction = { type: 'open_feedback'; category: '体验问题' | '功能建议' | '数据不准' | '其它'; draft: string };
 export type AssistantTurnFailure = 'not_configured' | 'timeout' | 'upstream' | 'invalid_response' | 'cancelled';
@@ -37,7 +40,19 @@ export async function requestAssistantTurn(input: {
   question: string; surface: 'home' | 'report'; history: Array<{ role: 'user' | 'assistant'; content: string }>; context?: string;
 }, signal: AbortSignal): Promise<AssistantTurn> {
   try {
-    const response = await fetch('/api/assistant/turn', { method: 'POST', signal, credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+    const prefs = readReaderPrefs();
+    const modelId = sanitizeModelId(prefs.modelId);
+    const response = await fetch('/api/assistant/turn', {
+      method: 'POST',
+      signal,
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...input,
+        history: prefs.memory ? input.history : [],
+        ...(modelId ? { modelId } : {}),
+      }),
+    });
     if (!response.ok) return unavailableAssistantTurn('upstream');
     const turn = parseAssistantTurn(await response.json());
     if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');

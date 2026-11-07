@@ -3,7 +3,7 @@
  * Client should try answerHomeRosterLocally first for roster; chitchat always hits LLM (or fallback).
  */
 import { fetchChatCompletionsFrom } from './llm-gate';
-import { llmConfigured, parseLlmProviders } from './llm-providers';
+import { llmConfigured, parseLlmProviders, selectPinnedProviders } from './llm-providers';
 import { orderVerdictProviders } from './report-verdict-llm';
 import {
   extractOpenCodeFromAnswer,
@@ -34,9 +34,11 @@ async function generateHomeAskLlm(opts: {
   prompt: string;
   maxTokens: number;
   clipMax: number;
+  modelId?: string;
 }): Promise<string | null> {
   if (!llmConfigured()) return null;
-  const providers = orderVerdictProviders(parseLlmProviders()).slice(0, 2);
+  const configured = parseLlmProviders();
+  const providers = selectPinnedProviders(configured, opts.modelId) ?? orderVerdictProviders(configured).slice(0, 2);
   const body = {
     temperature: 0.3,
     max_tokens: opts.maxTokens,
@@ -81,6 +83,7 @@ export async function generateHomeAskAnswer(input: {
   mode?: HomeAskMode;
   /** Voice reply: one short spoken sentence. Typed home chat may use two. */
   spoken?: boolean;
+  modelId?: string;
 }): Promise<HomeRosterAnswer> {
   const mode: HomeAskMode = input.mode === 'chitchat' ? 'chitchat' : 'roster';
 
@@ -95,6 +98,7 @@ export async function generateHomeAskAnswer(input: {
       prompt,
       maxTokens: 480,
       clipMax: spoken ? 80 : 160,
+      modelId: input.modelId,
     });
     if (llm) return { answer: llm, mode: 'llm' };
     return { answer: homeChitchatFallback(), mode: 'local' };
@@ -110,6 +114,7 @@ export async function generateHomeAskAnswer(input: {
     prompt,
     maxTokens: 220,
     clipMax: 280,
+    modelId: input.modelId,
   });
   if (llm) {
     const openCode = extractOpenCodeFromAnswer(llm, input.rows);

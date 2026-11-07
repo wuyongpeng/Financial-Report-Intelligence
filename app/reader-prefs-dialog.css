@@ -1,0 +1,52 @@
+.prefs-backdrop{position:fixed;inset:0;z-index:130;background:#12213f66;display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(2px)}
+.prefs-dialog{width:min(760px,100%);height:min(520px,100%);background:#fff;border-radius:16px;box-shadow:0 24px 60px #13213b33;display:flex;overflow:hidden;color:#203047}
+.prefs-nav{width:168px;flex:none;background:#f6f8fb;border-right:1px solid #e6ebf2;padding:18px 10px;display:flex;flex-direction:column}
+.prefs-kicker{margin:0 8px 12px;font-size:15px;font-weight:700}
+.prefs-tabs{display:flex;flex-direction:column;gap:4px}
+.prefs-tab{border:0;background:transparent;text-align:left;color:#31465f;font:inherit;font-size:14px;border-radius:8px;padding:8px 10px;cursor:pointer}
+.prefs-tab:hover{background:#eef3fa}
+.prefs-tab[aria-selected="true"]{background:#fff;color:#1f4fad;font-weight:650;box-shadow:0 1px 2px #13213b14}
+.prefs-main{position:relative;flex:1;min-width:0;padding:22px 24px 24px;overflow:auto}
+.prefs-main h3{margin:0 36px 6px 0;font-size:16px;font-weight:700}
+.prefs-lead{margin:0 36px 16px 0;color:#6b7a8d;font-size:13px;line-height:1.55}
+.prefs-close{position:absolute;top:14px;right:14px;width:32px;height:32px;border:0;background:transparent;color:#68748a;border-radius:8px;font-size:20px;line-height:1;cursor:pointer}
+.prefs-close:hover{background:#f3f6fb;color:#203047}
+.prefs-choices{display:flex;flex-direction:column;gap:8px}
+.prefs-choice{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;text-align:left;border:1px solid #e1e7f0;background:#fff;border-radius:12px;padding:12px 14px;cursor:pointer;color:#203047}
+.prefs-choice b{font-size:14px;font-weight:650}
+.prefs-choice span{font-size:13px;color:#6b7a8d;line-height:1.45}
+.prefs-choice:hover{border-color:#c5d4ee}
+.prefs-choice[aria-checked="true"]{border-color:#3064db;background:#f5f8ff;box-shadow:inset 0 0 0 1px #3064db}
+.prefs-choice[aria-checked="true"] b{color:#1f4fad}
+.prefs-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid #eef2f6}
+.prefs-row-label{font-size:14px;font-weight:650}
+.prefs-hint{margin:4px 0 0;color:#6b7a8d;font-size:13px;line-height:1.5}
+.prefs-label{margin:18px 0 8px;font-size:13px;font-weight:650;color:#31465f}
+.prefs-error{margin:0 0 10px;color:#b91c1c;font-size:13px}
+.prefs-switch{width:44px;height:26px;border:0;border-radius:999px;background:#d5dde8;padding:3px;cursor:pointer;flex:none}
+.prefs-switch span{display:block;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #13213b33;transition:transform .15s}
+.prefs-switch.on{background:#3064db}
+.prefs-switch.on span{transform:translateX(18px)}
+.prefs-segment{display:flex;gap:8px}
+.prefs-segment button{flex:1;border:1px solid #e1e7f0;background:#fff;border-radius:10px;padding:8px 0;font:inherit;font-size:13px;color:#31465f;cursor:pointer}
+.prefs-segment button.on{border-color:#3064db;background:#f5f8ff;color:#1f4fad;font-weight:650;box-shadow:inset 0 0 0 1px #3064db}
+.prefs-memory-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.prefs-memory-head .prefs-label{margin:8px 0}
+.prefs-text{border:0;background:transparent;color:#35558f;font:inherit;font-size:13px;cursor:pointer;padding:4px 0}
+.prefs-text:disabled{color:#b0bac8;cursor:default}
+.prefs-text.danger{color:#b91c1c}
+.prefs-text.danger:disabled{color:#e4b4b4}
+.prefs-confirm{display:inline-flex;gap:12px}
+.prefs-memory-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.prefs-memory-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #e6ebf2;border-radius:10px;padding:10px 12px}
+.prefs-memory-list b{display:block;font-size:13px;font-weight:650;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prefs-memory-list span{display:block;margin-top:2px;color:#8090a6;font-size:12px}
+.prefs-memory-list button{border:0;background:transparent;color:#b91c1c;font:inherit;font-size:13px;cursor:pointer;flex:none}
+.prefs-memory-list button:disabled{color:#e4b4b4;cursor:default}
+@media(max-width:640px){
+  .prefs-backdrop{padding:12px}
+  .prefs-dialog{flex-direction:column;height:auto;max-height:calc(100% - 8px)}
+  .prefs-nav{width:auto;border-right:0;border-bottom:1px solid #e6ebf2;padding:14px 10px 10px}
+  .prefs-tabs{flex-direction:row;overflow:auto}
+  .prefs-tab{white-space:nowrap}
+}

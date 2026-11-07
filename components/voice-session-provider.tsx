@@ -16,6 +16,8 @@ import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/vo
 import { playVoiceCue, primeVoiceCues } from '@/lib/voice/cues';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer } from '@/lib/voice/client-tts';
+import { EVA_INTRO_LINE } from '@/lib/product-identity';
+import { readReaderPrefs } from '@/lib/reader-prefs-client';
 import { resetVoiceLevels } from '@/lib/voice/client-level';
 import { isVoiceFarewell } from '@/lib/voice/farewell-intent';
 import {
@@ -157,6 +159,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const bargeArmedRef = useRef(false);
   const captureOpeningRef = useRef<Promise<PcmCapture> | null>(null);
   const systemTtsAbortRef = useRef<AbortController | null>(null);
+  /** Welcome TTS is in flight — do not open the mic over it. */
+  const welcomeHoldRef = useRef(false);
   const handleUtteranceRef = useRef<(raw: string) => Promise<void>>(async () => undefined);
   /** One auto-reconnect after mid-session ASR drop; reset on successful listen / explicit end. */
   const asrReconnectRef = useRef(0);
@@ -655,6 +659,21 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     activeRef.current = true;
     voiceEmptyTurnsRef.current = 0;
     setActive(true);
+    if (readReaderPrefs().welcome) {
+      welcomeHoldRef.current = true;
+      const abort = new AbortController();
+      systemTtsAbortRef.current = abort;
+      setSpeakingState(true);
+      try {
+        await speakAnswer(EVA_INTRO_LINE, abort.signal);
+      } catch {
+        /* Still open the mic if the greeting cannot play. */
+      }
+      if (systemTtsAbortRef.current === abort) systemTtsAbortRef.current = null;
+      setSpeakingState(false);
+      welcomeHoldRef.current = false;
+      if (!activeRef.current) return;
+    }
     await listenTurn();
   }, [busy, listenTurn, listening, speaking]);
 
@@ -699,6 +718,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       if (armingRef.current) return;
       if (suppressAutoListenRef.current) return;
       if (finalizingRef.current) return;
+      if (welcomeHoldRef.current) return;
       if (asrSessionRef.current || pcmCaptureRef.current) return;
       void listenTurnRef.current();
     }, 1600);

@@ -6,6 +6,7 @@ import { llmConfigured } from './llm-providers';
 import { historyForModel } from '@/modules/retrieval/application/question-planner';
 import { ensureSoftScopeFooter, SOFT_SCOPE_FOOTER, SOFT_SCOPE_FOOTER_SPOKEN } from '@/modules/retrieval/application/answer-policy';
 import { humanizeYuanInText } from '@/lib/format-finance-amount';
+import { readingLevelInstruction, type ReadingLevel } from '@/lib/reader-prefs';
 
 export type AnswerRewrite = 'detailed' | 'brief' | 'retry';
 
@@ -25,6 +26,9 @@ export type AnswerOptions = {
   rewrite?: AnswerRewrite;
   /** Realtime / continuous voice: aggressive spoken brevity. */
   spoken?: boolean;
+  readingLevel?: ReadingLevel;
+  /** Pin one configured provider. Omit to keep automatic failover. */
+  modelId?: string;
 };
 
 const SPOKEN_HINT = (
@@ -63,8 +67,9 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
   const rewriteHint = rewrite ? `\n\n${REWRITE_HINT[rewrite]}` : '';
   const spokenHint = spoken ? `\n\n${SPOKEN_HINT}` : '';
   const industry = context.industry || industryFromStructuredContext(context.structuredContext);
-  // Industry frameworks push multi-section essays — skip in voice mode.
-  const skillAppend = spoken ? '' : industrySkillSystemAppend(industry);
+  // Industry frameworks push multi-section essays — skip in voice mode and for the professional level.
+  const skillAppend = spoken || opts.readingLevel === 'professional' ? '' : industrySkillSystemAppend(industry);
+  const levelLine = opts.readingLevel ? readingLevelInstruction(opts.readingLevel, spoken) : '';
   const continuity = (
     '历史对话只用于理解指代（如「它」「同比」），不是事实依据；以前的回答可能不准确。'
     + '只回答本轮用户消息里「当前问题」这一句；禁止复述、澄清或回答历史里的旧问题'
@@ -97,7 +102,7 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
     + softHint
     + style
   );
-  const systemContent = skillAppend ? `${systemBase}\n\n${skillAppend}` : systemBase;
+  const systemContent = [systemBase, skillAppend, levelLine].filter(Boolean).join('\n\n');
   const safeHistory = historyForModel(history);
   return [
     { role: 'system', content: systemContent },
@@ -164,8 +169,8 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
         ? Math.min(maxTokens, rewrite === 'detailed' ? 480 : 280)
         : rewrite === 'detailed' ? Math.min(Math.round(maxTokens * 1.4), 8192) : maxTokens;
       const upstream = await fetchChatCompletions(
-        { temperature: 0, max_tokens: sized, stream: Boolean(emit), messages: modelMessages(context, history, { rewrite, spoken }) },
-        { signal, timeoutMs },
+        { temperature: 0, max_tokens: sized, stream: Boolean(emit), messages: modelMessages(context, history, opts) },
+        { signal, timeoutMs, modelId: opts.modelId },
       );
       if (!upstream.ok || !upstream.body) throw new Error(`Model HTTP ${upstream.status}`);
       if (!emit) {

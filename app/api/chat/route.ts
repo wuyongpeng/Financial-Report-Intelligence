@@ -63,7 +63,12 @@ export async function POST(request: Request) {
     const persist = async (result: AnswerResult) => {
       if (lease) await finishTurn(lease.owner, lease.conversationId, lease.requestId, result);
     };
-    const answerOpts = { rewrite: input.rewrite, spoken: Boolean(input.spoken) };
+    const answerOpts = {
+      rewrite: input.rewrite,
+      spoken: Boolean(input.spoken),
+      readingLevel: input.readingLevel,
+      modelId: input.modelId,
+    };
     if (!input.stream) {
       const result = replay ?? await generateAnswer(context!, history, request.signal, undefined, answerOpts);
       await persist(result);

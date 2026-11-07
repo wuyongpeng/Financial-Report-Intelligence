@@ -1,5 +1,5 @@
 import { fetchChatCompletionsFrom, withLlmSlot } from './llm-gate';
-import { llmConfigured, parseLlmProviders } from './llm-providers';
+import { llmConfigured, parseLlmProviders, selectPinnedProviders } from './llm-providers';
 import { unwrapModelJson } from './report-verdict';
 import { parseAssistantTurn, unavailableAssistantTurn, type AssistantTurnFailure, type AssistantTurn } from './assistant-turn';
 
@@ -21,7 +21,7 @@ export function assistantTurnSystemPrompt(surface: 'home' | 'report') {
 }
 
 export async function resolveAssistantTurn(input: {
-  question: string; surface: 'home' | 'report'; history: Array<{ role: 'user' | 'assistant'; content: string }>; context?: string;
+  question: string; surface: 'home' | 'report'; history: Array<{ role: 'user' | 'assistant'; content: string }>; context?: string; modelId?: string;
 }, signal: AbortSignal): Promise<AssistantTurn> {
   const started = Date.now();
   const fail = (reason: AssistantTurnFailure, status?: number): AssistantTurn => {
@@ -31,7 +31,8 @@ export async function resolveAssistantTurn(input: {
   if (signal.aborted) return fail('cancelled');
   if (!llmConfigured()) return fail('not_configured');
   // Respect the configured interactive primary, not the background verdict ranking.
-  const provider = parseLlmProviders()[0];
+  const providers = parseLlmProviders();
+  const provider = selectPinnedProviders(providers, input.modelId)?.[0] ?? providers[0];
   if (!provider) return fail('not_configured');
   const timeoutMs = 12_000;
   const timeout = AbortSignal.timeout(timeoutMs);

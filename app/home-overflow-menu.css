@@ -19,8 +19,8 @@
 .hom-cat-menu{position:absolute;left:0;top:calc(100% + 4px);z-index:20;min-width:100%;background:#fff;border:1px solid #d5dde8;border-radius:8px;box-shadow:0 8px 20px #13213b1a;padding:4px;display:flex;flex-direction:column;gap:2px}
 .hom-cat-opt{border:0;background:transparent;text-align:left;font:inherit;font-size:12px;color:#31465f;padding:6px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
 .hom-cat-opt:hover,.hom-cat-opt[aria-selected="true"]{background:#f3f7fd;color:#1f4fad}
-.hom-admin-link{font-size:13px;color:#8b97a9;text-decoration:none;flex-shrink:0}
-.hom-admin-link:hover{color:#5b6d86;text-decoration:underline}
+.hom-admin-link{font-size:13px;font-weight:600;color:#3064db;text-decoration:underline;text-underline-offset:3px;flex-shrink:0}
+.hom-admin-link:hover{color:#1f4fad}
 .hom-req{color:#dc2626;margin-right:4px;font-weight:600}
 .hom-req-spacer{visibility:hidden;margin-right:4px;font-weight:600}
 .hom-textarea{width:100%;border:1px solid #d5dde8;border-radius:10px;padding:12px;font:inherit;font-size:14px;color:#203047;resize:vertical;min-height:140px}

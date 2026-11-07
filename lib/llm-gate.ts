@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { parseLlmProviders, type LlmProvider } from './llm-providers';
+import { parseLlmProviders, selectPinnedProviders, type LlmProvider } from './llm-providers';
 import { formatLlmCallError, formatLlmHttpError } from './llm-error';
 
 type LockPayload = { pid: number; at: number };
@@ -306,9 +306,9 @@ export async function withLlmSlot<T>(
 
 export async function fetchChatCompletions(
   body: unknown,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; modelId?: string } = {},
 ): Promise<Response> {
-  const providers = orderedProviders();
+  const providers = selectPinnedProviders(parseLlmProviders(), options.modelId) ?? orderedProviders();
   if (!providers.length) throw new Error('LLM_BASE_URL is not configured');
   const timeoutMs = options.timeoutMs ?? 60_000;
   let last: Response | undefined;

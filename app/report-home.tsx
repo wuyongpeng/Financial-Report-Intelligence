@@ -68,6 +68,7 @@ import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
+import { MEMORY_CLEARED_EVENT, readerChatFields, readerHistory } from '@/lib/reader-prefs-client';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
 import { VoiceActivity, VoiceActivityStatus, voiceActivityState } from '@/components/voice-activity';
 import '@/app/voice-float.css';
@@ -655,6 +656,15 @@ export default function ReportHome() {
   // Detail → home: keep voice mic if active, but never inherit a report chat thread.
   // Home turns stay home-only; clearing on mount avoids a prior SPA visit leaking in.
   useEffect(() => {
+    const onCleared = () => {
+      clearHomeChatTurns();
+      setVoiceTurns([]);
+    };
+    window.addEventListener(MEMORY_CLEARED_EVENT, onCleared);
+    return () => window.removeEventListener(MEMORY_CLEARED_EVENT, onCleared);
+  }, []);
+
+  useEffect(() => {
     clearHomeChatTurns();
     setVoiceTurns([]);
     setSearch('');
@@ -1138,7 +1148,8 @@ export default function ReportHome() {
           question: raw,
           rosterSnapshot: snapshot,
           rows,
-          history: getHomeChatTurns().slice(0, -1),
+          history: readerHistory(getHomeChatTurns().slice(0, -1)),
+          ...(readerChatFields().modelId ? { modelId: readerChatFields().modelId } : {}),
         }),
       });
       if (!response.ok) throw new Error(`home ask ${response.status}`);
@@ -1196,8 +1207,9 @@ export default function ReportHome() {
           question: raw,
           rosterSnapshot: HOME_CHITCHAT_SNAPSHOT_PLACEHOLDER,
           rows: [],
-          history: getHomeChatTurns().slice(0, -1),
+          history: readerHistory(getHomeChatTurns().slice(0, -1)),
           mode: 'chitchat',
+          ...(readerChatFields().modelId ? { modelId: readerChatFields().modelId } : {}),
           spoken: Boolean(opts?.fromVoice || voice.active),
         }),
       });

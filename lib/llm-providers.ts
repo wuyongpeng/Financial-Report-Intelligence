@@ -79,6 +79,15 @@ export function llmModelName(env: NodeJS.ProcessEnv = process.env) {
   return parseLlmProviders(env)[0]?.model ?? env.LLM_MODEL?.trim() ?? null;
 }
 
+/** One provider when the reader pinned an id that exists. Otherwise null (keep failover). */
+export function selectPinnedProviders(all: LlmProvider[], modelId?: string | null): LlmProvider[] | null {
+  if (typeof modelId !== 'string') return null;
+  const id = modelId.trim();
+  if (!id || id === 'auto') return null;
+  const hit = all.find((item) => item.id === id);
+  return hit ? [hit] : null;
+}
+
 export function llmProviderPublicMeta(item: LlmProvider) {
   let host = item.baseUrl;
   try {

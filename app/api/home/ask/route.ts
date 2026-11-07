@@ -1,4 +1,5 @@
 import { apiError, ApiError, readObject, requiredText } from '@/lib/api';
+import { sanitizeModelId } from '@/lib/reader-prefs';
 import { generateHomeAskAnswer } from '@/lib/home-ask';
 import type { HomeRosterRow } from '@/lib/home-roster-snapshot';
 
@@ -57,6 +58,7 @@ export async function POST(request: Request) {
       history,
       mode,
       spoken: body.spoken === true,
+      modelId: sanitizeModelId(body.modelId),
     });
     return Response.json(
       { answer: result.answer, openCode: result.openCode ?? null, mode: result.mode },

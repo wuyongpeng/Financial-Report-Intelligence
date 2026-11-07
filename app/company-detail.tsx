@@ -28,6 +28,7 @@ import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
+import { CONVERSATION_DELETED_EVENT, MEMORY_CLEARED_EVENT, readReaderPrefs, readerChatFields } from '@/lib/reader-prefs-client';
 import {
   clampAttributionTitle,
   expandAttributionModulePool,
@@ -628,6 +629,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         // Guest cookie must land before hydrate so Postgres owner_key stays stable on HTTP demos.
         await ensureGuestCookie();
         if (abort.signal.aborted) return;
+        if (!readReaderPrefs().memory) {
+          conversationIds.current.delete(selected.id);
+          if (canHydrate()) setMessages([]);
+          return;
+        }
 
         // Home → detail ask: do not carry home chitchat or an older report thread.
         // Fresh conversation so the deep-link utterance seeds as the first turn.
@@ -676,6 +682,29 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     })();
     return () => abort.abort();
   }, [selected.id]);
+  useEffect(() => {
+    const onCleared = () => {
+      conversationIds.current.clear();
+      setMessages([]);
+    };
+    const onDeleted = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (!id) return;
+      let clearedCurrent = false;
+      for (const [reportId, conversationId] of [...conversationIds.current]) {
+        if (conversationId !== id) continue;
+        conversationIds.current.delete(reportId);
+        if (reportId === activeId.current) clearedCurrent = true;
+      }
+      if (clearedCurrent) setMessages([]);
+    };
+    window.addEventListener(MEMORY_CLEARED_EVENT, onCleared);
+    window.addEventListener(CONVERSATION_DELETED_EVENT, onDeleted);
+    return () => {
+      window.removeEventListener(MEMORY_CLEARED_EVENT, onCleared);
+      window.removeEventListener(CONVERSATION_DELETED_EVENT, onDeleted);
+    };
+  }, []);
   useEffect(() => {
     const abort = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -2616,8 +2645,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     try {
       await ensureGuestCookie();
-      let conversationId = conversationIds.current.get(id);
-      if (!conversationId) {
+      const remember = readReaderPrefs().memory;
+      let conversationId = remember ? conversationIds.current.get(id) : undefined;
+      if (remember && !conversationId) {
         try {
           const created = await fetch('/api/conversations', { method: 'POST', signal: controller.signal, credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reportId: id }) });
           const payload = await readContractJson(created, parseCreateConversationResponse);
@@ -2627,7 +2657,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const spoken = Boolean(extra?.spoken ?? voiceSpeakRef.current ?? voiceConvRef.current);
       const styleRewrite = spoken ? (voiceAnswerStyleRef.current ?? undefined) : undefined;
       const rewrite = extra?.rewrite ?? styleRewrite;
-      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(rewrite ? { rewrite } : {}), ...(spoken ? { spoken: true } : {}), stream:true }) });
+      const chatPrefs = readerChatFields();
+      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(rewrite ? { rewrite } : {}), ...(spoken ? { spoken: true } : {}), readingLevel: chatPrefs.readingLevel, ...(chatPrefs.modelId ? { modelId: chatPrefs.modelId } : {}), stream:true }) });
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
@@ -2788,6 +2819,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   async function newConversation() {
     if (busyRef.current || !memoryReady.current) return;
     const id = selected.id;
+    if (!readReaderPrefs().memory) {
+      conversationIds.current.delete(id);
+      if (activeId.current === id) { setMessages([]); setQuestion(''); setClips([]); setPick(null); setOverviewPick(null); }
+      return;
+    }
     busyRef.current = true; setAsking(true);
     try {
       await ensureGuestCookie();

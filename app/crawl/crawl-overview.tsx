@@ -154,6 +154,19 @@ function formatCrawlTime(iso: string | null | undefined) {
   return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
 }
 
+/** Table cells drop the year; the full stamp stays on the title. */
+function formatCrawlTimeCompact(iso: string | null | undefined) {
+  const full = formatCrawlTime(iso);
+  return full === '—' ? full : full.slice(5);
+}
+
+function rowStage(item: CrawlFilingRow): { text: string; tone: 'bad' | 'warn' | 'good' | '' } {
+  if (item.state === 'failed') return { text: '失败', tone: 'bad' };
+  if (item.verdictStatus === 'ready') return { text: '已智析', tone: 'good' };
+  if (item.state === 'parsed' || item.state === 'parsed_partial') return { text: '未智析', tone: 'warn' };
+  return { text: periodStateLabel(item.state), tone: '' };
+}
+
 function cycleSort(current: SortState): SortState {
   if (current === 'default') return 'asc';
   if (current === 'asc') return 'desc';
@@ -648,6 +661,7 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
   const [discardPasswordError, setDiscardPasswordError] = useState('');
   const [periodPrefix, setPeriodPrefix] = useState('');
   const [onlyMissingAi, setOnlyMissingAi] = useState(false);
+  const [opsMenu, setOpsMenu] = useState<{ key: string; top: number; left: number } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [batchBusy, setBatchBusy] = useState(false);
   const [tableRefreshing, setTableRefreshing] = useState(false);
@@ -860,18 +874,30 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
 
   const periodOptions = useMemo(() => uniquePeriodTokens(allFilings), [allFilings]);
 
-  const filings = useMemo(() => {
+  const scopedFilings = useMemo(() => {
     const keyword = search.trim();
     const parsed = parseHomeQuery(keyword);
     const needle = parsed.companyQuery || keyword;
-    let list = allFilings.filter((item) => {
+    return allFilings.filter((item) => {
       if (!filingMatchesSourceFilter(item, source)) return false;
-      if (onlyFailed && item.state !== 'failed') return false;
-      if (onlyUnparsed && (item.state === 'parsed' || item.state === 'parsed_partial')) return false;
-      if (onlyMissingAi && item.verdictStatus === 'ready') return false;
       if (!periodPrefixMatches(item.period, periodPrefix)) return false;
       if (!keyword) return true;
       return queryMatchesCompany(needle, item) || queryMatchesCompany(keyword, item);
+    });
+  }, [allFilings, search, source, periodPrefix]);
+
+  const filterCounts = useMemo(() => ({
+    failed: scopedFilings.filter((item) => item.state === 'failed').length,
+    unparsed: scopedFilings.filter((item) => item.state !== 'parsed' && item.state !== 'parsed_partial').length,
+    missingAi: scopedFilings.filter((item) => item.verdictStatus !== 'ready').length,
+  }), [scopedFilings]);
+
+  const filings = useMemo(() => {
+    let list = scopedFilings.filter((item) => {
+      if (onlyFailed && item.state !== 'failed') return false;
+      if (onlyUnparsed && (item.state === 'parsed' || item.state === 'parsed_partial')) return false;
+      if (onlyMissingAi && item.verdictStatus === 'ready') return false;
+      return true;
     });
     if (timeCol && timeSort !== 'default') {
       list = [...list].sort((a, b) => {
@@ -882,7 +908,7 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
       });
     }
     return list;
-  }, [allFilings, search, source, onlyFailed, onlyUnparsed, onlyMissingAi, periodPrefix, timeCol, timeSort]);
+  }, [scopedFilings, onlyFailed, onlyUnparsed, onlyMissingAi, timeCol, timeSort]);
 
   const selectedFilings = useMemo(
     () => filings.filter((row) => selectedIds.has(row.key)),
@@ -1912,6 +1938,7 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
   }
 
   const queueCount = Math.max(live?.counts.pending_download ?? 0, downloadQueueItems.length);
+  const downloadFailed = live?.counts.download_failed ?? 0;
   const downloadUsed = Math.max(live?.downloadSlots.used ?? 0, downloadingItems.length);
   // 槽位占用：不超过并发上限（超额 zombie 由 worker reclaim，不在此用全表 COUNT 撑大）
   const parseUsed = Math.min(
@@ -1928,6 +1955,31 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
     queuedItemCount: verdictQueuedItems.length,
   });
   const verdictSkippedCount = Math.max(live?.verdictQueue?.skippedCount ?? 0, verdictSkips.length);
+
+  const quickFilter = onlyFailed ? 'failed' : onlyUnparsed ? 'unparsed' : onlyMissingAi ? 'missing' : 'all';
+  function setQuickFilter(next: 'all' | 'failed' | 'unparsed' | 'missing') {
+    setOnlyFailed(next === 'failed');
+    setOnlyUnparsed(next === 'unparsed');
+    setOnlyMissingAi(next === 'missing');
+  }
+
+  useEffect(() => {
+    if (!opsMenu) return;
+    function onDoc(event: MouseEvent) {
+      const target = event.target as Element | null;
+      if (target?.closest('.co-ops-menu')) return;
+      setOpsMenu(null);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpsMenu(null);
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [opsMenu]);
 
   const shellClass = embedded ? 'co-shell co-shell-embedded' : 'app-shell co-shell';
   const ShellTag = embedded ? 'div' : 'main';
@@ -2005,12 +2057,12 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
               <button
                 type="button"
                 ref={dlQueueBtnRef}
-                className={`co-sb-node clickable ${queuePopover === 'download' ? 'open' : ''}`}
+                className={`co-sb-node co-step clickable${queueCount > 0 ? ' warn' : ''} ${queuePopover === 'download' ? 'open' : ''}`}
                 aria-expanded={queuePopover === 'download'}
                 onClick={() => setQueuePopover((v) => (v === 'download' ? null : 'download'))}
               >
-                <PulseDot on={queueCount > 0} />
-                排队下载(<b>{queueCount}</b>)
+                <span className="co-step-kicker"><PulseDot on={queueCount > 0} />排队下载</span>
+                <b className="co-step-num">{queueCount}</b>
               </button>
               <QueuePopover
                 open={queuePopover === 'download'}
@@ -2031,13 +2083,14 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
               <button
                 type="button"
                 ref={dlActiveBtnRef}
-                className={`co-sb-node clickable ${queuePopover === 'downloading' ? 'open' : ''}`}
+                className={`co-sb-node co-step clickable${downloadFailed > 0 ? ' bad' : downloadUsed > 0 ? ' live' : ''} ${queuePopover === 'downloading' ? 'open' : ''}`}
                 aria-expanded={queuePopover === 'downloading'}
                 title="点击查看下载中任务与来源"
                 onClick={() => setQueuePopover((v) => (v === 'downloading' ? null : 'downloading'))}
               >
-                <PulseDot on={downloadUsed > 0} />
-                下载中(<b>{downloadUsed}/{downloadMax}</b>)
+                <span className="co-step-kicker"><PulseDot on={downloadUsed > 0} />下载中</span>
+                <b className="co-step-num">{downloadUsed}/{downloadMax}</b>
+                {downloadFailed > 0 ? <em className="co-step-flag">失败 {downloadFailed}</em> : null}
               </button>
               <QueuePopover
                 open={queuePopover === 'downloading'}
@@ -2056,12 +2109,12 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
               <button
                 type="button"
                 ref={parseQueueBtnRef}
-                className={`co-sb-node clickable ${queuePopover === 'parse' ? 'open' : ''}`}
+                className={`co-sb-node co-step clickable${parseQueueCount > 0 ? ' warn' : ''} ${queuePopover === 'parse' ? 'open' : ''}`}
                 aria-expanded={queuePopover === 'parse'}
                 onClick={() => setQueuePopover((v) => (v === 'parse' ? null : 'parse'))}
               >
-                <PulseDot on={parseQueueCount > 0} />
-                排队解析(<b>{parseQueueCount}</b>)
+                <span className="co-step-kicker"><PulseDot on={parseQueueCount > 0} />排队解析</span>
+                <b className="co-step-num">{parseQueueCount}</b>
               </button>
               <QueuePopover
                 open={queuePopover === 'parse'}
@@ -2081,13 +2134,13 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
               <button
                 type="button"
                 ref={parseActiveBtnRef}
-                className={`co-sb-node clickable ${queuePopover === 'parsing' ? 'open' : ''}`}
+                className={`co-sb-node co-step clickable${parseUsed > 0 ? ' live' : ''} ${queuePopover === 'parsing' ? 'open' : ''}`}
                 aria-expanded={queuePopover === 'parsing'}
                 title="点击查看解析中任务"
                 onClick={() => setQueuePopover((v) => (v === 'parsing' ? null : 'parsing'))}
               >
-                <PulseDot on={parseUsed > 0} />
-                解析中(<b>{parseUsed}/{parseMax}</b>)
+                <span className="co-step-kicker"><PulseDot on={parseUsed > 0} />解析中</span>
+                <b className="co-step-num">{parseUsed}/{parseMax}</b>
               </button>
               <QueuePopover
                 open={queuePopover === 'parsing'}
@@ -2105,19 +2158,19 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
               />
             </span>
             <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
-            <span className="co-sb-node static">已入库(<b>{ingested}</b>)</span>
+            <span className="co-sb-node co-step static good"><span className="co-step-kicker">已入库</span><b className="co-step-num">{ingested}</b></span>
             <span className="co-sb-arrow" aria-hidden="true"><Icon name="arrowRight" size={12} /></span>
             <span className="co-sb-node-wrap">
               <button
                 type="button"
                 ref={verdictBtnRef}
-                className={`co-sb-node clickable ${queuePopover === 'verdict' ? 'open' : ''}`}
+                className={`co-sb-node co-step clickable${verdictPending > 0 ? ' warn' : ''} ${queuePopover === 'verdict' ? 'open' : ''}`}
                 aria-expanded={queuePopover === 'verdict'}
                 title="点击查看排队智析队列"
                 onClick={() => setQueuePopover((v) => (v === 'verdict' ? null : 'verdict'))}
               >
-                <PulseDot on={autoVerdictEnabled && verdictPending > 0} />
-                排队智析(<b>{verdictPending}</b>)
+                <span className="co-step-kicker"><PulseDot on={autoVerdictEnabled && verdictPending > 0} />排队智析</span>
+                <b className="co-step-num">{verdictPending}</b>
               </button>
               <QueuePopover
                 open={queuePopover === 'verdict'}
@@ -2134,13 +2187,13 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
               <button
                 type="button"
                 ref={verdictActiveBtnRef}
-                className={`co-sb-node clickable ${queuePopover === 'verdicting' ? 'open' : ''}`}
+                className={`co-sb-node co-step clickable${verdictUsed > 0 ? ' live' : ''} ${queuePopover === 'verdicting' ? 'open' : ''}`}
                 aria-expanded={queuePopover === 'verdicting'}
                 title="点击查看智析中任务，可随时中止"
                 onClick={() => setQueuePopover((v) => (v === 'verdicting' ? null : 'verdicting'))}
               >
-                <PulseDot on={verdictUsed > 0} />
-                智析中(<b>{verdictUsed}/{verdictMax}</b>)
+                <span className="co-step-kicker"><PulseDot on={verdictUsed > 0} />智析中</span>
+                <b className="co-step-num">{verdictUsed}/{verdictMax}</b>
               </button>
               <QueuePopover
                 open={queuePopover === 'verdicting'}
@@ -2163,12 +2216,13 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
                   <button
                     type="button"
                     ref={verdictSkipBtnRef}
-                    className={`co-sb-node clickable ${queuePopover === 'verdictSkipped' ? 'open' : ''}`}
+                    className={`co-sb-node co-step clickable bad ${queuePopover === 'verdictSkipped' ? 'open' : ''}`}
                     aria-expanded={queuePopover === 'verdictSkipped'}
                     title="手动中止后跳过的财报；可重新智析"
                     onClick={() => setQueuePopover((v) => (v === 'verdictSkipped' ? null : 'verdictSkipped'))}
                   >
-                    已跳过(<b>{verdictSkippedCount}</b>)
+                    <span className="co-step-kicker">已跳过</span>
+                    <b className="co-step-num">{verdictSkippedCount}</b>
                   </button>
                   <QueuePopover
                     open={queuePopover === 'verdictSkipped'}
@@ -2303,65 +2357,6 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
             <option value="">全部期次</option>
             {periodOptions.map((token) => <option key={token} value={token}>{token}</option>)}
           </select>
-          <div className="co-toggles" role="group" aria-label="快速筛选">
-            <button
-              type="button"
-              className={`co-toggle ${onlyFailed ? 'on' : ''}`}
-              aria-pressed={onlyFailed}
-              onClick={() => {
-                setOnlyFailed((v) => !v);
-                if (!onlyFailed) setOnlyUnparsed(false);
-              }}
-            >
-              失败
-            </button>
-            <button
-              type="button"
-              className={`co-toggle ${onlyUnparsed ? 'on' : ''}`}
-              aria-pressed={onlyUnparsed}
-              onClick={() => {
-                setOnlyUnparsed((v) => !v);
-                if (!onlyUnparsed) setOnlyFailed(false);
-              }}
-            >
-              未解析
-            </button>
-            <button
-              type="button"
-              className={`co-toggle ${onlyMissingAi ? 'on' : ''}`}
-              aria-pressed={onlyMissingAi}
-              onClick={() => setOnlyMissingAi((v) => !v)}
-            >
-              未智析
-            </button>
-          </div>
-          <div className="co-batch-acts" role="group" aria-label="批量操作">
-            <button
-              type="button"
-              className="co-batch-run"
-              disabled={batchBusy || !selectedFilings.length}
-              onClick={() => runBatchCrawl()}
-            >
-              批量抓取
-            </button>
-            <button
-              type="button"
-              className="co-batch-run"
-              disabled={batchBusy || !selectedFilings.length}
-              onClick={() => runBatchParse()}
-            >
-              批量解析
-            </button>
-            <button
-              type="button"
-              className="co-batch-run"
-              disabled={batchBusy || !selectedFilings.length}
-              onClick={() => runBatchVerdict()}
-            >
-              批量智析
-            </button>
-            {selectedFilings.length ? <span className="co-batch-count">已选 {selectedFilings.length}</span> : null}
-          </div>
           <div className="co-toolbar-right">
             <button
               type="button"
@@ -2376,6 +2371,26 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
             <span className="co-sort-hint" aria-live="polite">
               {loading ? '…' : `${filings.length} 份`}
             </span>
+          </div>
+        </div>
+        <div className="co-filterbar">
+          <div className="co-filter-tabs" role="tablist" aria-label="快速筛选">
+            <button type="button" role="tab" className={`co-filter-tab${quickFilter === 'all' ? ' on' : ''}`} aria-selected={quickFilter === 'all'} onClick={() => setQuickFilter('all')}>全部</button>
+            <button type="button" role="tab" className={`co-filter-tab${filterCounts.failed > 0 ? ' bad' : ''}${quickFilter === 'failed' ? ' on' : ''}`} aria-selected={quickFilter === 'failed'} onClick={() => setQuickFilter(quickFilter === 'failed' ? 'all' : 'failed')}>
+              失败<span className="co-badge">{filterCounts.failed}</span>
+            </button>
+            <button type="button" role="tab" className={`co-filter-tab${filterCounts.unparsed > 0 ? ' warn' : ''}${quickFilter === 'unparsed' ? ' on' : ''}`} aria-selected={quickFilter === 'unparsed'} onClick={() => setQuickFilter(quickFilter === 'unparsed' ? 'all' : 'unparsed')}>
+              未解析<span className="co-badge">{filterCounts.unparsed}</span>
+            </button>
+            <button type="button" role="tab" className={`co-filter-tab${filterCounts.missingAi > 0 ? ' warn' : ''}${quickFilter === 'missing' ? ' on' : ''}`} aria-selected={quickFilter === 'missing'} onClick={() => setQuickFilter(quickFilter === 'missing' ? 'all' : 'missing')}>
+              未智析<span className="co-badge">{filterCounts.missingAi}</span>
+            </button>
+          </div>
+          <div className="co-batch-acts" role="group" aria-label="批量操作">
+            {selectedFilings.length ? <span className="co-batch-count">已选 {selectedFilings.length}</span> : null}
+            <button type="button" className="co-batch-run" disabled={batchBusy || !selectedFilings.length} onClick={() => runBatchCrawl()}>批量抓取</button>
+            <button type="button" className="co-batch-run" disabled={batchBusy || !selectedFilings.length} onClick={() => runBatchParse()}>批量解析</button>
+            <button type="button" className="co-batch-run" disabled={batchBusy || !selectedFilings.length} onClick={() => runBatchVerdict()}>批量智析</button>
           </div>
         </div>
 
@@ -2453,42 +2468,69 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
                       </Link>
                     </td>
                     <td className="co-col-source">{filingSourceLabel(item)}</td>
-                    <td className="co-col-time"><span className="co-time">{formatCrawlTime(item.discoveredAt ?? item.publishedAt ?? null)}</span></td>
-                    <td className="co-col-time"><span className="co-time">{formatCrawlTime(item.downloadedAt ?? null)}</span></td>
+                    <td className="co-col-time"><span className="co-time" title={formatCrawlTime(item.discoveredAt ?? item.publishedAt ?? null)}>{formatCrawlTimeCompact(item.discoveredAt ?? item.publishedAt ?? null)}</span></td>
+                    <td className="co-col-time"><span className="co-time" title={formatCrawlTime(item.downloadedAt ?? null)}>{formatCrawlTimeCompact(item.downloadedAt ?? null)}</span></td>
                     <td className="co-col-time">
-                      <span className="co-time">{formatCrawlTime(item.parsedAt ?? null)}</span>
+                      <span className="co-time" title={formatCrawlTime(item.parsedAt ?? null)}>{formatCrawlTimeCompact(item.parsedAt ?? null)}</span>
                     </td>
                     <td className="co-col-time">
-                      <span className="co-time">{formatCrawlTime(item.verdictStatus === 'ready' ? item.verdictGeneratedAt : null)}</span>
+                      <span className="co-time" title={formatCrawlTime(item.verdictStatus === 'ready' ? item.verdictGeneratedAt : null)}>{formatCrawlTimeCompact(item.verdictStatus === 'ready' ? item.verdictGeneratedAt : null)}</span>
                     </td>
                     <td className="co-col-ops">
                       <div className="co-actions">
+                        <span className={`co-row-state${rowStage(item).tone ? ` ${rowStage(item).tone}` : ''}`}>{rowStage(item).text}</span>
                         <button
                           type="button"
-                          className="co-text-act"
+                          className="co-icon-act"
                           disabled={crawlBusy}
                           onClick={() => askCrawl(item.code, item.name, period)}
                         >{crawlBusy ? '抓取中' : '抓取'}</button>
                         <button
                           type="button"
-                          className="co-text-act"
+                          className="co-icon-act"
                           disabled={parseBusy}
                           onClick={() => askParse(item.code, item.name, period)}
                         >{parseBusy ? '解析中' : '解析'}</button>
                         <button
                           type="button"
-                          className="co-text-act"
+                          className="co-icon-act"
                           disabled={verdictBusy || (!canFillVerdict(item) && !parseBusy)}
                           onClick={() => askVerdict(item.code, item.name, period)}
                         >{verdictBusy ? '智析中' : '智析'}</button>
                         {item.announcementId ? (
-                          <button
-                            type="button"
-                            className="co-text-act danger"
-                            disabled={discardBusy || crawlBusy || parseBusy || verdictBusy}
-                            title="剔除错抓/非完整财报，释放该期次"
-                            onClick={() => askDiscard(item.code, item.name, period)}
-                          >{discardBusy ? '剔除中' : '删除'}</button>
+                          <span className="co-ops-menu">
+                            <button
+                              type="button"
+                              className="co-ops-more"
+                              aria-label={`${item.name} ${item.period} 更多操作`}
+                              aria-haspopup="menu"
+                              aria-expanded={opsMenu?.key === item.key}
+                              disabled={discardBusy || crawlBusy || parseBusy || verdictBusy}
+                              onClick={(event) => {
+                                if (opsMenu?.key === item.key) {
+                                  setOpsMenu(null);
+                                  return;
+                                }
+                                const rect = event.currentTarget.getBoundingClientRect();
+                                const width = 128;
+                                const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+                                setOpsMenu({ key: item.key, top: rect.bottom + 6, left });
+                              }}
+                            >⋯</button>
+                            {opsMenu?.key === item.key ? (
+                              <div className="co-ops-pop" role="menu" style={{ top: opsMenu.top, left: opsMenu.left }}>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  disabled={discardBusy}
+                                  onClick={() => {
+                                    setOpsMenu(null);
+                                    askDiscard(item.code, item.name, period);
+                                  }}
+                                >{discardBusy ? '剔除中' : '删除'}</button>
+                              </div>
+                            ) : null}
+                          </span>
                         ) : null}
                       </div>
                     </td>

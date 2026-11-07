@@ -7,7 +7,7 @@ import {
   type ConversationListResponse,
   type CreateConversationResponse,
 } from '@/contracts/conversations';
-import { createConversation, listConversations } from '@/lib/conversations';
+import { createConversation, deleteAllConversations, listConversations } from '@/lib/conversations';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,6 +33,14 @@ export async function GET(request: Request) {
     const reportId = parseConversationListQuery(new URL(request.url));
     const body = { conversations: (await listConversations(owner, reportId)).map(conversationDto) } satisfies ConversationListResponse;
     return withCookie(body, 200, setCookie);
+  } catch (error) { return apiError(error); }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { owner, setCookie } = ensureConversationOwner(request);
+    const deleted = await deleteAllConversations(owner);
+    return withCookie({ ok: true, deleted }, 200, setCookie);
   } catch (error) { return apiError(error); }
 }
 
