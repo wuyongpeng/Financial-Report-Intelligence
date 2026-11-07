@@ -139,6 +139,14 @@ export function parseHomeQuery(raw: string): ParsedHomeQuery {
 
 export type ListedNameCode = { code: string; name: string };
 
+/** Literal name/code selections keep their deterministic route even during AI outages. */
+export function isDirectCompanySelection(raw: string, candidates: ListedNameCode[]): boolean {
+  const parsed = parseHomeQuery(raw);
+  return !parsed.hasQuestionIntent && parsed.companyQuery.length >= 2
+    && candidates.some(row => row.name.includes(parsed.companyQuery) || row.code.includes(parsed.companyQuery));
+}
+
+
 
 function dedupeListed(rows: ListedNameCode[]): ListedNameCode[] {
   const seen = new Set<string>();

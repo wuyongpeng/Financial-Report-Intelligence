@@ -1,5 +1,5 @@
 'use client';
-import { requestAssistantTurn, FEEDBACK_REVIEW_LINE } from '@/lib/assistant-turn';
+import { requestAssistantTurn, FEEDBACK_REVIEW_LINE, assistantTurnFailureMessage } from '@/lib/assistant-turn';
 import { requestFeedbackDraft, subscribeFeedbackState, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import { shouldExpandHomeVoicePanel } from '@/lib/voice/home-panel';
 import { useVoiceFloatDrag } from '@/components/use-voice-float-drag';
@@ -33,6 +33,7 @@ import {
   matchCompanies,
   matchCompany,
   parseHomeQuery,
+  isDirectCompanySelection,
   queryMatchesCompany,
   resolveListedCompanies,
   resolveListedCompany,
@@ -1313,11 +1314,13 @@ export default function ReportHome() {
     if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);
     armHomeInterrupt(turn);
     try {
-      const semantic = await requestAssistantTurn({ question: raw, surface: 'home', history: getHomeChatTurns().slice(0, -1).slice(-8) }, turn?.signal ?? new AbortController().signal);
+      const semantic = isDirectCompanySelection(raw, [...coverage, ...resolveListedCompanies(raw)]) ? { kind: 'domain' as const } : await requestAssistantTurn({ question: raw, surface: 'home', history: getHomeChatTurns().slice(0, -1).slice(-8) }, turn?.signal ?? new AbortController().signal);
       assertHomeVoiceTurn(turn);
       if (semantic.kind !== 'domain') {
-        if (!opts?.fromVoice) setSearch('');
-        if (semantic.kind === 'feedback') {
+        if (!opts?.fromVoice && semantic.kind !== 'unavailable') setSearch('');
+        if (semantic.kind === 'unavailable') {
+          await deliverHomeAnswer(assistantTurnFailureMessage(semantic.reason), { fromVoice: opts?.fromVoice });
+        } else if (semantic.kind === 'feedback') {
           pushTurn('assistant', FEEDBACK_REVIEW_LINE);
           requestFeedbackDraft(semantic.action, () => homeMountedRef.current && homeVoiceTurnsRef.current.owns(turn) && !isFeedbackDrawerOpen());
         } else await deliverHomeAnswer(semantic.answer, { fromVoice: opts?.fromVoice });

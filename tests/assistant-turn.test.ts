@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { parseAssistantTurn, requestAssistantTurn, type AssistantTurn } from '../lib/assistant-turn';
+import { parseAssistantTurn, requestAssistantTurn, assistantTurnFailureMessage, type AssistantTurn } from '../lib/assistant-turn';
 import { assistantTurnSystemPrompt, resolveAssistantTurn } from '../lib/assistant-turn-server';
+import { isDirectCompanySelection } from '../lib/home-search';
 import { decideDirectAnswer } from '../modules/retrieval/application/answer-policy';
 import { planQuestion } from '../modules/retrieval/application/question-planner';
 
@@ -19,7 +20,7 @@ test('semantic JSON is a strict UI whitelist, never arbitrary navigation or subm
   for (const value of [null, [], { kind: 'open_url', url: '/000001' }, { kind: 'feedback', action: { type: 'submit_feedback', draft: '我觉得不方便' } },
     { kind: 'feedback', action: { type: 'open_feedback', category: '其它', draft: '我希望更方便', url: 'https://example.test' } },
     { kind: 'conversation', answer: '营收81.24亿元' }, { kind: 'conversation', answer: '不用谢【E1】' }, { kind: 'conversation', answer: '已打开', action: { type: 'open_feedback' } }]) {
-    assert.deepEqual(parseAssistantTurn(value), { kind: 'domain' });
+    assert.deepEqual(parseAssistantTurn(value), { kind: 'unavailable', reason: 'invalid_response' });
   }
 });
 
@@ -59,16 +60,16 @@ test('model transport receives recent context for varied intents; fixtures test 
   assert.equal(fetch.mock.callCount(), cases.length * 2, 'one semantic call, no extra answer call for conversation/feedback');
 });
 
-test('invalid model JSON, HTTP failure and cancelled requests fail closed to domain', async (t) => {
+test('invalid model JSON and HTTP failure are diagnosable, never silently routed to financial RAG', async (t) => {
   configureModel(t);
   const input = { question: '这个是真的吗', surface: 'report' as const, history: [] };
   const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json({ choices: [{ message: { content: 'not json' } }] }));
-  assert.deepEqual(await resolveAssistantTurn(input, new AbortController().signal), { kind: 'domain' });
+  assert.deepEqual(await resolveAssistantTurn(input, new AbortController().signal), { kind: 'unavailable', reason: 'invalid_response' });
   fetch.mock.mockImplementation(async () => new Response('', { status: 400 }));
-  assert.deepEqual(await resolveAssistantTurn(input, new AbortController().signal), { kind: 'domain' });
+  assert.deepEqual(await resolveAssistantTurn(input, new AbortController().signal), { kind: 'unavailable', reason: 'upstream' });
   const abort = new AbortController(); abort.abort();
   const count = fetch.mock.callCount();
-  assert.deepEqual(await resolveAssistantTurn(input, abort.signal), { kind: 'domain' });
+  assert.deepEqual(await resolveAssistantTurn(input, abort.signal), { kind: 'unavailable', reason: 'cancelled' });
   assert.equal(fetch.mock.callCount(), count);
 });
 
@@ -86,7 +87,7 @@ test('in-flight semantic inference is aborted upstream, not allowed to return a 
   const pending = resolveAssistantTurn({ question: '我希望更方便', history: [], surface: 'report' }, controller.signal);
   await ready;
   controller.abort();
-  assert.deepEqual(await pending, { kind: 'domain' });
+  assert.deepEqual(await pending, { kind: 'unavailable', reason: 'cancelled' });
   assert.equal(observed?.aborted, true);
 });
 
@@ -132,4 +133,61 @@ test('semantic pass precedes report focus/retrieval; stale same-report completio
   assert.ok(submit.includes('assertHomeVoiceTurn(turn)'));
   assert.ok(home.includes('isFeedbackDrawerOpen()'));
   assert.ok(!detail.includes('voiceCapabilitySpeech()') && !home.includes('homeGreetingNudge()'));
+});
+
+
+test('fenced JSON and visible content blocks are parsed; vendor-only 400 retries portable body once', async (t) => {
+  configureModel(t);
+  const action = { kind: 'feedback', action: { type: 'open_feedback', category: '体验问题', draft: '我觉得排版太乱，希望改善。' } };
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)); calls++;
+    if (calls === 1) { assert.ok(body.response_format); return new Response('', { status: 400 }); }
+    assert.ok(!body.response_format && !body.thinking && !body.enable_thinking);
+    return Response.json({ choices: [{ message: { content: [{ type: 'text', text: '```json\n' + JSON.stringify(action) + '\n```' }] } }] });
+  });
+  assert.deepEqual(await resolveAssistantTurn({ question: '在排版太乱了，我想反馈一下这个问题。', surface: 'report', history: [] }, new AbortController().signal), action);
+  assert.equal(calls, 2);
+});
+
+test('missing model, upstream error, invalid output and client network failure stay visible without false evidence refusals', async (t) => {
+  configureModel(t); delete process.env.LLM_BASE_URL; delete process.env.LLM_MODEL;
+  assert.deepEqual(await resolveAssistantTurn({ question: '我想反馈数据疑似错误', surface: 'report', history: [] }, new AbortController().signal), { kind: 'unavailable', reason: 'not_configured' });
+  for (const reason of ['not_configured', 'timeout', 'upstream', 'invalid_response'] as const) {
+    const message = assistantTurnFailureMessage(reason);
+    assert.ok(message && !message.includes('证据不足') && !message.includes('暂无法回答'));
+    assert.deepEqual(parseAssistantTurn({ kind: 'unavailable', reason }), { kind: 'unavailable', reason });
+  }
+  t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('network failed'); });
+  assert.deepEqual(await requestAssistantTurn({ question: '我想反馈', surface: 'home', history: [] }, new AbortController().signal), { kind: 'unavailable', reason: 'upstream' });
+});
+
+
+test('timeout bounds intent queue wait too; an old busy request cannot delay visible failure indefinitely', async (t) => {
+  configureModel(t);
+  const budgets: AbortController[] = [];
+  t.mock.method(AbortSignal, 'timeout', () => { const controller = new AbortController(); budgets.push(controller); return controller.signal; });
+  let started = () => {}; const ready = new Promise<void>(resolve => { started = resolve; });
+  const fetch = t.mock.method(globalThis, 'fetch', async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const signal = init?.signal as AbortSignal;
+    started();
+    return new Promise<Response>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Cancelled', 'AbortError')), { once: true }));
+  });
+  const first = new AbortController();
+  const input = { question: '我想反馈数据疑似不准', surface: 'report' as const, history: [] };
+  const pending = resolveAssistantTurn(input, first.signal);
+  await ready;
+  const queued = resolveAssistantTurn(input, new AbortController().signal);
+  budgets[1].abort(new DOMException('Timed out', 'TimeoutError'));
+  assert.deepEqual(await queued, { kind: 'unavailable', reason: 'timeout' });
+  assert.equal(fetch.mock.callCount(), 1, 'queued work never acquires a second model request after timeout');
+  first.abort();
+  assert.deepEqual(await pending, { kind: 'unavailable', reason: 'cancelled' });
+});
+
+
+test('known literal company/code and ambiguous name selection stay deterministic without a model, never mixed feedback or financial questions', () => {
+  const rows = [{ name: '京东方A', code: '000725' }, { name: '东鹏控股', code: '003012' }, { name: '东鹏饮料', code: '605499' }];
+  for (const raw of ['京东方A', '000725', '东鹏', '京东方A财报']) assert.equal(isDirectCompanySelection(raw, rows), true, raw);
+  for (const raw of ['京东方A的排版太乱了，我想反馈', '对比京东方A和立讯精密的ROE', '这里的数据错了想反馈', '谢谢', '京东方A营收多少']) assert.equal(isDirectCompanySelection(raw, rows), false, raw);
 });

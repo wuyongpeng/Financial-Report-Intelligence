@@ -1,6 +1,7 @@
 'use client';
 
-import { requestAssistantTurn, FEEDBACK_REVIEW_LINE } from '@/lib/assistant-turn';
+import { canStartHandoffAsk, canApplyHydratedThread, pendingDetailAskQuestion } from '@/lib/detail-ask-state';
+import { requestAssistantTurn, FEEDBACK_REVIEW_LINE, assistantTurnFailureMessage } from '@/lib/assistant-turn';
 import { requestFeedbackDraft, subscribeFeedbackState, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { amount, anomaliesConclusion, attributionConclusion, comparableHistory, sequentialHistory, filingType, format, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, suggestClosestReport, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
@@ -289,6 +290,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [clipsFlash, setClipsFlash] = useState(false);
   const pageEnter = useRef<'start' | 'next' | 'prev'>('start');
   const [asking, setAsking] = useState(false);
+  const [preflightQuestion, setPreflightQuestion] = useState<string | null>(null);
+  const [handoffPending, setHandoffPending] = useState(Boolean(autoAskQuestion?.trim()));
   const voice = useVoiceSession();
   const voiceApiRef = useRef(voice);
   const voiceRequestRef = useRef<AbortController | null>(null);
@@ -324,13 +327,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [jumpBlocked, setJumpBlocked] = useState(false);
   // A reasoning model thinks before it speaks; say so instead of showing dead air.
   const [thinking, setThinking] = useState(false);
-  const [mobilePane, setMobilePane] = useState('dashboard');
+  const [mobilePane, setMobilePane] = useState(autoAskQuestion?.trim() ? 'chat' : 'dashboard');
   // Conversations are reportId-scoped (server-enforced). Map survives period switches
   // within this mount so each report can resume its own thread — never cross-company,
   // and never hydrate a prior thread on a home→detail `?q=` handoff.
   const conversationIds = useRef(new Map<string, string>());
   /** One-shot: home ask deep-link starts a fresh report thread (seed question first). */
   const homeAskHandoffRef = useRef(Boolean(autoAskQuestion?.trim()));
+  const initialHandoffQuestionRef = useRef(autoAskQuestion);
   const memoryReady = useRef(false);
   const [memoryLoading, setMemoryLoading] = useState(true);
   const [baselineId, setBaselineId] = useState<string | null>(null);
@@ -573,6 +577,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }, [selected.id, canLoadReportData]);
   useEffect(() => {
     const abort = new AbortController();
+    const hydrationReportId = selected.id;
+    const hydrationRequest = requestRef.current;
+    const canHydrate = () => canApplyHydratedThread({ aborted: abort.signal.aborted, reportId: hydrationReportId, activeId: activeId.current, requestUnchanged: requestRef.current === hydrationRequest, busy: busyRef.current });
     memoryReady.current = false;
     // Always drop previous report's UI thread before hydrate (home/detail + A→B isolation).
     setMessages([]);
@@ -587,7 +594,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         // Fresh conversation so the deep-link utterance seeds as the first turn.
         // Once auto-asked, later period switches hydrate normally even if `q` lingers.
         const wantFreshHandoff = !autoAskedRef.current
-          && (homeAskHandoffRef.current || consumeHomeAskHandoff(autoAskQuestion));
+          && (homeAskHandoffRef.current || consumeHomeAskHandoff(initialHandoffQuestionRef.current));
         if (wantFreshHandoff) {
           homeAskHandoffRef.current = true;
           conversationIds.current.delete(selected.id);
@@ -606,7 +613,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           } catch {
             conversationIds.current.delete(selected.id);
           }
-          if (!abort.signal.aborted) setMessages([]);
+          if (canHydrate()) setMessages([]);
           return;
         }
 
@@ -614,22 +621,22 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         const data = await readContractJson(response, parseConversationListResponse);
         const id = conversationIds.current.get(selected.id) ?? data.conversations[0]?.id;
         if (!id) {
-          if (!abort.signal.aborted) setMessages([]);
+          if (canHydrate()) setMessages([]);
           return;
         }
         const detail = await fetch(`/api/conversations/${id}`, { signal: abort.signal, cache: 'no-store', credentials: 'same-origin' });
         const payload = await readContractJson(detail, parseConversationDetailResponse);
-        if (abort.signal.aborted) return;
+        if (!canHydrate()) return;
         conversationIds.current.set(selected.id, id);
         setMessages(payload.messages.map(m => ({ role: m.role, text: m.content || (m.role === 'assistant' ? '这次回答尚未完成，可重新提问。' : ''), citations: m.evidence })));
       } catch {
         // Fail / 401 / empty: stay empty — never keep another report's messages.
-        if (!abort.signal.aborted) setMessages([]);
+        if (canHydrate()) setMessages([]);
       }
       finally { if (!abort.signal.aborted) { memoryReady.current = true; setMemoryLoading(false); } }
     })();
     return () => abort.abort();
-  }, [selected.id, autoAskQuestion]);
+  }, [selected.id]);
   useEffect(() => {
     const abort = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -2388,19 +2395,20 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const id = selected.id;
     if (extra?.spoken || voiceConvRef.current) voiceRequestRef.current = controller;
     const releasePreflight = () => {
-      if (requestRef.current === controller && activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
+      if (requestRef.current === controller && activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); setPreflightQuestion(null); }
     };
     const ownsTurn = () => requestRef.current === controller && activeId.current === id && !controller.signal.aborted && !isFeedbackDrawerOpen();
+    setPreflightQuestion(replacing == null ? typed : null);
     setAsking(true);
     if (typed && replacing == null) {
       try {
         const turn = await requestAssistantTurn({ question: typed, surface: 'report', context: `${selected.company_name} ${period(selected)}`, history: messages.slice(-8).map(row => ({ role: row.role, content: row.text })) }, controller.signal);
         if (!ownsTurn()) { releasePreflight(); return; }
         if (turn.kind !== 'domain') {
-          const line = turn.kind === 'feedback' ? FEEDBACK_REVIEW_LINE : turn.answer;
+          const line = turn.kind === 'feedback' ? FEEDBACK_REVIEW_LINE : turn.kind === 'unavailable' ? assistantTurnFailureMessage(turn.reason) : turn.answer;
           setQuestion('');
           setMessages(current => [...current, { role: 'user', text: typed, local: true }, { role: 'assistant', text: line, local: true }]);
-          busyRef.current = false; setAsking(false); setThinking(false);
+          busyRef.current = false; setAsking(false); setThinking(false); setPreflightQuestion(null);
           setChatCollapsed(false);
           if (turn.kind === 'feedback') {
             const opened = requestFeedbackDraft(turn.action, ownsTurn);
@@ -2410,7 +2418,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         }
       } catch {
         if (!ownsTurn()) { releasePreflight(); return; }
-        // Transient classification failure never relaxes the evidence policy.
+        setQuestion('');
+        setMessages(current => [...current, { role: 'user', text: typed, local: true }, { role: 'assistant', text: assistantTurnFailureMessage('upstream'), local: true }]);
+        releasePreflight();
+        return; // Unknown intent is a service failure, not a financial-evidence refusal.
       }
     }
     if (!ownsTurn()) { releasePreflight(); return; }
@@ -2489,7 +2500,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const prior = replacing != null ? messages.slice(0, replacing - 1) : messages;
     const asked = prior.filter(m => m.role === 'user' && !m.local).map(m => m.ask?.question ?? m.text);
     const slot = replacing != null ? replacing : messages.length + 1;
-    setAsking(true); setThinking(false);
+    setAsking(true); setThinking(false); setPreflightQuestion(null);
     chatStickRef.current = true;
     if (typewriterTimerRef.current != null) { window.clearInterval(typewriterTimerRef.current); typewriterTimerRef.current = null; }
     if (replacing == null) {
@@ -2613,7 +2624,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         revealed = answer;
         paint(lastEvidence, true);
       }
-      if (requestRef.current === controller && activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); }
+      if (requestRef.current === controller && activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); setPreflightQuestion(null); }
     }
     if (requestRef.current === controller && activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
     /* Typed ask: jump/highlight first in-report cite so「营收是多少」paints 营业收入 without a click. */
@@ -2684,9 +2695,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
 
   // Home deep-link: seed ONLY this utterance into a fresh report thread (no home history).
   useEffect(() => {
-    if (!autoAskQuestion || autoAskedRef.current) return;
-    if (!periodBootstrapDone || memoryLoading || loading || asking) return;
-    if (!memoryReady.current || busyRef.current) return;
+    if (!autoAskQuestion || !canStartHandoffAsk({ question: autoAskQuestion, sent: autoAskedRef.current, periodReady: periodBootstrapDone, memoryLoading, memoryReady: memoryReady.current, loading, asking, busy: busyRef.current, reportReady: canLoadReportData })) return;
     if (preferredPeriod) {
       const hint = parsePeriodHints(preferredPeriod);
       if (!hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(preferredPeriod)) hint.token = preferredPeriod.toUpperCase();
@@ -2698,8 +2707,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     const questionText = autoAskQuestion;
     const timer = window.setTimeout(() => {
-      if (autoAskedRef.current) return;
+      if (autoAskedRef.current || busyRef.current || !memoryReady.current || activeId.current !== selected.id) return;
       autoAskedRef.current = true;
+      setHandoffPending(false);
       homeAskHandoffRef.current = false;
       setChatCollapsed(false);
       setMobilePane('chat');
@@ -2722,7 +2732,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       void askRef.current(questionText);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [autoAskQuestion, preferredPeriod, periodBootstrapDone, memoryLoading, loading, asking, selected]);
+  }, [autoAskQuestion, preferredPeriod, periodBootstrapDone, memoryLoading, loading, asking, selected, canLoadReportData]);
 
   useEffect(() => {
     if (!preferredCite || deepCitedRef.current) return;
@@ -3181,7 +3191,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 )}
               </div>}
             </div>;
-          })}<div ref={chatEnd}/>
+          })}
+          {pendingDetailAskQuestion({ asking, preflight: preflightQuestion, handoffPending, handoff: autoAskQuestion }) && <>
+            <div className="cd-message cd-message-user"><div className="cd-user-turn"><p>{pendingDetailAskQuestion({ asking, preflight: preflightQuestion, handoffPending, handoff: autoAskQuestion })}</p></div></div>
+            <div className="cd-message cd-message-assistant">{!asking && (error || (!canLoadReportData && ['download_failed', 'parse_failed', 'parse_parked', 'auto_skipped'].includes(selected.status))) ? <p role="alert">{error || '当前报告暂不可用于问答。'} 问题已保留，请切换已解析报告或稍后重试。</p> : <EvaAnalyzing phase={thinking ? 'reasoning' : 'retrieving'} />}</div>
+          </>}
+          <div ref={chatEnd}/>
         </div><form className="cd-chat-input" onSubmit={e=>{e.preventDefault(); if (!asking) void ask(question);}}>
           {clipToast && <div className="cd-clip-toast" role="status">{clipToast}</div>}
           {clips.length>0 && <div className={`cd-clips ${clipsFlash?'cd-clips-flash':''}`} aria-label="AI分析关注">

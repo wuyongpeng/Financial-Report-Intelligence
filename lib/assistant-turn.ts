@@ -1,11 +1,24 @@
 /** Shared, client-safe semantic response contract. No arbitrary model tools. */
 export type FeedbackDraftAction = { type: 'open_feedback'; category: '体验问题' | '功能建议' | '数据不准' | '其它'; draft: string };
-export type AssistantTurn = { kind: 'domain' } | { kind: 'conversation'; answer: string } | { kind: 'feedback'; action: FeedbackDraftAction };
+export type AssistantTurnFailure = 'not_configured' | 'timeout' | 'upstream' | 'invalid_response' | 'cancelled';
+export type AssistantTurn = { kind: 'unavailable'; reason: AssistantTurnFailure } | { kind: 'domain' } | { kind: 'conversation'; answer: string } | { kind: 'feedback'; action: FeedbackDraftAction };
 export const FEEDBACK_REVIEW_LINE = '反馈已打开，请确认内容，没问题后再亲自点击发送。';
 
+export function unavailableAssistantTurn(reason: AssistantTurnFailure): Extract<AssistantTurn, { kind: 'unavailable' }> {
+  return { kind: 'unavailable', reason };
+}
+export function assistantTurnFailureMessage(reason: AssistantTurnFailure): string {
+  if (reason === 'not_configured') return 'AI对话暂未配置，这次没有执行页面操作。请联系维护者，或从页面反馈入口手动反馈。';
+  if (reason === 'timeout') return '这次意图识别超时了，你的话已保留。请重试，或从页面反馈入口手动反馈。';
+  if (reason === 'invalid_response') return '这次没能可靠识别你的意图，你的话已保留。请换个说法，或手动打开反馈。';
+  if (reason === 'cancelled') return '已停止本次处理。';
+  return 'AI对话暂时不可用，你的话已保留。请稍后重试，或从页面反馈入口手动反馈。';
+}
 export function parseAssistantTurn(value: unknown): AssistantTurn {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { kind: 'domain' };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return unavailableAssistantTurn('invalid_response');
   const row = value as Record<string, unknown>;
+  if (row.kind === 'domain' && Object.keys(row).length === 1) return { kind: 'domain' };
+  if (row.kind === 'unavailable' && ['not_configured', 'timeout', 'upstream', 'invalid_response', 'cancelled'].includes(String(row.reason))) return unavailableAssistantTurn(row.reason as AssistantTurnFailure);
   if (row.kind === 'conversation' && typeof row.answer === 'string' && row.answer.trim() && row.answer.length <= 240 && !row.action && !/[\p{N}<>]|【E/u.test(row.answer)) {
     return { kind: 'conversation', answer: row.answer.trim() };
   }
@@ -17,7 +30,7 @@ export function parseAssistantTurn(value: unknown): AssistantTurn {
       return { kind: 'feedback', action: { type: 'open_feedback', category: action.category as FeedbackDraftAction['category'], draft: action.draft.trim() } };
     }
   }
-  return { kind: 'domain' };
+  return unavailableAssistantTurn('invalid_response');
 }
 
 export async function requestAssistantTurn(input: {
@@ -25,12 +38,12 @@ export async function requestAssistantTurn(input: {
 }, signal: AbortSignal): Promise<AssistantTurn> {
   try {
     const response = await fetch('/api/assistant/turn', { method: 'POST', signal, credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
-    if (!response.ok) return { kind: 'domain' };
+    if (!response.ok) return unavailableAssistantTurn('upstream');
     const turn = parseAssistantTurn(await response.json());
     if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
     return turn;
   } catch (error) {
     if (signal.aborted) throw error;
-    return { kind: 'domain' }; // Fail closed into existing evidence/selection routing.
+    return unavailableAssistantTurn('upstream'); // Never mislabel failed intent recognition as missing financial evidence.
   }
 }

@@ -1,7 +1,7 @@
 import { fetchChatCompletionsFrom, withLlmSlot } from './llm-gate';
 import { llmConfigured, parseLlmProviders } from './llm-providers';
-import { orderVerdictProviders } from './report-verdict-llm';
-import { parseAssistantTurn, type AssistantTurn } from './assistant-turn';
+import { unwrapModelJson } from './report-verdict';
+import { parseAssistantTurn, unavailableAssistantTurn, type AssistantTurnFailure, type AssistantTurn } from './assistant-turn';
 
 export function assistantTurnSystemPrompt(surface: 'home' | 'report') {
   return [
@@ -23,25 +23,55 @@ export function assistantTurnSystemPrompt(surface: 'home' | 'report') {
 export async function resolveAssistantTurn(input: {
   question: string; surface: 'home' | 'report'; history: Array<{ role: 'user' | 'assistant'; content: string }>; context?: string;
 }, signal: AbortSignal): Promise<AssistantTurn> {
-  if (signal.aborted || !llmConfigured()) return { kind: 'domain' };
-  const provider = orderVerdictProviders(parseLlmProviders())[0];
-  if (!provider) return { kind: 'domain' };
-  const timeout = AbortSignal.timeout(4000);
-  const combined = AbortSignal.any([signal, timeout]);
+  const started = Date.now();
+  const fail = (reason: AssistantTurnFailure, status?: number): AssistantTurn => {
+    if (reason !== 'cancelled') console.warn('[assistant-turn]', { reason, ...(status ? { status } : {}), elapsedMs: Date.now() - started });
+    return unavailableAssistantTurn(reason);
+  };
+  if (signal.aborted) return fail('cancelled');
+  if (!llmConfigured()) return fail('not_configured');
+  // Respect the configured interactive primary, not the background verdict ranking.
+  const provider = parseLlmProviders()[0];
+  if (!provider) return fail('not_configured');
+  const timeoutMs = 12_000;
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const cleanup = new AbortController();
+  const combined = AbortSignal.any([signal, timeout, cleanup.signal]);
+  let onAbort = () => {};
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new DOMException('Cancelled', 'AbortError'));
+    if (combined.aborted) onAbort(); else combined.addEventListener('abort', onAbort, { once: true });
+  });
   try {
-    return await withLlmSlot(async () => {
-      const response = await fetchChatCompletionsFrom(provider, {
-        temperature: 0, max_tokens: 360, stream: false, enable_thinking: false, thinking: { type: 'disabled' }, chat_template_kwargs: { enable_thinking: false },
+    return await Promise.race([withLlmSlot(async () => {
+      const body = {
+        temperature: 0, max_tokens: 360, stream: false,
         messages: [
           { role: 'system', content: assistantTurnSystemPrompt(input.surface) },
           { role: 'user', content: JSON.stringify({ current: input.question, page: input.context ?? '', recent: input.history.slice(-8).map(row => ({ role: row.role, content: row.content.slice(0, 1200) })) }) },
         ],
-      }, { signal: combined, timeoutMs: 4000, maxAttempts: 1 });
-      if (!response.ok) return { kind: 'domain' };
-      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-      if (combined.aborted) return { kind: 'domain' };
-      const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
-      return parseAssistantTurn(JSON.parse(content));
-    }, combined);
-  } catch { return { kind: 'domain' }; }
+      };
+      const options = { signal: combined, timeoutMs, maxAttempts: 1, keepAbortAlive: true };
+      let response = await fetchChatCompletionsFrom(provider, {
+        ...body, response_format: { type: 'json_object' }, enable_thinking: false, thinking: { type: 'disabled' }, chat_template_kwargs: { enable_thinking: false },
+      }, options);
+      // Some compatible endpoints reject vendor extensions; retry only that protocol mismatch.
+      if ((response.status === 400 || response.status === 422) && !combined.aborted) {
+        await response.body?.cancel().catch(() => undefined);
+        response = await fetchChatCompletionsFrom(provider, body, options);
+      }
+      if (!response.ok) return fail('upstream', response.status);
+      const payload = await response.json().catch(error => { if (combined.aborted) throw error; return null; }) as { choices?: Array<{ message?: { content?: unknown } }> } | null;
+      if (!payload) return fail('invalid_response');
+      if (combined.aborted) return fail(signal.aborted ? 'cancelled' : 'timeout');
+      const raw = payload.choices?.[0]?.message?.content;
+      const content = typeof raw === 'string' ? raw : Array.isArray(raw) ? raw.map(part => typeof part?.text === 'string' ? part.text : '').join('') : '';
+      const json = unwrapModelJson(content);
+      if (!json) return fail('invalid_response');
+      const turn = parseAssistantTurn(JSON.parse(json));
+      return turn.kind === 'unavailable' ? fail('invalid_response') : turn;
+    }, combined, timeoutMs), aborted]);
+  } catch {
+    return fail(signal.aborted ? 'cancelled' : timeout.aborted ? 'timeout' : 'upstream');
+  } finally { combined.removeEventListener('abort', onAbort); cleanup.abort(); }
 }
