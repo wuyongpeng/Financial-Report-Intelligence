@@ -38,13 +38,18 @@ test('announcementMeetsAutoCutoff uses title period, not publish date', () => {
   );
 });
 
-test('latest expected in Sep is H1; in Nov is Q3; 2025Q1 stays in the hunt list', () => {
+test('latest expected opens with the disclosure month in Shanghai time', () => {
+  assert.equal(latestExpectedPeriod(new Date('2026-03-15T00:00:00+08:00')), '2025FY');
+  assert.equal(latestExpectedPeriod(new Date('2026-04-01T00:00:00+08:00')), '2026Q1');
+  assert.equal(latestExpectedPeriod(new Date('2026-07-01T00:00:00+08:00')), '2026H1');
   assert.equal(latestExpectedPeriod(new Date('2026-09-14T00:00:00+08:00')), '2026H1');
+  assert.equal(latestExpectedPeriod(new Date('2026-10-30T20:00:00+08:00')), '2026Q3');
   assert.equal(latestExpectedPeriod(new Date('2026-11-05T00:00:00+08:00')), '2026Q3');
   const sept = expectedPeriodsThroughLatest(new Date('2026-09-14T00:00:00+08:00'));
   assert.ok(sept.includes('2025Q1') && sept.includes('2025H1') && sept.includes('2026H1'));
   assert.ok(!sept.includes('2026Q3'));
   assert.ok(!sept.includes('2024FY'));
+  assert.ok(expectedPeriodsThroughLatest(new Date('2026-10-30T20:00:00+08:00')).includes('2026Q3'));
 });
 
 test('auto search days reach 2025-01-01', () => {

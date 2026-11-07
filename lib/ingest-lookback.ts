@@ -36,16 +36,28 @@ export function autoCollectSearchDays(now = new Date()): number {
 /** Manual history also stops at 2025Q1 — same day window as auto. */
 export const MANUAL_HISTORY_DAYS = autoCollectSearchDays();
 
+/** Calendar month in Shanghai. Server TZ must not decide when a filing season starts. */
+export function shanghaiYearMonth(now = new Date()): { year: number; month: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(now);
+  const year = Number(parts.find((part) => part.type === 'year')?.value);
+  const month = Number(parts.find((part) => part.type === 'month')?.value);
+  return { year, month };
+}
+
 /**
- * A-share “latest expected” period for coverage UI (not a hard filing deadline).
- * Q1 from May 1, H1 from Sep 1, Q3 from Nov 1, else prior FY.
+ * Latest period the per-company hunt should already be looking for.
+ * Opens at the start of the real disclosure month, not the day after the deadline:
+ * Q1 from April, half-year from July, Q3 from October, otherwise the prior annual report.
  */
 export function latestExpectedPeriod(now = new Date()): string {
-  const y = now.getFullYear();
-  const m = now.getMonth() + 1;
-  if (m >= 11) return `${y}Q3`;
-  if (m >= 9) return `${y}H1`;
-  if (m >= 5) return `${y}Q1`;
+  const { year: y, month: m } = shanghaiYearMonth(now);
+  if (m >= 10) return `${y}Q3`;
+  if (m >= 7) return `${y}H1`;
+  if (m >= 4) return `${y}Q1`;
   return `${y - 1}FY`;
 }
 

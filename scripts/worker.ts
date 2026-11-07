@@ -1,4 +1,5 @@
-import { bootstrapLiveData, countManualParsePriority, fillCoverageGaps, processBacklog, runIngestion } from '../lib/ingest';
+import { bootstrapLiveData, countManualParsePriority, fillCoverageGaps, processBacklog, runIngestion, watchFreshFilings } from '../lib/ingest';
+import { FRESH_WATCH_INTERVAL_MS } from '../lib/fresh-watch';
 import { refreshAshareUniverse } from './refresh-ashare-universe';
 import { closeDb } from '../lib/db';
 import { ensureSchema } from '../lib/migrate';
@@ -21,6 +22,8 @@ let bootstrapTimer: NodeJS.Timeout | undefined;
 let backlogTimer: NodeJS.Timeout | undefined;
 let universeTimer: NodeJS.Timeout | undefined;
 let verdictTimer: NodeJS.Timeout | undefined;
+let freshTimer: NodeJS.Timeout | undefined;
+let freshRunning = false;
 let lastUniverseDay = '';
 let verdictScheduling = false;
 /** Jobs this process currently has in flight; size is capped by settings.verdictLimit. */
@@ -179,6 +182,20 @@ async function verdictTick() {
   }
 }
 
+async function freshWatchTick() {
+  if (freshRunning) return;
+  freshRunning = true;
+  try {
+    const result = await watchFreshFilings();
+    console.info('[worker] fresh watch', result);
+  } catch (error) {
+    console.error('[worker] fresh watch failed', error);
+    await sendAlert('监控池财报点名抓取失败', { error: String(error) });
+  } finally {
+    freshRunning = false;
+  }
+}
+
 async function shutdown(signal: string) {
   console.info(`[worker] received ${signal}, shutting down`);
   if (discoverTimer) clearInterval(discoverTimer);
@@ -186,6 +203,7 @@ async function shutdown(signal: string) {
   if (backlogTimer) clearTimeout(backlogTimer);
   if (universeTimer) clearInterval(universeTimer);
   if (verdictTimer) clearTimeout(verdictTimer);
+  if (freshTimer) clearInterval(freshTimer);
   await closeDb();
   process.exit(0);
 }
@@ -202,6 +220,8 @@ async function main() {
   bootstrapTimer = setInterval(() => void coverageBootstrapTick(), bootstrapGapMs);
   universeTimer = setInterval(() => { void ashareUniverseTick(); }, 30 * 60 * 1000);
   scheduleVerdict(5_000);
+  setTimeout(() => void freshWatchTick(), 15_000);
+  freshTimer = setInterval(() => void freshWatchTick(), FRESH_WATCH_INTERVAL_MS);
   const coverage = getGapScanState();
   const settings = getIngestSettings();
   const intervalMs = ingestPollIntervalMs(settings);

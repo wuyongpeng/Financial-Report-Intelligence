@@ -3,7 +3,8 @@ import seedReportsJson from '@/data/seed-reports.json';
 import { getDb } from './db';
 import { ensureBackendSchema } from './backend-schema';
 import { parseCoreMetrics, shouldExtractTextExternally } from './parser';
-import { fetchAllSources, fetchCninfoReportsForCode, fetchReportsForCode } from './sources';
+import { fetchAllSources, fetchCninfoReportsForCode, fetchRecentReportsForCode, fetchReportsForCode } from './sources';
+import { FRESH_DOWNLOAD_PAUSE_MS, FRESH_LOOKBACK_DAYS, FRESH_QUERY_PAUSE_MS } from './fresh-watch';
 import { putReport, readReport, reportByteLength, reportPath } from './storage';
 import { sendAlert } from './alerts';
 import { hasCoreMetrics } from './metric-quality';
@@ -30,6 +31,7 @@ import {
   setIngestProgress,
 } from './ingest-progress';
 import { getIngestSettings } from './ingest-settings';
+import { isAutoCrawlEnabled } from './ingest-control';
 import { PARSE_PRIORITY_MANUAL } from './parse-queue';
 import {
   abortParseRun,
@@ -672,7 +674,7 @@ export async function retireDuplicateIngestedReports() {
 
 export async function processBacklog(options: {
   downloadLimit?: number; parseLimit?: number; codes?: string[]; fullHistory?: boolean;
-  announcementIds?: string[]; periods?: string[];
+  announcementIds?: string[]; periods?: string[]; downloadPauseMs?: number;
 } = {}) {
   const db = getDb();
   const downloadLimit = options.downloadLimit ?? 1;
@@ -683,7 +685,7 @@ export async function processBacklog(options: {
   const fullHistory = Boolean(options.fullHistory);
   // 手动点「解析」才重试指标不完整；自动流水线只解析一次并标注
   const retryPartial = announcementIds.length > 0 || (codes.length > 0 && fullHistory);
-  const pauseBetweenDownloads = downloadPauseMs();
+  const pauseBetweenDownloads = options.downloadPauseMs ?? downloadPauseMs();
   await ensureBackendSchema();
   await recoverStaleRuns();
   await retireRedundantPendingDownloads(announcementIds);
@@ -941,6 +943,65 @@ export async function processBacklog(options: {
     setDownloadGate({ nextAt: null, pauseMs: pauseBetweenDownloads, mode: 'idle' });
   }
   return { backlog: backlog.length, downloaded, parsed, failed, skippedCutoff, downloadCandidates: downloadCandidates.length, parseCandidates: parseCandidates.length };
+}
+
+/**
+ * Ask each monitored company, on its exchange and on 巨潮, whether a full
+ * report landed in the last few days. Download new ones in the same pass.
+ */
+export async function watchFreshFilings() {
+  const started = Date.now();
+  const db = getDb();
+  const startedAt = new Date(started).toISOString();
+  const listed = await db<Array<{ code: string; name: string }>>`
+    SELECT code, name FROM companies WHERE enabled=true ORDER BY rank ASC, code ASC
+  `;
+  const newIds: string[] = [];
+  let failed = 0;
+  for (const company of listed) {
+    try {
+      const found = await fetchRecentReportsForCode(company.code, company.name, FRESH_LOOKBACK_DAYS);
+      for (const item of found) {
+        if (!announcementMeetsAutoCutoff(item.title, item.publishedAt)) continue;
+        if (!isFullFinancialReport(item.title)) continue;
+        const id = await logicalId(item);
+        const inserted = await insertDiscoveredAnnouncement({
+          id,
+          source: item.source,
+          sourceId: item.sourceId,
+          code: item.code,
+          companyName: company.name,
+          title: item.title,
+          reportType: item.reportType,
+          publishedAt: item.publishedAt,
+          discoveredAt: startedAt,
+          pdfUrl: item.pdfUrl,
+        });
+        if (inserted) newIds.push(id);
+      }
+    } catch (error) {
+      failed += 1;
+      console.warn(`[ingest] fresh watch ${company.code} failed`, error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, FRESH_QUERY_PAUSE_MS));
+  }
+  let downloaded = 0;
+  if (newIds.length && await isAutoCrawlEnabled()) {
+    const processed = await processBacklog({
+      downloadLimit: newIds.length,
+      parseLimit: 0,
+      announcementIds: newIds,
+      downloadPauseMs: FRESH_DOWNLOAD_PAUSE_MS,
+    });
+    downloaded = processed.downloaded;
+  }
+  return {
+    checked: listed.length,
+    inserted: newIds.length,
+    downloaded,
+    failed,
+    ms: Date.now() - started,
+  };
 }
 
 export async function runIngestion(options: {

@@ -59,9 +59,15 @@ function httpsRequestJson(url: string, init: {
 }
 
 
+/** Exchange query windows follow the Shanghai calendar, not UTC midnight. */
 function dateOnly(daysAgo = 0) {
   const date = new Date(Date.now() - daysAgo * 86400000);
-  return date.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 }
 
 function classify(title: string): Announcement['reportType'] {
@@ -303,7 +309,11 @@ export async function collectPages(fetchPage: (page: number) => Promise<SourcePa
 }
 
 
+const cninfoOrgIds = new Map<string, string>();
+
 async function resolveCninfoOrgId(code: string): Promise<string | null> {
+  const cached = cninfoOrgIds.get(code);
+  if (cached) return cached;
   try {
     const response = await safeFetch('https://www.cninfo.com.cn/new/information/topSearch/query', {
       method: 'POST',
@@ -316,17 +326,42 @@ async function resolveCninfoOrgId(code: string): Promise<string | null> {
     }, 12000);
     const matches = await response.json() as Array<{ code?: string; orgId?: string }>;
     const hit = Array.isArray(matches) ? matches.find((item) => item.code === code) : null;
-    return hit?.orgId ? String(hit.orgId) : null;
+    const orgId = hit?.orgId ? String(hit.orgId) : null;
+    if (orgId) cninfoOrgIds.set(code, orgId);
+    return orgId;
   } catch {
     return null;
   }
 }
 
+function exchangeForCode(code: string): 'SSE' | 'SZSE' | 'BSE' {
+  if (code.startsWith('6') || code.startsWith('9')) return 'SSE';
+  if (code.startsWith('8') || code.startsWith('4')) return 'BSE';
+  return 'SZSE';
+}
+
+async function fetchExchangeReportsInWindow(code: string, days: number): Promise<Announcement[]> {
+  const windowDays = Math.max(1, Math.min(days, 14));
+  const exchange = exchangeForCode(code);
+  try {
+    if (exchange === 'SSE') {
+      const page = await fetchSse(windowDays, 1, 30, code);
+      return page.items.filter((item) => item.code === code);
+    }
+    if (exchange === 'SZSE') {
+      const page = await fetchSzse(windowDays, 1, 30, code);
+      return page.items.filter((item) => item.code === code);
+    }
+    const page = await fetchBse(windowDays, 1, 50);
+    return page.items.filter((item) => item.code === code);
+  } catch {
+    return [];
+  }
+}
+
 /** Prefer exchange hits for this code (stock-scoped APIs), then CNINFO orgId 兜底. */
 async function fetchExchangeReportsForCode(code: string, days: number): Promise<Announcement[]> {
-  const exchange = code.startsWith('6') || code.startsWith('9') ? 'SSE'
-    : code.startsWith('8') || code.startsWith('4') ? 'BSE'
-      : 'SZSE';
+  const exchange = exchangeForCode(code);
   try {
     const windowDays = Math.min(Math.max(days, 180), 800);
     if (exchange === 'SSE') {
@@ -395,6 +430,22 @@ export async function fetchCninfoReportsForCode(code: string, name: string, days
     }
   }
   return found;
+}
+
+/**
+ * One monitored company, last few days only. Used so a new filing is seen
+ * without waiting for the market-wide page scan.
+ */
+export async function fetchRecentReportsForCode(code: string, name: string, days = 3): Promise<Announcement[]> {
+  const unique = new Map<string, Announcement>();
+  const windowDays = Math.max(1, Math.min(days, 14));
+  for (const item of await fetchExchangeReportsInWindow(code, windowDays)) {
+    unique.set(`${item.source}:${item.sourceId}`, item);
+  }
+  for (const item of await fetchCninfoReportsForCode(code, name, windowDays)) {
+    unique.set(`${item.source}:${item.sourceId}`, item);
+  }
+  return [...unique.values()];
 }
 
 /**
