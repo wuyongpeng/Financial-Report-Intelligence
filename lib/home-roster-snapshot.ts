@@ -78,6 +78,8 @@ export type HomeRosterSnapshotMeta = {
   poolCount: number;
   industry?: string;
   viewMode?: 'grid' | 'list';
+  /** Snapshot is only companies that already have readable parsed metrics. */
+  parsedOnly?: boolean;
 };
 
 /**
@@ -88,10 +90,12 @@ export function formatHomeRosterSnapshot(
   rows: HomeRosterRow[],
   meta?: HomeRosterSnapshotMeta,
 ): string {
-  const header = [
-    '首页公司清单快照（与用户当前首页所见一致；问「有哪些公司 / 在不在 / 监控池」时优先依据本节；',
-    '「哪些值得分析」只许用客观信号如已可读、新期待更新、已收藏、解析中，禁止投资排名或买卖建议）：',
-  ].join('');
+  const header = meta?.parsedOnly
+    ? '已解析公司清单（可以打开详情细读；问「支持哪些公司 / 已经解析了哪些」时只根据本节总结，按行业概括，不要逐家念完，禁止投资排名）：'
+    : [
+      '首页公司清单快照（与用户当前首页所见一致；问「有哪些公司 / 在不在 / 监控池」时优先依据本节；',
+      '「哪些值得分析」只许用客观信号如已可读、新期待更新、已收藏、解析中，禁止投资排名或买卖建议）：',
+    ].join('');
 
   const scopeBits: string[] = [];
   if (meta) {

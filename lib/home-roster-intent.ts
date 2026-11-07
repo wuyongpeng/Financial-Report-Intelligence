@@ -86,14 +86,27 @@ export function parseHomeRosterOpenQuery(text: string): string | null {
   return name;
 }
 
-/**
- * True when the utterance should stay on the home AI path with roster context,
- * instead of company-detail handoff / missing-company join dialogs.
- */
+/** 「你都支持哪些公司 / 已经解析了哪些」— needs the parsed roster, not a vague capability line. */
+export function isHomeCoverageQuestion(text: string): boolean {
+  const q = normalizeVoiceText(text);
+  if (!q || q.length > 40) return false;
+  if (ISSUER_FACT_RE.test(q)) return false;
+  return /支持哪些|能看哪些|覆盖哪些|可以问哪些|能问哪些|已经解析|已解析哪些|解析了哪些|解析好了哪些|都支持|收入了哪些|你这里有哪些|都有哪些公司|有哪些公司可以/.test(q);
+}
+
+/** Detail-page design and how to use Eva. Not a single company's numbers. */
+export function isHomeProductGuideQuestion(text: string): boolean {
+  const q = normalizeVoiceText(text);
+  if (!q || q.length > 40) return false;
+  if (ISSUER_FACT_RE.test(q) && !/划词|三栏|角标|详情页|怎么用|如何使用/.test(q)) return false;
+  return /划词|三栏|角标|详情页|设计理念|怎么用|如何使用|怎么提问|怎么核对|回原文|有什么功能|能做什么|你会什么|产品特点|怎么选词/.test(q);
+}
+
 export function isHomeRosterQuestion(text: string): boolean {
   const q = normalizeVoiceText(text);
   if (!q) return false;
   if (isHomeRosterListQuestion(q)) return true;
+  if (isHomeCoverageQuestion(q)) return true;
   if (isHomeDiscoveryQuestion(q)) return true;
   if (isHomeRosterPresenceQuestion(q)) return true;
   if (isHomeRosterWorthQuestion(q)) return true;

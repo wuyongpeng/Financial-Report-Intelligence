@@ -84,7 +84,9 @@ import {
 } from '@/lib/chat-surface';
 import {
   homeRosterSourcePreference,
+  isHomeCoverageQuestion,
   isHomeDiscoveryQuestion,
+  isHomeProductGuideQuestion,
   isHomeRosterQuestion,
 } from '@/lib/home-roster-intent';
 import { answerHomeRosterLocally } from '@/lib/home-roster-answer';
@@ -1091,19 +1093,24 @@ export default function ReportHome() {
     assertHomeVoiceTurn(turn);
     homeSpeakingTextRef.current = '';
     armHomeInterrupt(turn);
+    const coverageAsk = isHomeCoverageQuestion(raw);
     const pref = homeRosterSourcePreference(raw);
-    const source = pref === 'pool'
-      ? coverage
-      : pref === 'filtered'
-        ? filtered
-        : (visibleCards.length ? visibleCards : filtered);
+    const parsed = coverage.filter((item) => hasReadableMetrics(item));
+    const source = coverageAsk
+      ? parsed
+      : pref === 'pool'
+        ? coverage
+        : pref === 'filtered'
+          ? filtered
+          : (visibleCards.length ? visibleCards : filtered);
     const rows = buildHomeRosterRows(source, { starred: starredSet });
     const snapshot = formatHomeRosterSnapshot(rows, {
-      visibleCount: visibleCards.length,
-      filteredCount: filtered.length,
+      visibleCount: coverageAsk ? rows.length : visibleCards.length,
+      filteredCount: coverageAsk ? rows.length : filtered.length,
       poolCount: coverage.length,
       industry,
       viewMode,
+      parsedOnly: coverageAsk,
     });
     setHomeAnswer(null);
 
@@ -1311,6 +1318,19 @@ export default function ReportHome() {
     const compact = raw.replace(/\s+/g, '');
     if (isVoiceGreetingOrNoise(raw) && /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact)) return;
     homeVoiceTurnsRef.current.recordUser(turn, raw, (content) => pushTurn('user', content));
+    if (isHomeCoverageQuestion(raw) || isHomeProductGuideQuestion(raw)) {
+      setSubmitting(true);
+      if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);
+      try {
+        await runHomeRosterAsk(raw, { fromVoice: opts?.fromVoice });
+      } finally {
+        if (homeVoiceTurnsRef.current.owns(turn)) {
+          setSubmitting(false);
+          homeVoiceApiRef.current.setBusy(false);
+        }
+      }
+      return;
+    }
     setSubmitting(true);
     if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);
     armHomeInterrupt(turn);
