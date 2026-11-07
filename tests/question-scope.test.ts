@@ -51,6 +51,22 @@ test('classifyQuestionScope + outOfScopeReply cover meta, weather, and finance c
   assert.deepEqual(identity, { outOfScope: true, outOfScopeKind: 'identity' });
   assert.equal(outOfScopeReply('identity'), '我是 Eva，你的财报智能分析助手。');
 
+  const guide = classifyQuestionScope({
+    originalQuestion: '我该怎么看这个财报呢？',
+    retrievalQuestion: '我该怎么看这个财报呢？',
+    metricNames: [],
+    explicitPage: null,
+  });
+  assert.deepEqual(guide, { outOfScope: true, outOfScopeKind: 'reading-guide' });
+  assert.match(outOfScopeReply('reading-guide'), /中间概览/);
+  assert.match(outOfScopeReply('reading-guide'), /划词/);
+  assert.equal(classifyQuestionScope({
+    originalQuestion: '营收怎么看',
+    retrievalQuestion: '营收怎么看',
+    metricNames: ['revenue'],
+    explicitPage: null,
+  }).outOfScope, false);
+
   const weather = classifyQuestionScope({
     originalQuestion: '北京明天啥天气',
     retrievalQuestion: '北京明天啥天气',

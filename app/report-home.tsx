@@ -82,14 +82,9 @@ import {
   getHomeChatTurns,
   markHomeAskHandoff,
 } from '@/lib/chat-surface';
-import {
-  homeRosterSourcePreference,
-  isHomeCoverageQuestion,
-  isHomeDiscoveryQuestion,
-  isHomeProductGuideQuestion,
-  isHomeRosterQuestion,
-} from '@/lib/home-roster-intent';
+import { isHomeCoverageQuestion, isHomeProductGuideQuestion, isHomeDiscoveryQuestion, isHomeRosterQuestion, homeRosterSourcePreference } from '@/lib/home-roster-intent';
 import { answerHomeRosterLocally } from '@/lib/home-roster-answer';
+import { isReportReadingGuideQuestion, REPORT_READING_GUIDE } from '@/lib/report-reading-guide';
 import {
   buildHomeRosterRows,
   formatHomeRosterSnapshot,
@@ -1318,6 +1313,19 @@ export default function ReportHome() {
     const compact = raw.replace(/\s+/g, '');
     if (isVoiceGreetingOrNoise(raw) && /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact)) return;
     homeVoiceTurnsRef.current.recordUser(turn, raw, (content) => pushTurn('user', content));
+    if (isReportReadingGuideQuestion(raw)) {
+      setSubmitting(true);
+      if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);
+      try {
+        await deliverHomeAnswer(REPORT_READING_GUIDE, { fromVoice: opts?.fromVoice });
+      } finally {
+        if (homeVoiceTurnsRef.current.owns(turn)) {
+          setSubmitting(false);
+          homeVoiceApiRef.current.setBusy(false);
+        }
+      }
+      return;
+    }
     if (isHomeCoverageQuestion(raw) || isHomeProductGuideQuestion(raw)) {
       setSubmitting(true);
       if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);

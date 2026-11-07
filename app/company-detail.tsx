@@ -54,6 +54,7 @@ import { openAsrSession, type AsrSession } from '@/lib/voice/client-asr';
 import { hasReportAuditRisk } from '@/lib/voice/report-audit-risk';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer, pauseVoiceTts, resumeVoiceTts, isVoiceTtsPaused, hasVoiceTtsPlayback } from '@/lib/voice/client-tts';
+import { isReportReadingGuideQuestion, REPORT_READING_GUIDE } from '@/lib/report-reading-guide';
 import './company-detail.css';
 
 type Outline = { pageLabels?: PdfPageLabel[]; indexedPages: number; pages: { page: number; content: string }[]; outline: { id: string; title: string; page: number; highlight: string }[] };
@@ -2400,6 +2401,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     const ownsTurn = () => requestRef.current === controller && activeId.current === id && !controller.signal.aborted && !isFeedbackDrawerOpen();
     setPreflightQuestion(replacing == null ? typed : null);
     setAsking(true);
+    if (typed && replacing == null && isReportReadingGuideQuestion(typed)) {
+      setQuestion('');
+      setMessages(current => [...current, { role: 'user', text: typed, local: true }, { role: 'assistant', text: REPORT_READING_GUIDE, local: true }]);
+      busyRef.current = false; setAsking(false); setThinking(false); setPreflightQuestion(null);
+      setChatCollapsed(false);
+      if (extra?.spoken || voiceConvRef.current) speakVoiceConfirm(REPORT_READING_GUIDE);
+      return;
+    }
     if (typed && replacing == null) {
       try {
         const turn = await requestAssistantTurn({ question: typed, surface: 'report', context: `${selected.company_name} ${period(selected)}`, history: messages.slice(-8).map(row => ({ role: row.role, content: row.text })) }, controller.signal);

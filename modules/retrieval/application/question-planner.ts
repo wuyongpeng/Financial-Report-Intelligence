@@ -2,6 +2,7 @@ import { isFocusReferenceQuestion } from '@/lib/focus-prompt';
 import { nameVariants, WELL_KNOWN_ALIASES } from '@/lib/company-aliases';
 import type { MemoryMessage } from '@/lib/conversations';
 import { isProductIdentityQuestion } from '@/lib/product-identity';
+import { isReportReadingGuideQuestion } from '@/lib/report-reading-guide';
 import {
   METRIC_PATTERNS,
   type OutOfScopeKind,
@@ -192,6 +193,9 @@ export function classifyQuestionScope(input: {
   // 「你是谁 / 你能干什么」— warm Eva one-liner (voice + typed).
   if (isProductIdentityQuestion(original) || isProductIdentityQuestion(input.retrievalQuestion)) {
     return { outOfScope: true, outOfScopeKind: 'identity' };
+  }
+  if (isReportReadingGuideQuestion(original) || isReportReadingGuideQuestion(input.retrievalQuestion)) {
+    return { outOfScope: true, outOfScopeKind: 'reading-guide' };
   }
   if (input.summary || (input.hasFocus && isFocusReferenceQuestion(original))) return { outOfScope: false };
   if (input.metricNames.length || input.explicitPage != null) return { outOfScope: false };
