@@ -30,7 +30,7 @@ export type ParsedHomeQuery = {
 };
 
 const QUESTION_HINT =
-  /是否|怎么|如何|为何|为什么|增长|下降|同比|环比|变化|多少|怎样|什么|哪些|对比|分析|解读|说明|原因|缓慢|加快|看法|值得|关注|买吗|买入|卖出|加仓|减仓|持有|值得买|推荐买|能买|该买|[？?]/
+  /是否|怎么|如何|为何|为什么|增长|下降|同比|环比|变化|多少|怎样|什么|哪些|对比|分析|解读|说明|原因|缓慢|加快|看法|值得|关注|好不好|好吗|行不行|买吗|买入|卖出|加仓|减仓|持有|值得买|推荐买|能买|该买|[？?]/
 
 /** Short name/code-only queries stay on live card filter; full questions take the deep path. */
 export function hasQuestionIntent(raw: string): boolean {
@@ -122,6 +122,7 @@ export function stripQueryNoise(raw: string): string {
     .replace(/[（(]\s*(\d{6})\s*[）)]/g, ' $1 ')
     .replace(questionNoise, ' ')
     .replace(/业绩|财报|报表|情况|表现|数据|营收|利润|净利润|收入/g, ' ')
+    .replace(/最近|好不好|好吗|行不行|怎么样/g, ' ')
     .replace(/[？?，,。.!！、\s]+/g, ' ')
     .trim();
 }

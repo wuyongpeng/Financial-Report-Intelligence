@@ -25,6 +25,7 @@ import {
 import {
   buildCompanyAskUrl,
   coverageHasMatchingReport,
+  hasQuestionIntent,
   matchCompanies,
   matchCompany,
   parseHomeQuery,
@@ -36,6 +37,13 @@ import {
   type ListedNameCode,
   type ParsedPeriod,
 } from '@/lib/home-search';
+import {
+  buildVoiceConfirmPrompt,
+  buildVoicePickPrompt,
+  needsVoiceCompanyConfirm,
+  parseVoiceConfirmReply,
+  parseVoicePickChoice,
+} from '@/lib/home-voice-flow';
 import { metricYoyHoverDetail, type Report } from '@/lib/detail-model';
 import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
@@ -72,10 +80,27 @@ type ViewMode = 'grid' | 'list';
 type ListSortKey = 'name' | 'code' | 'industry' | 'revenue' | 'net_profit' | 'eps' | 'yoy' | 'updatedAt' | 'status';
 type ListSortDir = 'asc' | 'desc';
 
+type VoicePickCandidate = ListedNameCode & { inPool: boolean };
+
 type DialogState =
-  | { kind: 'unrecognized'; query: string; suggestedCode?: string }
-  | { kind: 'missing-company'; listed: { code: string; name: string }; query?: string }
-  | { kind: 'missing-report'; company: CrawlCompanyCoverage; period: ParsedPeriod }
+  | { kind: 'unrecognized'; query: string; suggestedCode?: string; fromVoice?: boolean }
+  | { kind: 'missing-company'; listed: { code: string; name: string }; query?: string; fromVoice?: boolean }
+  | { kind: 'missing-report'; company: CrawlCompanyCoverage; period: ParsedPeriod; fromVoice?: boolean }
+  | {
+      kind: 'voice-confirm';
+      listed: ListedNameCode;
+      query: string;
+      next: 'open' | 'ask' | 'join';
+      period: ParsedPeriod;
+      inPoolCompany?: CrawlCompanyCoverage | null;
+    }
+  | {
+      kind: 'voice-pick';
+      candidates: VoicePickCandidate[];
+      query: string;
+      hasQuestionIntent: boolean;
+      period: ParsedPeriod;
+    }
 ;
 
 const VIEW_STORAGE_KEY = 'home_view_mode';
@@ -280,8 +305,15 @@ export default function ReportHome() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const onSearchSubmitRef = useRef<(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) => Promise<void>>(async () => undefined);
   const voiceNavigatingRef = useRef(false);
+  type VoiceConfirmDialog = Extract<DialogState, { kind: 'voice-confirm' }>;
+  type VoicePickDialog = Extract<DialogState, { kind: 'voice-pick' }>;
+  const voiceConfirmYesRef = useRef<(d: VoiceConfirmDialog) => Promise<void>>(async () => undefined);
+  const voicePickRef = useRef<(d: VoicePickDialog, index: number) => Promise<void>>(async () => undefined);
+  const closeBlockingDialogRef = useRef<(opts?: { resumeListen?: boolean }) => void>(() => undefined);
   /** User typed/edited the super-entry while a voice session was active. */
   const searchEditedDuringVoiceRef = useRef(false);
+  /** Mirrors dialog synchronously so utterance handler can hold while modal is open. */
+  const dialogRef = useRef<DialogState | null>(null);
 
   const coveragePlaceholderKey = useMemo(
     () => coverage.map((item) => `${item.code}:${item.reportPeriod ?? ''}`).sort().join('|'),
@@ -328,52 +360,85 @@ export default function ReportHome() {
 
   // Global voice session: register home utterance handler; do not own ASR/float.
   useEffect(() => {
+    const speakLine = async (line: string) => {
+      voice.setBusy(true);
+      voice.setSpeaking(true);
+      try {
+        await speakAnswer(line, undefined);
+      } catch { /* ignore TTS */ }
+      finally {
+        voice.setSpeaking(false);
+        voice.setBusy(false);
+      }
+    };
+
     const handler = async (text: string): Promise<VoiceUtteranceResult> => {
+      const openDialog = dialogRef.current;
+
+      // While a blocking dialog is open, only confirm/pick replies are accepted.
+      if (openDialog?.kind === 'voice-confirm') {
+        const reply = parseVoiceConfirmReply(text);
+        if (reply === 'yes') {
+          voice.setBusy(true);
+          try {
+            await voiceConfirmYesRef.current(openDialog);
+          } finally {
+            voice.setBusy(false);
+          }
+          return { action: 'hold' };
+        }
+        if (reply === 'no') {
+          closeBlockingDialogRef.current({ resumeListen: true });
+          setWaitToast('好的，请再说一次公司名或问题');
+          return { action: 'hold' };
+        }
+        await speakLine('请说确定或不是');
+        return { action: 'hold' };
+      }
+      if (openDialog?.kind === 'voice-pick') {
+        const choice = parseVoicePickChoice(text, openDialog.candidates);
+        if (choice?.kind === 'pick') {
+          voice.setBusy(true);
+          try {
+            await voicePickRef.current(openDialog, choice.index);
+          } finally {
+            voice.setBusy(false);
+          }
+          return { action: 'hold' };
+        }
+        if (choice?.kind === 'cancel') {
+          closeBlockingDialogRef.current({ resumeListen: true });
+          return { action: 'hold' };
+        }
+        await speakLine('请说序号或公司名字');
+        return { action: 'hold' };
+      }
+      if (openDialog) {
+        // missing-company / unrecognized / missing-report: keep mic held
+        return { action: 'hold' };
+      }
+
       if (isVoiceFarewell(text)) {
         const line = pickVoiceFarewellLine();
-        voice.setBusy(true);
-        voice.setSpeaking(true);
-        try {
-          await speakAnswer(line, undefined);
-        } catch { /* ignore TTS failure on exit */ }
-        finally {
-          voice.setSpeaking(false);
-          voice.setBusy(false);
-        }
+        await speakLine(line);
         return { action: 'end' };
       }
       // 「你是谁 / 你能干什么」— brand one-liner, do not search.
       if (isVoiceCapabilityIntent(text)) {
-        const line = voiceCapabilitySpeech();
-        voice.setBusy(true);
-        voice.setSpeaking(true);
-        try {
-          await speakAnswer(line, undefined);
-        } catch { /* ignore */ }
-        finally {
-          voice.setSpeaking(false);
-          voice.setBusy(false);
-        }
+        await speakLine(voiceCapabilitySpeech());
         return { action: 'resume' };
       }
       // 「怎么问 / 问什么」— home has no company industry; nudge open + generic tips.
       if (isVoiceHowToAskIntent(text)) {
-        const line = voiceHowToAskSpeech(null, 'home');
-        voice.setBusy(true);
-        voice.setSpeaking(true);
-        try {
-          await speakAnswer(line, undefined);
-        } catch { /* ignore */ }
-        finally {
-          voice.setSpeaking(false);
-          voice.setBusy(false);
-        }
+        await speakLine(voiceHowToAskSpeech(null, 'home'));
         return { action: 'resume' };
       }
       // Greetings / filler must not fill the super-entry or trigger search.
       if (isVoiceGreetingOrNoise(text)) {
         return { action: 'resume' };
       }
+      // Fresh ASR utterance supersedes any prior keyboard edits on the box.
+      searchEditedDuringVoiceRef.current = false;
       setSearch(text);
       voice.setBusy(true);
       try {
@@ -381,8 +446,8 @@ export default function ReportHome() {
       } finally {
         voice.setBusy(false);
       }
-      if (voiceNavigatingRef.current) {
-        // Detail will keep the same global session after route change.
+      if (voiceNavigatingRef.current || dialogRef.current) {
+        // Detail handoff or blocking dialog — do not resume mic.
         return { action: 'hold' };
       }
       return { action: 'resume' };
@@ -415,7 +480,7 @@ export default function ReportHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const refreshCoverage = useCallback(async () => {
+  const refreshCoverage = useCallback(async (): Promise<CrawlCompanyCoverage[]> => {
     try {
       const response = await fetch('/api/crawl', { cache: 'no-store' });
       if (!response.ok) throw new Error(`抓取接口 ${response.status}`);
@@ -425,13 +490,16 @@ export default function ReportHome() {
         companies: CrawlCompanyCoverage[];
         warning?: string;
       };
-      setCoverage(payload.companies ?? []);
+      const companies = payload.companies ?? [];
+      setCoverage(companies);
       setStats(payload.stats ?? null);
       setSource(payload.source ?? '');
       setError(payload.warning ?? (payload.source === 'crawl-mock' ? '当前展示为演示兜底数据（库为空或暂不可用）。' : ''));
+      return companies;
     } catch (err) {
       setSource('');
       setError(`真实数据暂时无法读取：${String(err)}`);
+      return coverageRef.current;
     } finally {
       setLoading(false);
     }
@@ -630,7 +698,80 @@ export default function ReportHome() {
     setWaitToast(`${item.name}（${item.code}）：等待抓取`);
   }
 
-  async function navigateWithAsk(company: CrawlCompanyCoverage, question: string, period: ParsedPeriod, opts?: { fromVoice?: boolean }) {
+  function openBlockingDialog(next: DialogState) {
+    dialogRef.current = next;
+    if (voice.active) {
+      voice.stopMic();
+      voice.setSuppressAutoListen(true);
+    }
+    setDialog(next);
+  }
+
+  function closeBlockingDialog(opts?: { resumeListen?: boolean }) {
+    dialogRef.current = null;
+    setDialog(null);
+    voice.setSuppressAutoListen(false);
+    const shouldResume = opts?.resumeListen !== false;
+    if (shouldResume && voice.active && !voiceNavigatingRef.current) {
+      window.setTimeout(() => {
+        if (voice.active && !dialogRef.current && !voiceNavigatingRef.current) {
+          voice.resumeListen();
+        }
+      }, 200);
+    }
+  }
+  closeBlockingDialogRef.current = closeBlockingDialog;
+
+  async function speakBlockingPrompt(line: string) {
+    voice.setBusy(true);
+    voice.setSpeaking(true);
+    try {
+      await speakAnswer(line, undefined);
+    } catch { /* ignore TTS */ }
+    finally {
+      voice.setSpeaking(false);
+      voice.setBusy(false);
+    }
+  }
+
+  /** After watch-pool join: carry original utterance into detail when possible. */
+  async function afterJoinContinue(opts: {
+    code: string;
+    name: string;
+    query?: string;
+    fromVoice?: boolean;
+    companies: CrawlCompanyCoverage[];
+  }) {
+    const q = (opts.query ?? '').trim();
+    const company = opts.companies.find((c) => c.code === opts.code)
+      ?? matchCompany(opts.code, opts.companies);
+    voice.setSuppressAutoListen(false);
+    if (!company) {
+      setWaitToast(`已加入「${opts.name}」，请稍后再试`);
+      if (opts.fromVoice && voice.active) {
+        window.setTimeout(() => voice.resumeListen(), 200);
+      }
+      return;
+    }
+    if (q && hasQuestionIntent(q)) {
+      await navigateWithAsk(company, q, parseHomeQuery(q).period, { fromVoice: opts.fromVoice });
+      return;
+    }
+    if (opts.fromVoice || q) {
+      if (opts.fromVoice && voice.active) {
+        voiceNavigatingRef.current = true;
+        voice.stopMic();
+      }
+      clearHomeChatTurns();
+      router.push(`/${company.code}`);
+      return;
+    }
+    if (voice.active) {
+      window.setTimeout(() => voice.resumeListen(), 200);
+    }
+  }
+
+    async function navigateWithAsk(company: CrawlCompanyCoverage, question: string, period: ParsedPeriod, opts?: { fromVoice?: boolean }) {
     const pre = coverageHasMatchingReport(company, period);
     let periodToken = period.token ?? null;
     let matched: Report | null = null;
@@ -649,7 +790,7 @@ export default function ReportHome() {
 
     const periodSpecific = Boolean(period.year || period.kind || period.token || period.quarter);
     if (periodSpecific && !matched && pre !== 'yes') {
-      setDialog({ kind: 'missing-report', company, period });
+      openBlockingDialog({ kind: 'missing-report', company, period, fromVoice: Boolean(opts?.fromVoice) });
       return;
     }
 
@@ -799,15 +940,97 @@ export default function ReportHome() {
     }
   }
 
+  function buildVoicePickCandidates(listedRows: ListedNameCode[]): VoicePickCandidate[] {
+    return listedRows.map((listed) => ({
+      ...listed,
+      inPool: coverage.some((c) => c.code === listed.code),
+    }));
+  }
+
+  async function openVoicePickDialog(opts: {
+    listedRows: ListedNameCode[];
+    query: string;
+    hasQuestionIntent: boolean;
+    period: ParsedPeriod;
+  }) {
+    const candidates = buildVoicePickCandidates(opts.listedRows);
+    openBlockingDialog({
+      kind: 'voice-pick',
+      candidates,
+      query: opts.query,
+      hasQuestionIntent: opts.hasQuestionIntent,
+      period: opts.period,
+    });
+    const prompt = buildVoicePickPrompt(candidates);
+    setHomeAnswer(prompt);
+    void speakBlockingPrompt(prompt);
+  }
+
+  async function maybeConfirmOrProceed(opts: {
+    listed: ListedNameCode;
+    raw: string;
+    period: ParsedPeriod;
+    fromVoice?: boolean;
+    userEdited?: boolean;
+    company: CrawlCompanyCoverage | null;
+    isActiveTypedAsk: boolean;
+  }) {
+    const { listed, raw, period, fromVoice, userEdited, company, isActiveTypedAsk } = opts;
+    if (
+      needsVoiceCompanyConfirm({
+        fromVoice,
+        userEdited,
+        query: raw,
+        listed,
+      })
+    ) {
+      const next = company ? (hasQuestionIntent(raw) ? 'ask' : 'open') : 'join';
+      openBlockingDialog({
+        kind: 'voice-confirm',
+        listed,
+        query: raw,
+        next,
+        period,
+        inPoolCompany: company,
+      });
+      const prompt = buildVoiceConfirmPrompt(listed);
+      setHomeAnswer(prompt);
+      void speakBlockingPrompt(prompt);
+      return;
+    }
+    if (!company) {
+      openBlockingDialog({
+        kind: 'missing-company',
+        listed,
+        query: raw,
+        fromVoice: Boolean(fromVoice),
+      });
+      return;
+    }
+    if (hasQuestionIntent(raw)) {
+      if (isActiveTypedAsk) rememberActiveAsk(raw, company);
+      await navigateWithAsk(company, raw, period, { fromVoice });
+      return;
+    }
+    if (fromVoice && voice.active) {
+      voiceNavigatingRef.current = true;
+      voice.stopMic();
+    }
+    clearHomeChatTurns();
+    router.push(`/${company.code}`);
+  }
+
   async function onSearchSubmit(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) {
     const raw = (override ?? search).trim();
     if (!raw || submitting) return;
+    const fromVoice = Boolean(opts?.fromVoice);
+    const userEdited = Boolean(fromVoice && searchEditedDuringVoiceRef.current);
     // 「怎么问」 on home: local tip, do not search / open company.
     if (isVoiceHowToAskIntent(raw)) {
       setSubmitting(true);
       try {
         appendHomeChatTurn('user', raw);
-        await deliverHomeAnswer(voiceHowToAskSpeech(null, 'home'), { fromVoice: opts?.fromVoice });
+        await deliverHomeAnswer(voiceHowToAskSpeech(null, 'home'), { fromVoice });
       } finally {
         setSubmitting(false);
       }
@@ -815,7 +1038,7 @@ export default function ReportHome() {
     }
     const parsed = parseHomeQuery(raw);
     const isActiveTypedAsk = Boolean(parsed.hasQuestionIntent && !opts?.fromPlaceholder && search.trim());
-    const handoffVoice = Boolean(opts?.fromVoice && voice.active);
+    const handoffVoice = Boolean(fromVoice && voice.active);
     const goCompany = (code: string) => {
       if (handoffVoice) {
         voiceNavigatingRef.current = true;
@@ -831,7 +1054,7 @@ export default function ReportHome() {
     if (isHomeRosterQuestion(raw)) {
       setSubmitting(true);
       try {
-        await runHomeRosterAsk(raw, { fromVoice: opts?.fromVoice });
+        await runHomeRosterAsk(raw, { fromVoice });
       } finally {
         setSubmitting(false);
       }
@@ -847,10 +1070,10 @@ export default function ReportHome() {
       }
       const listed = resolveListedCompany(raw);
       if (listed) {
-        setDialog({ kind: 'missing-company', listed, query: raw });
+        openBlockingDialog({ kind: 'missing-company', listed, query: raw, fromVoice });
         return;
       }
-      setDialog({ kind: 'unrecognized', query: raw, suggestedCode: raw });
+      openBlockingDialog({ kind: 'unrecognized', query: raw, suggestedCode: raw, fromVoice });
       return;
     }
 
@@ -859,20 +1082,54 @@ export default function ReportHome() {
       const poolHits = matchCompanies(parsed.companyQuery || raw, coverage);
       const poolHitsRaw = poolHits.length ? poolHits : matchCompanies(raw, coverage);
       if (poolHitsRaw.length === 1) {
-        goCompany(poolHitsRaw[0].code);
+        await maybeConfirmOrProceed({
+          listed: { code: poolHitsRaw[0].code, name: poolHitsRaw[0].name },
+          raw,
+          period: parsed.period,
+          fromVoice,
+          userEdited,
+          company: poolHitsRaw[0],
+          isActiveTypedAsk: false,
+        });
         return;
       }
       if (poolHitsRaw.length > 1) {
+        if (fromVoice) {
+          await openVoicePickDialog({
+            listedRows: poolHitsRaw.map((c) => ({ code: c.code, name: c.name })),
+            query: raw,
+            hasQuestionIntent: false,
+            period: parsed.period,
+          });
+          return;
+        }
         document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
       const listedAll = resolveListedCompanies(raw);
       const listedFallback = listedAll.length ? listedAll : resolveListedCompanies(parsed.companyQuery || raw);
       if (listedFallback.length === 1) {
-        setDialog({ kind: 'missing-company', listed: listedFallback[0], query: raw });
+        await maybeConfirmOrProceed({
+          listed: listedFallback[0],
+          raw,
+          period: parsed.period,
+          fromVoice,
+          userEdited,
+          company: null,
+          isActiveTypedAsk: false,
+        });
         return;
       }
       if (listedFallback.length > 1) {
+        if (fromVoice) {
+          await openVoicePickDialog({
+            listedRows: listedFallback,
+            query: raw,
+            hasQuestionIntent: false,
+            period: parsed.period,
+          });
+          return;
+        }
         // Ambiguous: keep empty-state candidate list visible for click-to-join.
         document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
@@ -887,16 +1144,25 @@ export default function ReportHome() {
       const listedAll = resolveListedCompanies(raw);
       const listedCandidates = listedAll.length ? listedAll : resolveListedCompanies(parsed.companyQuery || raw);
       if (!listedCandidates.length) {
-        setDialog({ kind: 'unrecognized', query: raw });
+        openBlockingDialog({ kind: 'unrecognized', query: raw, fromVoice });
         return;
       }
       if (listedCandidates.length > 1) {
+        if (fromVoice) {
+          // 「东鹏最近业绩好不好」→ never silent preferred; keep full utterance for later ask.
+          await openVoicePickDialog({
+            listedRows: listedCandidates,
+            query: raw,
+            hasQuestionIntent: true,
+            period: parsed.period,
+          });
+          return;
+        }
         const inPool = listedCandidates
           .map((listed) => coverage.find((c) => c.code === listed.code))
           .filter((c): c is CrawlCompanyCoverage => Boolean(c));
         if (inPool.length >= 1) {
-          // Compare / multi-name asks: open the first company that appears in the
-          // question and is already in the pool; carry the full question into detail.
+          // Typed compare / multi-name: keep previous preferred-in-pool behavior.
           const preferred = [...inPool].sort((a, b) => {
             const ai = Math.min(
               ...[a.name, a.code].map((token) => {
@@ -913,24 +1179,32 @@ export default function ReportHome() {
             return ai - bi || a.code.localeCompare(b.code);
           })[0] ?? inPool[0];
           if (isActiveTypedAsk) rememberActiveAsk(raw, preferred);
-          await navigateWithAsk(preferred, raw, parsed.period, { fromVoice: opts?.fromVoice });
+          await navigateWithAsk(preferred, raw, parsed.period, { fromVoice });
           return;
         }
-        // None in pool yet — prompt to join the first named company.
-        setDialog({ kind: 'missing-company', listed: listedCandidates[0], query: raw });
+        openBlockingDialog({
+          kind: 'missing-company',
+          listed: listedCandidates[0],
+          query: raw,
+          fromVoice: false,
+        });
         return;
       }
       const listed = listedCandidates[0];
       // 2) Check whether it is in the active 60-company monitor pool
       const company = coverage.find((c) => c.code === listed.code)
         ?? matchCompany(listed.code, coverage)
-        ?? matchCompany(listed.name, coverage);
-      if (!company) {
-        setDialog({ kind: 'missing-company', listed, query: raw });
-        return;
-      }
-      if (isActiveTypedAsk) rememberActiveAsk(raw, company);
-      await navigateWithAsk(company, raw, parsed.period, { fromVoice: opts?.fromVoice });
+        ?? matchCompany(listed.name, coverage)
+        ?? null;
+      await maybeConfirmOrProceed({
+        listed,
+        raw,
+        period: parsed.period,
+        fromVoice,
+        userEdited,
+        company,
+        isActiveTypedAsk,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -938,9 +1212,64 @@ export default function ReportHome() {
 
   onSearchSubmitRef.current = onSearchSubmit;
 
+  async function resolveVoiceConfirmYes(d: VoiceConfirmDialog) {
+    const listed = d.listed;
+    if (d.next === 'join' || !d.inPoolCompany) {
+      openBlockingDialog({
+        kind: 'missing-company',
+        listed,
+        query: d.query,
+        fromVoice: true,
+      });
+      return;
+    }
+    dialogRef.current = null;
+    setDialog(null);
+    voice.setSuppressAutoListen(false);
+    if (d.next === 'ask') {
+      await navigateWithAsk(d.inPoolCompany, d.query, d.period, { fromVoice: true });
+      return;
+    }
+    voiceNavigatingRef.current = true;
+    voice.stopMic();
+    clearHomeChatTurns();
+    router.push(`/${d.inPoolCompany.code}`);
+  }
+  voiceConfirmYesRef.current = resolveVoiceConfirmYes;
+
+  async function resolveVoicePick(d: VoicePickDialog, index: number) {
+    const listed = d.candidates[index];
+    if (!listed) return;
+    const company = coverage.find((c) => c.code === listed.code)
+      ?? matchCompany(listed.code, coverage);
+    if (company) {
+      dialogRef.current = null;
+      setDialog(null);
+      voice.setSuppressAutoListen(false);
+      if (d.hasQuestionIntent) {
+        await navigateWithAsk(company, d.query, d.period, { fromVoice: true });
+      } else {
+        voiceNavigatingRef.current = true;
+        voice.stopMic();
+        clearHomeChatTurns();
+        router.push(`/${company.code}`);
+      }
+      return;
+    }
+    // Not in pool — keep original utterance for after-join continue.
+    openBlockingDialog({
+      kind: 'missing-company',
+      listed: { code: listed.code, name: listed.name },
+      query: d.query,
+      fromVoice: true,
+    });
+  }
+  voicePickRef.current = resolveVoicePick;
+
+
   async function confirmMissingCompany() {
     if (!dialog || dialog.kind !== 'missing-company') return;
-    const { listed } = dialog;
+    const { listed, query, fromVoice } = dialog;
     setDialogBusy(true);
     try {
       const response = await fetch('/api/companies/watch', {
@@ -959,8 +1288,16 @@ export default function ReportHome() {
         return;
       }
       setWaitToast(payload.note ?? `已将「${listed.name}」加入监控池`);
+      dialogRef.current = null;
       setDialog(null);
-      await refreshCoverage();
+      const companies = await refreshCoverage();
+      await afterJoinContinue({
+        code: listed.code,
+        name: listed.name,
+        query,
+        fromVoice,
+        companies,
+      });
     } finally {
       setDialogBusy(false);
     }
@@ -986,17 +1323,17 @@ export default function ReportHome() {
       };
       if (!response.ok) {
         setWaitToast(payload.error ?? '采集触发失败，请稍后在「数据采集」重试');
-        setDialog(null);
+        closeBlockingDialog({ resumeListen: true });
         return;
       }
       setWaitToast(
         payload.note
           ?? `已为 ${company.name}（${company.code}）触发温和采集：下载 ${payload.downloaded ?? 0} · 解析 ${payload.parsed ?? 0}`,
       );
-      setDialog(null);
+      closeBlockingDialog({ resumeListen: true });
     } catch (err) {
       setWaitToast(`网络异常：${String(err)}`);
-      setDialog(null);
+      closeBlockingDialog({ resumeListen: true });
     } finally {
       setDialogBusy(false);
     }
@@ -1036,6 +1373,8 @@ export default function ReportHome() {
     if (!dialog || dialog.kind !== 'unrecognized') return;
     const code = joinCode.trim();
     const name = joinName.trim();
+    const pendingQuery = dialog.query;
+    const fromVoice = Boolean(dialog.fromVoice);
     if (!/^\d{6}$/.test(code)) {
       setWaitToast('请填写有效的六位股票代码');
       return;
@@ -1061,9 +1400,17 @@ export default function ReportHome() {
         return;
       }
       setWaitToast(payload.note ?? `已将 ${code} 加入监控池`);
+      dialogRef.current = null;
       setDialog(null);
       setSearch('');
-      await refreshCoverage();
+      const companies = await refreshCoverage();
+      await afterJoinContinue({
+        code,
+        name: name || code,
+        query: pendingQuery,
+        fromVoice,
+        companies,
+      });
     } finally {
       setDialogBusy(false);
     }
@@ -1088,7 +1435,12 @@ export default function ReportHome() {
         return;
       }
       setWaitToast(payload.note ?? '已上报给管理员');
+      dialogRef.current = null;
       setDialog(null);
+      voice.setSuppressAutoListen(false);
+      if (voice.active) {
+        window.setTimeout(() => voice.resumeListen(), 200);
+      }
     } finally {
       setDialogBusy(false);
     }
@@ -1657,7 +2009,7 @@ export default function ReportHome() {
                 <li key={listed.code}>
                   <button
                     type="button"
-                    onClick={() => setDialog({ kind: 'missing-company', listed, query: search.trim() })}
+                    onClick={() => openBlockingDialog({ kind: 'missing-company', listed, query: search.trim(), fromVoice: voice.active })}
                   >
                     <span className="rh-listed-candidate-name">{listed.name}</span>
                     <span className="rh-listed-candidate-code">{listed.code}</span>
@@ -1679,7 +2031,7 @@ export default function ReportHome() {
                     <li key={listed.code}>
                       <button
                         type="button"
-                        onClick={() => setDialog({ kind: 'missing-company', listed, query: search.trim() })}
+                        onClick={() => openBlockingDialog({ kind: 'missing-company', listed, query: search.trim(), fromVoice: voice.active })}
                       >
                         <span className="rh-listed-candidate-name">{listed.name}</span>
                         <span className="rh-listed-candidate-code">{listed.code}</span>
@@ -1695,7 +2047,7 @@ export default function ReportHome() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setDialog({ kind: 'missing-company', listed: listedOutsidePool, query: search.trim() })}
+                  onClick={() => openBlockingDialog({ kind: 'missing-company', listed: listedOutsidePool, query: search.trim(), fromVoice: voice.active })}
                 >
                   加入监控池
                 </button>
@@ -1730,7 +2082,7 @@ export default function ReportHome() {
         <div
           className="rh-dialog-backdrop"
           role="presentation"
-          onClick={() => { if (!dialogBusy) setDialog(null); }}
+          onClick={() => { if (!dialogBusy) closeBlockingDialog({ resumeListen: true }); }}
         >
           <div
             className="rh-dialog"
@@ -1769,7 +2121,7 @@ export default function ReportHome() {
                   </label>
                 </div>
                 <div className="rh-dialog-actions rh-dialog-actions-wrap">
-                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => setDialog(null)}>
+                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => closeBlockingDialog({ resumeListen: true })}>
                     取消
                   </button>
                   <button type="button" className="rh-dialog-secondary" disabled={dialogBusy} onClick={() => void reportMissingToAdmin()}>
@@ -1790,13 +2142,60 @@ export default function ReportHome() {
                 <h2 id="rh-dialog-title">加入监控池</h2>
                 <p>
                   已识别到「{dialog.listed.name}」（{dialog.listed.code}），但不在当前监控池。
+                  {dialog.query && hasQuestionIntent(dialog.query) ? ' 加入后将继续用刚才的问题进入详情。' : ''}
                 </p>
                 <div className="rh-dialog-actions">
-                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => setDialog(null)}>
+                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => closeBlockingDialog({ resumeListen: true })}>
                     取消
                   </button>
                   <button type="button" className="rh-dialog-confirm" disabled={dialogBusy} onClick={() => void confirmMissingCompany()}>
                     {dialogBusy ? '加入中…' : '加入监控池'}
+                  </button>
+                </div>
+              </>
+            ) : dialog.kind === 'voice-confirm' ? (
+              <>
+                <h2 id="rh-dialog-title">确认公司</h2>
+                <p>
+                  语音识别到「{dialog.listed.name}」（{dialog.listed.code}）。是这家吗？可以说「确定」或「不是」。
+                </p>
+                <div className="rh-dialog-actions">
+                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => closeBlockingDialog({ resumeListen: true })}>
+                    不是
+                  </button>
+                  <button
+                    type="button"
+                    className="rh-dialog-confirm"
+                    disabled={dialogBusy}
+                    onClick={() => { void resolveVoiceConfirmYes(dialog); }}
+                  >
+                    确定
+                  </button>
+                </div>
+              </>
+            ) : dialog.kind === 'voice-pick' ? (
+              <>
+                <h2 id="rh-dialog-title">检索到多个匹配结果</h2>
+                <p>你想选择哪一个？可以说序号或名字；选中后会带上刚才的问题继续。</p>
+                <ul className="rh-listed-candidates rh-dialog-pick-list">
+                  {dialog.candidates.map((listed, index) => (
+                    <li key={listed.code}>
+                      <button
+                        type="button"
+                        disabled={dialogBusy}
+                        onClick={() => { void resolveVoicePick(dialog, index); }}
+                      >
+                        <span className="rh-listed-candidate-name">{index + 1}. {listed.name}</span>
+                        <span className="rh-listed-candidate-code">
+                          {listed.code}{listed.inPool ? ' · 已在池' : ' · 未入池'}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="rh-dialog-actions">
+                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => closeBlockingDialog({ resumeListen: true })}>
+                    取消
                   </button>
                 </div>
               </>
@@ -1810,7 +2209,7 @@ export default function ReportHome() {
                   {periodLabelZh(dialog.period)}可读财报。确认后将对该代码触发一轮温和积压处理（每次最多下载/解析 1 份）。
                 </p>
                 <div className="rh-dialog-actions">
-                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => setDialog(null)}>
+                  <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => closeBlockingDialog({ resumeListen: true })}>
                     取消
                   </button>
                   <button type="button" className="rh-dialog-confirm" disabled={dialogBusy} onClick={() => void confirmMissingReport()}>

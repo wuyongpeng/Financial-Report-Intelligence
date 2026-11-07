@@ -199,3 +199,12 @@ test('resolveListedCompanies keeps precise single hits', () => {
   assert.deepEqual(resolveListedCompanies('美的').map((h) => h.code), ['000333']);
   assert.equal(resolveListedCompanies('完全不存在的公司xyz').length, 0);
 });
+
+test('东鹏最近业绩好不好 → question + both 东鹏 companies', () => {
+  const q = parseHomeQuery('东鹏最近业绩好不好');
+  assert.equal(q.hasQuestionIntent, true);
+  assert.match(q.companyQuery, /东鹏/);
+  assert.ok(!/最近|好不好|业绩/.test(q.companyQuery));
+  const hits = resolveListedCompanies(q.companyQuery || q.raw);
+  assert.deepEqual(hits.map((h) => h.code).sort(), ['003012', '605499'].sort());
+});

@@ -250,3 +250,7 @@ font-size:11px!important;font-weight:600!important;line-height:1!important;lette
 @media(max-width:760px){.topbar.home-topbar{padding:0 16px}.rh-system-link{font-size:12px;padding:5px 8px}}
 
 .rh-load-more{display:flex;justify-content:center;align-items:center;padding:18px 0 8px;color:#94a3b8;font-size:12px}
+
+.rh-dialog-pick-list{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:8px;max-height:240px;overflow:auto}
+.rh-dialog-pick-list button{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;border:1px solid #dce2eb;background:#f8fafc;border-radius:8px;padding:10px 12px;cursor:pointer;color:#203047}
+.rh-dialog-pick-list button:hover{border-color:#93c5fd;background:#eff6ff}
