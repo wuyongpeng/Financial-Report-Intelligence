@@ -35,10 +35,10 @@ export function updateReaderPrefs(patch: Partial<ReaderPrefs>): ReaderPrefs {
 }
 
 /** Fields the detail ask should send. Omitted modelId means server-side auto failover. */
-export function readerChatFields(): { readingLevel: ReaderPrefs['readingLevel']; modelId?: string; readerMemory?: string } {
+export function readerChatFields(question = ''): { readingLevel: ReaderPrefs['readingLevel']; modelId?: string; readerMemory?: string } {
   const prefs = readReaderPrefs();
   const modelId = prefs.autoModel ? undefined : sanitizeModelId(prefs.modelId);
-  const brief = memoryPrompt(readReaderMemory());
+  const brief = memoryPrompt(readReaderMemory(), question);
   return {
     readingLevel: prefs.readingLevel,
     ...(modelId ? { modelId } : {}),

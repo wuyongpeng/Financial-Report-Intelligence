@@ -1,7 +1,10 @@
 import {
   EMPTY_READER_MEMORY,
   READER_MEMORY_KEY,
-  applyReaderActivity,
+  addManualMemory,
+  applyMemoryPatch,
+  parseMemoryPatch,
+  rememberExplicit,
   removeMemoryNote,
   type MemoryNote,
   type ReaderMemory,
@@ -18,10 +21,11 @@ function asNotes(value: unknown): MemoryNote[] {
     const id = typeof row.id === 'string' ? row.id.trim() : '';
     const text = typeof row.text === 'string' ? row.text.trim() : '';
     if (!id || !text) continue;
+    if (id.startsWith('habit:') || id.startsWith('company:') || text.startsWith('提问常围绕')) continue;
     notes.push({
       id: id.slice(0, 120),
       text: text.slice(0, 80),
-      source: row.source === 'saved' ? 'saved' : 'observed',
+      source: row.source === 'saved' ? 'saved' : 'inferred',
       updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : '',
     });
     if (notes.length >= 20) break;
@@ -29,31 +33,9 @@ function asNotes(value: unknown): MemoryNote[] {
   return notes;
 }
 
-/** Older builds stored companies/topics instead of sentences. */
-function fromLegacy(raw: Record<string, unknown>): MemoryNote[] {
-  const notes: MemoryNote[] = [];
-  if (Array.isArray(raw.companies)) {
-    for (const item of raw.companies) {
-      if (!item || typeof item !== 'object') continue;
-      const company = item as { code?: unknown; name?: unknown };
-      const code = typeof company.code === 'string' ? company.code : '';
-      const name = typeof company.name === 'string' ? company.name.trim() : '';
-      if (!/^\d{6}$/.test(code) || !name) continue;
-      notes.push({ id: `company:${code}`, text: `关注${name}`, source: 'observed', updatedAt: '' });
-    }
-  }
-  if (Array.isArray(raw.topics)) {
-    for (const item of raw.topics) {
-      if (!item || typeof item !== 'object') continue;
-      const topic = item as { key?: unknown; label?: unknown; count?: unknown };
-      const key = typeof topic.key === 'string' ? topic.key : '';
-      const label = typeof topic.label === 'string' ? topic.label : '';
-      const count = typeof topic.count === 'number' ? topic.count : 0;
-      if (!key || !label || count <= 0) continue;
-      notes.push({ id: `habit:${key}`, text: `提问常围绕${label}`, source: 'observed', updatedAt: '' });
-    }
-  }
-  return notes.slice(0, 20);
+/** Older builds stored a question log. Those entries are not durable facts. */
+function fromLegacy(_raw: Record<string, unknown>): MemoryNote[] {
+  return [];
 }
 
 function normalize(raw: unknown): ReaderMemory {
@@ -80,12 +62,41 @@ export function readReaderMemory(): ReaderMemory {
   }
 }
 
-export function noteReaderActivity(input: { question?: string; code?: string; name?: string }): ReaderMemory {
-  const prev = readReaderMemory();
-  const next = applyReaderActivity(prev, { ...input, at: new Date().toISOString() });
-  if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+export function addReaderMemory(text: string): ReaderMemory {
+  const next = addManualMemory(readReaderMemory(), text, new Date().toISOString());
   write(next);
   return next;
+}
+
+/** Keep an explicit "记住……". Otherwise ask the model whether this turn changes long-term memory. */
+export function reflectReaderMemory(input: { question: string; context?: string }) {
+  const question = input.question.replace(/\s+/g, ' ').trim();
+  if (question.length < 2) return;
+  const prev = readReaderMemory();
+  const saved = rememberExplicit(prev, question, new Date().toISOString());
+  if (JSON.stringify(saved) !== JSON.stringify(prev)) {
+    write(saved);
+    return;
+  }
+  const notes = prev.notes.map((item) => ({ id: item.id, text: item.text }));
+  void fetch('/api/reader/memory', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      question: question.slice(0, 400),
+      notes,
+      ...(input.context ? { context: input.context.slice(0, 80) } : {}),
+    }),
+  }).then(async (response) => {
+    if (!response.ok) return;
+    const body = await response.json() as { patch?: unknown };
+    const patch = parseMemoryPatch(body.patch);
+    if (!patch || patch.action === 'none') return;
+    const current = readReaderMemory();
+    const next = applyMemoryPatch(current, patch, new Date().toISOString());
+    if (JSON.stringify(next) !== JSON.stringify(current)) write(next);
+  }).catch(() => undefined);
 }
 
 export function deleteReaderNote(id: string): ReaderMemory {

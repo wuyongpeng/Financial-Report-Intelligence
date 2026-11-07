@@ -28,7 +28,7 @@ import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
-import { noteReaderActivity } from '@/lib/reader-memory-client';
+import { reflectReaderMemory } from '@/lib/reader-memory-client';
 import { CONVERSATION_DELETED_EVENT, MEMORY_CLEARED_EVENT, readReaderPrefs, readerChatFields } from '@/lib/reader-prefs-client';
 import {
   clampAttributionTitle,
@@ -683,9 +683,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     })();
     return () => abort.abort();
   }, [selected.id]);
-  useEffect(() => {
-    noteReaderActivity({ code: selected.code, name: selected.company_name });
-  }, [selected.code, selected.company_name]);
   useEffect(() => {
     const onCleared = () => {
       conversationIds.current.clear();
@@ -2648,7 +2645,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       }
     }
     try {
-      if (replacing == null) noteReaderActivity({ question: typed, code: selected.code, name: selected.company_name });
+      if (replacing == null) reflectReaderMemory({ question: typed, context: selected.company_name });
       await ensureGuestCookie();
       const remember = readReaderPrefs().memory;
       let conversationId = remember ? conversationIds.current.get(id) : undefined;
@@ -2662,7 +2659,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const spoken = Boolean(extra?.spoken ?? voiceSpeakRef.current ?? voiceConvRef.current);
       const styleRewrite = spoken ? (voiceAnswerStyleRef.current ?? undefined) : undefined;
       const rewrite = extra?.rewrite ?? styleRewrite;
-      const chatPrefs = readerChatFields();
+      const chatPrefs = readerChatFields(question);
       const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(rewrite ? { rewrite } : {}), ...(spoken ? { spoken: true } : {}), readingLevel: chatPrefs.readingLevel, ...(chatPrefs.modelId ? { modelId: chatPrefs.modelId } : {}), ...(chatPrefs.readerMemory ? { readerMemory: chatPrefs.readerMemory } : {}), stream:true }) });
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';

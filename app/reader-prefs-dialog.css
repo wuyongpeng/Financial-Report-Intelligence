@@ -22,6 +22,11 @@
 .prefs-row-label{font-size:14px;font-weight:650}
 .prefs-hint{margin:4px 0 0;color:#6b7a8d;font-size:13px;line-height:1.5}
 .prefs-label{margin:18px 0 8px;font-size:13px;font-weight:650;color:#31465f}
+.prefs-memory-add{display:flex;align-items:center;gap:8px;margin:0 0 12px}
+.prefs-memory-add input{flex:1;min-width:0;border:0;border-bottom:1px solid #d5dde8;border-radius:0;padding:6px 0;font:inherit;font-size:14px;color:#203047;background:transparent}
+.prefs-memory-add input:focus{outline:none;border-bottom-color:#3064db}
+.prefs-memory-add button{border:0;background:transparent;color:#1f4fad;font:inherit;font-size:13px;font-weight:650;cursor:pointer;padding:4px 0}
+.prefs-memory-add button:disabled{color:#b0bac8;cursor:default}
 .prefs-notes{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
 .prefs-notes li{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #e6ebf2;border-radius:10px;background:#f8fafc}
 .prefs-notes p{margin:0;font-size:14px;line-height:1.5;color:#203047}

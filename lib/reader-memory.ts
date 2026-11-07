@@ -3,8 +3,8 @@
 export type MemoryNote = {
   id: string;
   text: string;
-  /** observed: inferred from questions. saved: the user asked to remember it. */
-  source: 'observed' | 'saved';
+  /** saved: the user wrote it. inferred: a later turn replaced or added a durable fact. */
+  source: 'saved' | 'inferred';
   updatedAt: string;
 };
 
@@ -14,15 +14,7 @@ export const EMPTY_READER_MEMORY: ReaderMemory = { notes: [] };
 
 export const READER_MEMORY_KEY = 'eva_reader_memory';
 
-const TOPIC_RULES: Array<{ key: string; label: string; pattern: RegExp }> = [
-  { key: 'why', label: '变化原因', pattern: /为什么|为何|原因/ },
-  { key: 'compare', label: '公司对比', pattern: /对比|比较|同比|环比|同行|同业/ },
-  { key: 'metric', label: '核心指标', pattern: /营收|营业收入|净利润|ROE|EPS|现金流|毛利|净资产/i },
-  { key: 'change', label: '经营变化', pattern: /增长|下降|下滑|变好|变差|怎么样|是否缓慢/ },
-  { key: 'risk', label: '风险与异常', pattern: /风险|异常|商誉|负债|减值/ },
-  { key: 'guide', label: '怎么看财报', pattern: /怎么看|如何看|怎么读|从哪/ },
-  { key: 'dividend', label: '分红', pattern: /分红|派息/ },
-];
+const MAX_NOTES = 12;
 
 const EXPLICIT_PATTERNS = [
   /^(?:请)?(?:帮我)?记住[：:，,\s]*(.+)$/,
@@ -31,67 +23,129 @@ const EXPLICIT_PATTERNS = [
   /^回答(?:的时候|时)(?:请|要)?[，,\s]*(.+)$/,
 ];
 
+export type MemoryPatch =
+  | { action: 'none' }
+  | { action: 'save'; text: string; replaces?: string }
+  | { action: 'forget'; id: string };
+
 export function explicitMemoryText(question: string): string | null {
   const text = question.replace(/\s+/g, ' ').trim();
   for (const pattern of EXPLICIT_PATTERNS) {
     const captured = text.match(pattern)?.[1]?.trim();
-    if (captured && captured.length >= 2) return captured.slice(0, 80);
+    if (captured && captured.length >= 2 && !/[？?]/.test(captured)) return captured.slice(0, 80);
   }
   return null;
 }
 
-function upsert(notes: MemoryNote[], note: MemoryNote): MemoryNote[] {
-  const rest = notes.filter((item) => item.id !== note.id);
-  return [note, ...rest].slice(0, 20);
+function cleanFact(value: string): string | null {
+  const text = value.replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (text.length < 2 || /[？?]/.test(text)) return null;
+  return text;
 }
 
-export function applyReaderActivity(
+function noteId(text: string): string {
+  return `fact:${text.replace(/\s+/g, '').slice(0, 40)}`;
+}
+
+function cap(notes: MemoryNote[]): MemoryNote[] {
+  return notes.slice(0, MAX_NOTES);
+}
+
+function upsert(notes: MemoryNote[], note: MemoryNote): MemoryNote[] {
+  const rest = notes.filter((item) => item.id !== note.id && item.text !== note.text);
+  return cap([note, ...rest]);
+}
+
+/** User asked to remember something. A normal question changes nothing. */
+export function rememberExplicit(
   memory: ReaderMemory,
-  input: { question?: string; code?: string; name?: string; at?: string },
+  question: string,
+  at: string,
 ): ReaderMemory {
-  let notes = memory.notes.map((item) => ({ ...item }));
-  const at = input.at ?? new Date(0).toISOString();
-  const code = (input.code ?? '').trim();
-  const name = (input.name ?? '').trim();
-  if (/^\d{6}$/.test(code) && name) {
-    notes = upsert(notes, {
-      id: `company:${code}`,
-      text: `关注${name}`,
-      source: 'observed',
-      updatedAt: at,
-    });
+  const text = explicitMemoryText(question);
+  if (!text) return memory;
+  return { notes: upsert(memory.notes, { id: noteId(text), text, source: 'saved', updatedAt: at }) };
+}
+
+/** Same store as inferred memories: one durable sentence, not a second log. */
+export function addManualMemory(memory: ReaderMemory, raw: string, at: string): ReaderMemory {
+  const text = cleanFact(raw);
+  if (!text) return memory;
+  return { notes: upsert(memory.notes, { id: noteId(text), text, source: 'saved', updatedAt: at }) };
+}
+
+export function parseMemoryPatch(value: unknown): MemoryPatch | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as { action?: unknown; text?: unknown; replaces?: unknown; id?: unknown };
+  if (row.action === 'none') return { action: 'none' };
+  if (row.action === 'forget') {
+    const id = typeof row.id === 'string' ? row.id.trim() : '';
+    if (!id || id.length > 80) return null;
+    return { action: 'forget', id };
   }
-  const compact = (input.question ?? '').replace(/\s+/g, '');
-  const explicit = explicitMemoryText(input.question ?? '');
-  if (explicit) {
-    notes = upsert(notes, {
-      id: `saved:${explicit}`,
-      text: explicit,
-      source: 'saved',
-      updatedAt: at,
-    });
+  if (row.action === 'save') {
+    const text = typeof row.text === 'string' ? cleanFact(row.text) : null;
+    if (!text) return null;
+    const replaces = typeof row.replaces === 'string' ? row.replaces.trim() : '';
+    return replaces ? { action: 'save', text, replaces } : { action: 'save', text };
   }
-  if (compact.length >= 2 && !explicit) {
-    for (const rule of TOPIC_RULES) {
-      if (!rule.pattern.test(compact)) continue;
-      notes = upsert(notes, {
-        id: `habit:${rule.key}`,
-        text: `提问常围绕${rule.label}`,
-        source: 'observed',
-        updatedAt: at,
-      });
-    }
-  }
-  return { notes };
+  return null;
+}
+
+/** Merge one model decision into the durable set. Conflicting facts replace, they do not stack. */
+export function applyMemoryPatch(memory: ReaderMemory, patch: MemoryPatch, at: string): ReaderMemory {
+  if (patch.action === 'none') return memory;
+  if (patch.action === 'forget') return { notes: memory.notes.filter((item) => item.id !== patch.id) };
+  const text = cleanFact(patch.text);
+  if (!text) return memory;
+  const prior = patch.replaces ? memory.notes.find((item) => item.id === patch.replaces) : undefined;
+  const note: MemoryNote = {
+    id: prior?.id ?? noteId(text),
+    text,
+    source: prior?.source === 'saved' ? 'saved' : 'inferred',
+    updatedAt: at,
+  };
+  const rest = memory.notes.filter((item) => item.id !== note.id && item.id !== patch.replaces && item.text !== text);
+  return { notes: cap([note, ...rest]) };
 }
 
 export function removeMemoryNote(memory: ReaderMemory, id: string): ReaderMemory {
   return { notes: memory.notes.filter((item) => item.id !== id) };
 }
 
-/** One line for the answer prompt. Empty when there is nothing to remember. */
-export function memoryPrompt(memory: ReaderMemory): string {
-  const texts = memory.notes.map((item) => item.text.trim()).filter(Boolean);
+function grams(text: string): string[] {
+  const compact = text.replace(/\s+/g, '');
+  const out = (compact.match(/[A-Za-z0-9]{2,}/g) ?? []).map((item) => item.toLowerCase());
+  for (let i = 0; i < compact.length - 1; i += 1) {
+    const pair = compact.slice(i, i + 2);
+    if (/^[\u4e00-\u9fff]{2}$/.test(pair)) out.push(pair);
+  }
+  return out;
+}
+
+/** Saved facts always travel. Inferred facts travel only when this question touches them. */
+export function selectMemories(memory: ReaderMemory, question = ''): MemoryNote[] {
+  const notes = memory.notes.filter((item) => item.text.trim());
+  const saved = notes.filter((item) => item.source === 'saved');
+  const inferred = notes.filter((item) => item.source !== 'saved');
+  const query = new Set(grams(question));
+  const related = query.size
+    ? inferred.filter((item) => grams(item.text).some((token) => query.has(token)))
+    : inferred.slice(0, 4);
+  const seen = new Set<string>();
+  const picked: MemoryNote[] = [];
+  for (const item of [...saved, ...related]) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    picked.push(item);
+    if (picked.length >= 8) break;
+  }
+  return picked;
+}
+
+/** One line for the answer prompt. Empty when nothing relevant is stored. */
+export function memoryPrompt(memory: ReaderMemory, question = ''): string {
+  const texts = selectMemories(memory, question).map((item) => item.text.trim()).filter(Boolean);
   if (!texts.length) return '';
   return texts.join('；').slice(0, 400);
 }

@@ -68,7 +68,7 @@ import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
-import { noteReaderActivity } from '@/lib/reader-memory-client';
+import { reflectReaderMemory } from '@/lib/reader-memory-client';
 import { MEMORY_CLEARED_EVENT, readerChatFields, readerHistory } from '@/lib/reader-prefs-client';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
 import { VoiceActivity, VoiceActivityStatus, voiceActivityState } from '@/components/voice-activity';
@@ -1150,9 +1150,9 @@ export default function ReportHome() {
           rosterSnapshot: snapshot,
           rows,
           history: readerHistory(getHomeChatTurns().slice(0, -1)),
-          ...(readerChatFields().modelId ? { modelId: readerChatFields().modelId } : {}),
-          readingLevel: readerChatFields().readingLevel,
-          ...(readerChatFields().readerMemory ? { readerMemory: readerChatFields().readerMemory } : {}),
+          ...(readerChatFields(raw).modelId ? { modelId: readerChatFields(raw).modelId } : {}),
+          readingLevel: readerChatFields(raw).readingLevel,
+          ...(readerChatFields(raw).readerMemory ? { readerMemory: readerChatFields(raw).readerMemory } : {}),
         }),
       });
       if (!response.ok) throw new Error(`home ask ${response.status}`);
@@ -1212,9 +1212,9 @@ export default function ReportHome() {
           rows: [],
           history: readerHistory(getHomeChatTurns().slice(0, -1)),
           mode: 'chitchat',
-          ...(readerChatFields().modelId ? { modelId: readerChatFields().modelId } : {}),
-          readingLevel: readerChatFields().readingLevel,
-          ...(readerChatFields().readerMemory ? { readerMemory: readerChatFields().readerMemory } : {}),
+          ...(readerChatFields(raw).modelId ? { modelId: readerChatFields(raw).modelId } : {}),
+          readingLevel: readerChatFields(raw).readingLevel,
+          ...(readerChatFields(raw).readerMemory ? { readerMemory: readerChatFields(raw).readerMemory } : {}),
           spoken: Boolean(opts?.fromVoice || voice.active),
         }),
       });
@@ -1329,7 +1329,7 @@ export default function ReportHome() {
     if (isFeedbackDrawerOpen()) return;
     const compact = raw.replace(/\s+/g, '');
     if (isVoiceGreetingOrNoise(raw) && /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact)) return;
-    noteReaderActivity({ question: raw });
+    reflectReaderMemory({ question: raw });
     homeVoiceTurnsRef.current.recordUser(turn, raw, (content) => pushTurn('user', content));
     if (isReportReadingGuideQuestion(raw)) {
       setSubmitting(true);

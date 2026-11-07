@@ -4,7 +4,8 @@ import { parseChatRequest } from '../contracts/chat';
 import { ApiError } from '../lib/api';
 import { modelMessages } from '../lib/answer';
 import { selectPinnedProviders, type LlmProvider } from '../lib/llm-providers';
-import { applyReaderActivity, explicitMemoryText, memoryPrompt } from '../lib/reader-memory';
+import { addManualMemory, applyMemoryPatch, explicitMemoryText, memoryPrompt, parseMemoryPatch, rememberExplicit, selectMemories } from '../lib/reader-memory';
+import { MEMORY_REFLECT_PROMPT } from '../lib/reader-memory-reflect';
 import {
   normalizeReaderPrefs,
   readingLevelInstruction,
@@ -59,15 +60,29 @@ test('reading levels change the prompt without dropping the citation rule', () =
   assert.doesNotMatch(untouched[0].content, /解读档位/);
 });
 
-test('reader memory keeps concrete notes and drops them from the prompt when empty', () => {
-  const seen = applyReaderActivity({ notes: [] }, { code: '600519', name: '贵州茅台', question: '营收为什么下降', at: '2026-01-01T00:00:00.000Z' });
-  const saved = applyReaderActivity(seen, { question: '记住我以后要简短回答', at: '2026-01-02T00:00:00.000Z' });
-  assert.ok(saved.notes.some((note) => note.text === '关注贵州茅台' && note.source === 'observed'));
-  assert.ok(saved.notes.some((note) => note.text === '提问常围绕变化原因'));
-  assert.ok(saved.notes.some((note) => note.source === 'saved' && note.text.includes('简短')));
-  assert.match(memoryPrompt(saved), /关注贵州茅台/);
-  assert.equal(memoryPrompt({ notes: [] }), '');
+test('reader memory stores durable facts, not a log of each question', () => {
+  const asked = rememberExplicit({ notes: [] }, '营收为什么下降', '2026-01-01T00:00:00.000Z');
+  assert.deepEqual(asked.notes, []);
+  const saved = rememberExplicit(asked, '记住我以后要简短回答', '2026-01-02T00:00:00.000Z');
+  assert.equal(saved.notes.length, 1);
+  assert.equal(saved.notes[0]?.source, 'saved');
+  assert.match(saved.notes[0]?.text ?? '', /简短/);
+  const manual = addManualMemory(saved, '长期看贵州茅台', '2026-01-03T00:00:00.000Z');
+  const inferred = applyMemoryPatch(manual, { action: 'save', text: '回答时先说变化原因' }, '2026-01-04T00:00:00.000Z');
+  const replaced = applyMemoryPatch(inferred, { action: 'save', text: '回答时先说现金流', replaces: inferred.notes[0]?.id }, '2026-01-05T00:00:00.000Z');
+  assert.equal(replaced.notes.filter((note) => note.text.includes('变化原因')).length, 0);
+  assert.ok(replaced.notes.some((note) => note.text === '回答时先说现金流'));
   assert.equal(explicitMemoryText('营收为什么下降'), null);
+  assert.equal(parseMemoryPatch({ action: 'save', text: '营收为什么下降？' }), null);
+  assert.deepEqual(parseMemoryPatch({ action: 'none' }), { action: 'none' });
+  const visible = selectMemories(replaced, '贵州茅台的现金流怎么样');
+  assert.ok(visible.some((note) => note.text === '长期看贵州茅台'));
+  assert.ok(visible.every((note) => note.source === 'saved' || note.text.includes('现金流')));
+  assert.match(memoryPrompt(replaced, '今天天气怎么样'), /简短/);
+  assert.doesNotMatch(memoryPrompt(replaced, '今天天气怎么样'), /现金流/);
+  assert.equal(memoryPrompt({ notes: [] }), '');
+  assert.match(MEMORY_REFLECT_PROMPT, /不是聊天日志/);
+  assert.match(MEMORY_REFLECT_PROMPT, /单次财报问题/);
 });
 
 test('a pinned model is used alone; an unknown id keeps failover', () => {

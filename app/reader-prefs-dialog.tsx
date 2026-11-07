@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { clearHomeChatTurns } from '@/lib/chat-surface';
 import { type ReaderMemory } from '@/lib/reader-memory';
-import { READER_MEMORY_EVENT, clearReaderMemory, deleteReaderNote, readReaderMemory } from '@/lib/reader-memory-client';
+import { READER_MEMORY_EVENT, addReaderMemory, clearReaderMemory, deleteReaderNote, readReaderMemory } from '@/lib/reader-memory-client';
 import {
   notifyConversationDeleted,
   notifyMemoryCleared,
@@ -251,6 +251,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
               confirmClear={confirmHabitClear}
               onAskClear={() => setConfirmHabitClear(true)}
               onCancelClear={() => setConfirmHabitClear(false)}
+              onAdd={(text) => setHabit(addReaderMemory(text))}
               onDelete={(id) => setHabit(deleteReaderNote(id))}
               onClear={() => {
                 setHabit(clearReaderMemory());
@@ -314,6 +315,7 @@ function HabitPanel({
   confirmClear,
   onAskClear,
   onCancelClear,
+  onAdd,
   onDelete,
   onClear,
 }: {
@@ -321,22 +323,41 @@ function HabitPanel({
   confirmClear: boolean;
   onAskClear: () => void;
   onCancelClear: () => void;
+  onAdd: (text: string) => void;
   onDelete: (id: string) => void;
   onClear: () => void;
 }) {
+  const [draft, setDraft] = useState('');
+  function add(event: FormEvent) {
+    event.preventDefault();
+    const text = draft.trim();
+    if (text.length < 2) return;
+    onAdd(text);
+    setDraft('');
+  }
   return (
     <>
       <h3>记忆</h3>
-      <p className="prefs-lead">记住你的关注方向、提问习惯，持续优化后续应答</p>
+      <p className="prefs-lead">只留下以后还会用到的事实，用来调整后续回答。一次提问不会记下来。</p>
+      <form className="prefs-memory-add" onSubmit={add}>
+        <input
+          value={draft}
+          maxLength={80}
+          placeholder="添加一条，例如：回答请简短"
+          aria-label="添加记忆"
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button type="submit" disabled={draft.trim().length < 2}>添加</button>
+      </form>
       {habit.notes.length === 0 ? (
-        <p className="prefs-hint">还没有记忆。多问几家公司，或直接说「记住……」，会记在这里。</p>
+        <p className="prefs-hint">还没有记忆。写在上面，或在对话里说「记住……」。</p>
       ) : (
         <ul className="prefs-notes">
           {habit.notes.map((note) => (
             <li key={note.id}>
               <div>
                 <p>{note.text}</p>
-                <small>{note.source === 'saved' ? '你要求记住' : '根据提问记下'}</small>
+                <small>{note.source === 'saved' ? '你写下的' : '长期记下'}</small>
               </div>
               <button type="button" onClick={() => onDelete(note.id)}>删除</button>
             </li>
