@@ -90,9 +90,15 @@ test('cite / layout / style / meta intents', () => {
   assert.match(voiceStyleConfirmLine('detailed'), /细/);
 
   assert.equal(isVoiceCapabilityIntent('你能干什么'), true);
+  assert.equal(isVoiceCapabilityIntent('你能干啥'), true);
+  assert.equal(isVoiceCapabilityIntent('你能干啥？'), true);
+  assert.equal(isVoiceCapabilityIntent('你会干啥'), true);
+  assert.equal(isVoiceCapabilityIntent('你会啥'), true);
+  assert.equal(isVoiceCapabilityIntent('你能做啥'), true);
   assert.equal(isVoiceCapabilityIntent('你有什么功能'), true);
   assert.equal(isVoiceCapabilityIntent('你会做什么'), true);
   assert.equal(isVoiceCapabilityIntent('营收多少'), false);
+  assert.equal(isVoiceCapabilityIntent('东鹏最近业绩好不好'), false);
   const speech = voiceCapabilitySpeech();
   assert.equal(speech, VOICE_CAPABILITY_LINES.join(''));
   assert.equal(speech, '我是 Eva，你的财报智能分析助手。');

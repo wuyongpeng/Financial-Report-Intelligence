@@ -9,7 +9,7 @@ export const EVA_INTRO_LINE =
   '我是 Eva，你的财报智能分析助手。';
 
 const IDENTITY_RE =
-  /^(?:你是谁|你叫什么|自我介绍|介绍一下你自己|你是什么助手|你能干什么|你有什么功能|你会做什么|你可以做什么|你能干嘛|你能做什么)[\s?？!！.。]*$/;
+  /^(?:你是谁|你叫什么|自我介绍|介绍一下你自己|你是什么助手|你能干什么|你能干啥|你能干嘛|你能做什么|你能做啥|你有什么功能|你会做什么|你会做啥|你会干啥|你会啥|你可以做什么)[\s?？!！.。]*$/;
 
 /** Exact identity / capability asks (typed or spoken). */
 export function isProductIdentityQuestion(question: string): boolean {

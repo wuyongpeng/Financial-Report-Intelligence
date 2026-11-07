@@ -9,7 +9,7 @@ export function isVoiceCapabilityIntent(text: string): boolean {
   const t = normalizeVoiceText(text);
   if (!t) return false;
   return isProductIdentityQuestion(t)
-    || /^(你能干什么|你有什么功能|你会做什么|你可以做什么|你能干嘛|介绍一下你自己|你是谁|你能做什么)$/.test(t);
+    || /^(你能干什么|你能干啥|你能干嘛|你能做什么|你能做啥|你有什么功能|你会做什么|你会做啥|你会干啥|你会啥|你可以做什么|介绍一下你自己|你是谁)$/.test(t);
 }
 
 export function voiceCapabilitySpeech(): string {

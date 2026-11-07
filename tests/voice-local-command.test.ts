@@ -63,6 +63,11 @@ const MUST_MATCH: [string, LocalCommand][] = [
   ['翻到第9999页', nav({ kind: 'goto', page: 9999 })],
   // —— pack: capability / tts / style / layout / zoom / cite / read / toc
   ['你能干什么', { kind: 'capability' }],
+  ['你能干啥', { kind: 'capability' }],
+  ['你能干啥？', { kind: 'capability' }],
+  ['你会干啥', { kind: 'capability' }],
+  ['你会啥', { kind: 'capability' }],
+  ['你有什么功能', { kind: 'capability' }],
   ['介绍一下你自己', { kind: 'capability' }],
   ['我该怎么提问', { kind: 'how-to-ask' }],
   ['可以问什么', { kind: 'how-to-ask' }],

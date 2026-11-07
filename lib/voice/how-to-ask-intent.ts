@@ -295,7 +295,7 @@ export function isVoiceHowToAskIntent(text: string): boolean {
   if (!t) return false;
 
   // Capability / identity stay in meta-intent (parser order also prefers them).
-  if (/^(?:你是谁|你叫什么|自我介绍|介绍一下你自己|你能干什么|你有什么功能|你会做什么|你可以做什么|你能干嘛|你能做什么)$/.test(t)) {
+  if (/^(?:你是谁|你叫什么|自我介绍|介绍一下你自己|你能干什么|你能干啥|你能干嘛|你能做什么|你能做啥|你有什么功能|你会做什么|你会做啥|你会干啥|你会啥|你可以做什么)$/.test(t)) {
     return false;
   }
 

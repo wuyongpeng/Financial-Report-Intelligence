@@ -46,6 +46,8 @@ test('isVoiceHowToAskIntent rejects finance asks and other intents', () => {
     '营业收入是多少',
     '怎么问营收同比算出来的',
     '你能干什么',
+    '你能干啥',
+    '你会干啥',
     '介绍一下你自己',
     '你是谁',
     '下一页',
@@ -69,12 +71,18 @@ test('parseLocalCommand routes how-to-ask without stealing capability/farewell',
   assert.deepEqual(parseLocalCommand('可以问什么', noWindow), { kind: 'how-to-ask' });
   assert.deepEqual(parseLocalCommand('问什么好', noWindow), { kind: 'how-to-ask' });
   assert.deepEqual(parseLocalCommand('你能干什么', noWindow), { kind: 'capability' });
+  assert.deepEqual(parseLocalCommand('你能干啥？', noWindow), { kind: 'capability' });
+  assert.deepEqual(parseLocalCommand('你会干啥', noWindow), { kind: 'capability' });
   assert.deepEqual(parseLocalCommand('再见', noWindow), { kind: 'farewell' });
   assert.equal(parseLocalCommand('营业收入是多少', noWindow), null);
 
   // capability detector and farewell stay independent
   assert.equal(isVoiceCapabilityIntent('你能干什么'), true);
   assert.equal(isVoiceHowToAskIntent('你能干什么'), false);
+  assert.equal(isVoiceCapabilityIntent('你能干啥？'), true);
+  assert.equal(isVoiceHowToAskIntent('你能干啥？'), false);
+  assert.equal(isVoiceCapabilityIntent('你会干啥'), true);
+  assert.equal(isVoiceHowToAskIntent('你会干啥'), false);
   assert.equal(isVoiceFarewell('再见'), true);
   assert.equal(isVoiceHowToAskIntent('再见'), false);
 });
