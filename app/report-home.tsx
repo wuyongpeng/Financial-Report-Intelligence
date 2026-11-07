@@ -296,7 +296,7 @@ export default function ReportHome() {
   /** Ephemeral home-AI reply (typed + voice); never seeds detail chat. */
   const [homeAnswer, setHomeAnswer] = useState<string | null>(null);
   const [voiceTurns, setVoiceTurns] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const [voicePanelOpen, setVoicePanelOpen] = useState(true);
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
   const [starred, setStarred] = useState<string[]>(() => readStarredCodes());
   const [submitting, setSubmitting] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -471,11 +471,14 @@ export default function ReportHome() {
         const fillerOnly = /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact);
         setSearch('');
         if (!fillerOnly) {
+          setVoicePanelOpen(true);
           pushTurn('user', text);
           await speakLine(homeGreetingNudge());
         }
         return { action: 'resume' };
       }
+      // A real utterance (not 嗯/啊) opens the history; the logo click folds it back.
+      setVoicePanelOpen(true);
       // Fresh ASR utterance supersedes any prior keyboard edits on the box.
       // Chitchat must not stay in the search box — that filters the company grid.
       searchEditedDuringVoiceRef.current = false;
@@ -521,13 +524,6 @@ export default function ReportHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Home voice lives in the right-side Eva dock, not the bottom float.
-  useEffect(() => {
-    voice.setHideFloat(true);
-    return () => voice.setHideFloat(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Mirror the live transcript into the search box unless the user is editing it.
   useEffect(() => {
     if (!voice.active || (!voice.listening && !voice.arming)) return;
@@ -541,7 +537,6 @@ export default function ReportHome() {
 
   const voiceWasActiveRef = useRef(false);
   useEffect(() => {
-    if (!voiceWasActiveRef.current && voice.active) setVoicePanelOpen(true);
     if (voiceWasActiveRef.current && !voice.active) {
       if (!searchEditedDuringVoiceRef.current) setSearch('');
     }
