@@ -130,14 +130,9 @@ test('both voice floats share dragging; detail has one red X, quiet opt-in foote
   assert.ok(float.includes('尽管提问，停顿即发送') && provider.includes('尽管提问，停顿即发送'));
   assert.ok(!float.includes('说出公司名称') && !provider.includes('说出公司名称'));
   assert.ok(float.indexOf('{footerExtra}') > float.indexOf('eva-voice-float-text'));
-  assert.ok(detail.includes('[voiceAutoJump, setVoiceAutoJump] = useState(false)'));
-  assert.ok(detail.includes('voiceAutoJumpRef = useRef(false)'));
-  assert.ok(!detail.includes('setVoiceAutoJump(true)'));
-  assert.ok(detail.includes('setVoiceAutoJump(false); // Every explicit voice start'));
-  assert.ok(detail.includes('checked={voiceAutoJump}') && detail.includes('setVoiceAutoJump(e.target.checked)'));
-  assert.ok(detail.includes('voiceAutoJumpRef.current = e.target.checked'));
-  assert.ok(detail.includes('voice.setFloatFooterExtra(null)'));
-  assert.ok(detail.includes('if (voiceAutoJumpRef.current)'));
+  assert.ok(!detail.includes('自动跳转到答案页'));
+  assert.ok(!detail.includes('voiceAutoJump'));
+  assert.ok(detail.includes('答案在第'));
   assert.ok(detail.includes('id="cd-chat-panel"'), 'existing follow-up panel is retained');
   assert.ok(!float.includes('role="dialog"'), 'no second chat panel is introduced');
 });

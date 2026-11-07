@@ -310,7 +310,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const setVoiceSpeaking = (v: boolean) => { voice.setSpeaking(v); };
   const setVoicePartial = (v: string) => { voice.setPartial(v); };
   const [voiceJumpHint, setVoiceJumpHint] = useState<Citation | null>(null);
-  const [voiceAutoJump, setVoiceAutoJump] = useState(false);
   const voiceHandoffHomeRef = useRef(false);
   /** Last successful voice next/prev — seeds short-lived 「继续 / 再翻」 (12s). */
   const lastVoicePageNavRef = useRef<{ kind: 'next' | 'prev'; at: number } | null>(null);
@@ -367,7 +366,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const userScrollAtRef = useRef(0);
   const sourcePageRef = useRef(1);
   const outlineRef = useRef(emptyOutline);
-  const voiceAutoJumpRef = useRef(false);
   const voicePartialRef = useRef('');
   const overviewRef = useRef<HTMLDivElement>(null);
   const autoAskedRef = useRef(false);
@@ -1286,7 +1284,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { outlineRef.current = outline; }, [outline]);
-  useEffect(() => { voiceAutoJumpRef.current = voiceAutoJump; }, [voiceAutoJump]);
   // Only mirror ask busy into the voice session while voice is active.
   // Otherwise typed send (加入AI分析 → 发送) would set busy and used to pop the float.
   useEffect(() => {
@@ -1311,24 +1308,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     return () => voice.setReportAuditRisk(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected.id, selected.audit_opinion_kind]);
-
-  // Global float: quiet footer auto-jump control (page-owned; cleared on leave).
-  useEffect(() => {
-    voice.setFloatFooterExtra(
-      <label className="eva-voice-float-jump">
-        <input
-          type="checkbox"
-          checked={voiceAutoJump}
-          onChange={(e) => { voiceAutoJumpRef.current = e.target.checked; setVoiceAutoJump(e.target.checked); }}
-        />
-        自动跳转到答案页
-      </label>,
-    );
-    return () => {
-      voice.setFloatFooterExtra(null);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceAutoJump]);
 
   function onFeedbackState(open: boolean) {
     if (open) {
@@ -1989,8 +1968,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voiceEmptyTurnsRef.current = 0;
     voiceEarlyJumpRef.current = false;
     voiceHandoffHomeRef.current = false;
-    voiceAutoJumpRef.current = false;
-    setVoiceAutoJump(false); // Every explicit voice start is opt-in, never restore an old enabled preference.
     await voice.start();
   }
 
@@ -2580,12 +2557,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         ensureTypewriter();
         if (citations) paint(citations);
       }
-      // Voice session: jump to the first citation as soon as evidence appears (same path as [Pxx] chip).
+      // Voice: offer the first citation as a click, never move the PDF on its own.
       if (
         citations
         && voiceSpeakRef.current
         && voiceConvRef.current
-        && voiceAutoJumpRef.current
         && !voiceEarlyJumpRef.current
       ) {
         const fromMarks = uniqueAnswerSources(answer, citations, pageLabel);
@@ -2594,8 +2570,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         if (target?.page) {
           voiceEarlyJumpRef.current = true;
           lastVoiceCiteRef.current = target;
-          revealVoiceCitation(target);
-          setVoiceJumpHint(null);
+          setVoiceJumpHint(target);
         }
       }
     }
@@ -2668,13 +2643,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         const target = fromMarks[0] ?? withQuote ?? lastEvidence?.[0];
         if (target?.page) {
           lastVoiceCiteRef.current = target;
-          // Voice conversation: always auto-jump (checkbox still respected); ignore recent manual scroll.
-          if (voiceAutoJumpRef.current) {
-            if (!voiceEarlyJumpRef.current) revealVoiceCitation(target);
-            setVoiceJumpHint(null);
-          } else {
-            setVoiceJumpHint(target);
-          }
+          if (!voiceEarlyJumpRef.current) setVoiceJumpHint(target);
         }
         const abort = new AbortController();
         voiceTtsAbortRef.current = abort;
