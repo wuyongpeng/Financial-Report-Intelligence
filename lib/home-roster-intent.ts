@@ -21,6 +21,25 @@ const OPEN_RE =
 const HOME_SCOPE_RE =
   /首页|主页|监控池|列表里|卡片上|当前展示|现在展示/;
 
+/** 「A股有哪些和造汽车相关的公司」— theme scan, not one named issuer. */
+const INDUSTRY_ASK_RE =
+  /有哪些|哪些公司|什么公司|哪几家|哪家|相关的公司|有关的公司|涉及.{0,8}公司/;
+const INDUSTRY_CUE_RE =
+  /行业|产业|赛道|板块|概念|相关|造车|汽车|新能源|半导体|白酒|银行|医药|光伏|锂电|家电|军工|券商|保险|消费|制造|a股|A股/;
+
+/**
+ * Industry / theme discovery on the home list.
+ * 「有哪些公司」alone stays a plain list; this catches 「和造汽车相关的公司」.
+ */
+export function isHomeIndustryRosterQuestion(text: string): boolean {
+  const q = normalizeVoiceText(text);
+  if (!q || q.length > 40) return false;
+  if (!INDUSTRY_ASK_RE.test(q) || !INDUSTRY_CUE_RE.test(q)) return false;
+  // A single issuer's finance question must not become a roster scan.
+  if (/营收|净利润|同比|财报|年报|季报|业绩|增长原因/.test(q) && !/有哪些|哪些公司|相关的公司/.test(q)) return false;
+  return true;
+}
+
 export function isHomeRosterListQuestion(text: string): boolean {
   const q = normalizeVoiceText(text);
   if (!q) return false;
@@ -63,6 +82,7 @@ export function isHomeRosterQuestion(text: string): boolean {
   const q = normalizeVoiceText(text);
   if (!q) return false;
   if (isHomeRosterListQuestion(q)) return true;
+  if (isHomeIndustryRosterQuestion(q)) return true;
   if (isHomeRosterPresenceQuestion(q)) return true;
   if (isHomeRosterWorthQuestion(q)) return true;
   if (parseHomeRosterOpenQuery(q)) return true;
@@ -75,7 +95,7 @@ export function homeRosterSourcePreference(
   text: string,
 ): 'pool' | 'filtered' | 'visible' {
   const q = normalizeVoiceText(text);
-  if (/监控池|全部公司|都收入|收入了哪些/.test(q)) return 'pool';
+  if (/监控池|全部公司|都收入|收入了哪些/.test(q) || isHomeIndustryRosterQuestion(q)) return 'pool';
   if (/筛选|当前列表|列表里/.test(q)) return 'filtered';
   return 'visible';
 }
