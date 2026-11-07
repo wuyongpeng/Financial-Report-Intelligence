@@ -53,7 +53,7 @@ export type RetrievalChunk = {
 
 export type WatchedCompany = { code: string; companyName: string };
 
-export type OutOfScopeKind = 'investment' | 'meta-model' | 'identity' | 'reading-guide' | 'off-topic';
+export type OutOfScopeKind = 'investment' | 'meta-model' | 'identity' | 'reading-guide' | 'need-peer' | 'data-doubt' | 'off-topic';
 
 export type QueryPlan = {
   originalQuestion: string;

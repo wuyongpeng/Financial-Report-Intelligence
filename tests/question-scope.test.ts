@@ -61,6 +61,30 @@ test('classifyQuestionScope + outOfScopeReply cover meta, weather, and finance c
   assert.match(outOfScopeReply('reading-guide'), /中间概览/);
   assert.match(outOfScopeReply('reading-guide'), /划词/);
   assert.equal(classifyQuestionScope({
+    originalQuestion: '三栏是什么意思',
+    retrievalQuestion: '三栏是什么意思',
+    metricNames: [],
+    explicitPage: null,
+  }).outOfScopeKind, 'reading-guide');
+  assert.equal(classifyQuestionScope({
+    originalQuestion: '和别人比一下营收',
+    retrievalQuestion: '和别人比一下营收',
+    metricNames: [],
+    explicitPage: null,
+  }).outOfScopeKind, 'need-peer');
+  assert.equal(classifyQuestionScope({
+    originalQuestion: '和五粮液比营收',
+    retrievalQuestion: '和五粮液比营收',
+    metricNames: [],
+    explicitPage: null,
+  }).outOfScope, false);
+  assert.equal(classifyQuestionScope({
+    originalQuestion: '这个数好像错了',
+    retrievalQuestion: '这个数好像错了',
+    metricNames: [],
+    explicitPage: null,
+  }).outOfScopeKind, 'data-doubt');
+  assert.equal(classifyQuestionScope({
     originalQuestion: '营收怎么看',
     retrievalQuestion: '营收怎么看',
     metricNames: ['revenue'],

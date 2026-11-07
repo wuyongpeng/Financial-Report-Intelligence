@@ -83,10 +83,12 @@ export function parseLocalCommand(text: string, ctx: LocalCommandContext): Local
   const nav = parseVoiceNavIntent(text);
   if (nav && nav.kind !== 'home') return { kind: 'page-nav', nav, via: 'direct' };
 
+  // Bare 「继续」 while reading is paused resumes speech, even if a page was just turned.
+  // Explicit 「继续往下翻」 stays navigation above via parseVoicePageContinue.
+  if (ctx.ttsPaused && normalizeVoiceText(text) === '继续') return { kind: 'tts-resume-bare' };
+
   const cont = parseVoicePageContinue(text, ctx.lastPageNav, ctx.now);
   if (cont) return { kind: 'page-nav', nav: cont, via: 'continue' };
-
-  if (ctx.ttsPaused && normalizeVoiceText(text) === '继续') return { kind: 'tts-resume-bare' };
 
   if (nav?.kind === 'home') return { kind: 'home' };
   if (isVoiceFarewell(text)) return { kind: 'farewell' };

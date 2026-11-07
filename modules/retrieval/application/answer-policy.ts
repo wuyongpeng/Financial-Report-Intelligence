@@ -1,6 +1,6 @@
 import { unsupportedYears } from '@/lib/chat-evidence';
 import { EVA_INTRO_LINE } from '@/lib/product-identity';
-import { REPORT_READING_GUIDE } from '@/lib/report-reading-guide';
+import { DATA_DOUBT_REPLY, REPORT_READING_GUIDE, UNNAMED_PEER_REPLY } from '@/lib/report-reading-guide';
 import { llmModelName } from '@/lib/llm-providers';
 import type { QueryPlan, RetrievedPassage, RetrievalMetric } from '../domain/retrieval';
 
@@ -31,6 +31,8 @@ export function outOfScopeReply(kind: QueryPlan['outOfScopeKind'] = 'off-topic')
   if (kind === 'reading-guide') {
     return REPORT_READING_GUIDE;
   }
+  if (kind === 'need-peer') return UNNAMED_PEER_REPLY;
+  if (kind === 'data-doubt') return DATA_DOUBT_REPLY;
   if (kind === 'meta-model') {
     const model = llmModelName();
     return model

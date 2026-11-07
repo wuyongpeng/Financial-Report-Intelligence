@@ -2,7 +2,8 @@ import { isFocusReferenceQuestion } from '@/lib/focus-prompt';
 import { nameVariants, WELL_KNOWN_ALIASES } from '@/lib/company-aliases';
 import type { MemoryMessage } from '@/lib/conversations';
 import { isProductIdentityQuestion } from '@/lib/product-identity';
-import { isReportReadingGuideQuestion } from '@/lib/report-reading-guide';
+import { isDataDoubtQuestion, isReportReadingGuideQuestion, isUnnamedPeerCompare } from '@/lib/report-reading-guide';
+import { isHomeProductGuideQuestion } from '@/lib/home-roster-intent';
 import {
   METRIC_PATTERNS,
   type OutOfScopeKind,
@@ -194,8 +195,15 @@ export function classifyQuestionScope(input: {
   if (isProductIdentityQuestion(original) || isProductIdentityQuestion(input.retrievalQuestion)) {
     return { outOfScope: true, outOfScopeKind: 'identity' };
   }
-  if (isReportReadingGuideQuestion(original) || isReportReadingGuideQuestion(input.retrievalQuestion)) {
+  if (isReportReadingGuideQuestion(original) || isReportReadingGuideQuestion(input.retrievalQuestion)
+    || isHomeProductGuideQuestion(original) || isHomeProductGuideQuestion(input.retrievalQuestion)) {
     return { outOfScope: true, outOfScopeKind: 'reading-guide' };
+  }
+  if (isUnnamedPeerCompare(original) || isUnnamedPeerCompare(input.retrievalQuestion)) {
+    return { outOfScope: true, outOfScopeKind: 'need-peer' };
+  }
+  if (isDataDoubtQuestion(original) || isDataDoubtQuestion(input.retrievalQuestion)) {
+    return { outOfScope: true, outOfScopeKind: 'data-doubt' };
   }
   if (input.summary || (input.hasFocus && isFocusReferenceQuestion(original))) return { outOfScope: false };
   if (input.metricNames.length || input.explicitPage != null) return { outOfScope: false };

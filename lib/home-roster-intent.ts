@@ -99,7 +99,7 @@ export function isHomeProductGuideQuestion(text: string): boolean {
   const q = normalizeVoiceText(text);
   if (!q || q.length > 40) return false;
   if (ISSUER_FACT_RE.test(q) && !/划词|三栏|角标|详情页|怎么用|如何使用/.test(q)) return false;
-  return /划词|三栏|角标|详情页|设计理念|怎么用|如何使用|怎么提问|怎么核对|回原文|有什么功能|能做什么|你会什么|产品特点|怎么选词/.test(q);
+  return /划词|三栏|角标|详情页|设计理念|怎么用|如何使用|怎么提问|怎么核对|回原文|有什么功能|能做什么|能干啥|能干什么|你会什么|产品特点|怎么选词/.test(q);
 }
 
 export function isHomeRosterQuestion(text: string): boolean {

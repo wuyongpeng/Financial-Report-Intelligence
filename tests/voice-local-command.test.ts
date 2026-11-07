@@ -217,9 +217,11 @@ test('「继续」 shares the 12s window with typed/voice page nav; 接着念 ne
   assert.deepEqual(parseLocalCommand('继续', edge), nav({ kind: 'next' }, 'continue'));
   // 接着念 is TTS resume, not page continue, even inside a fresh window.
   assert.deepEqual(parseLocalCommand('接着念', freshNext), { kind: 'tts-resume' });
-  // Paused TTS + bare 继续 and no window → resume reading; a fresh window still wins (page nav first).
+  // Paused TTS + bare 继续 resumes reading, even inside a fresh page-nav window.
+  // Explicit 「继续往下翻」 still turns the page.
   assert.deepEqual(parseLocalCommand('继续', { ...noWindow, ttsPaused: true }), { kind: 'tts-resume-bare' });
-  assert.deepEqual(parseLocalCommand('继续', { ...freshNext, ttsPaused: true }), nav({ kind: 'next' }, 'continue'));
+  assert.deepEqual(parseLocalCommand('继续', { ...freshNext, ttsPaused: true }), { kind: 'tts-resume-bare' });
+  assert.deepEqual(parseLocalCommand('继续往下翻', { ...freshNext, ttsPaused: true }), nav({ kind: 'next' }, 'continue'));
   assert.equal(parseLocalCommand('继续分析营收', { ...noWindow, ttsPaused: true }), null);
 });
 
