@@ -60,7 +60,7 @@ export function parseChatRequest(body: Record<string, unknown>): ChatRequest {
     if (!modelId) throw new ApiError(400, 'modelId 参数无效');
   }
   const readerMemory = typeof body.readerMemory === 'string'
-    ? body.readerMemory.replace(/\s+/g, ' ').trim().slice(0, 180)
+    ? body.readerMemory.replace(/\s+/g, ' ').trim().slice(0, 400)
     : '';
   return {
     reportId,

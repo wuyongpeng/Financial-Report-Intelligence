@@ -1,8 +1,7 @@
-import { describeReaderMemory } from './reader-memory';
+import { memoryPrompt } from './reader-memory';
 import { readReaderMemory } from './reader-memory-client';
 import {
   DEFAULT_READER_PREFS,
-  READING_LEVEL_COPY,
   READER_PREFS_KEY,
   normalizeReaderPrefs,
   sanitizeModelId,
@@ -39,7 +38,7 @@ export function updateReaderPrefs(patch: Partial<ReaderPrefs>): ReaderPrefs {
 export function readerChatFields(): { readingLevel: ReaderPrefs['readingLevel']; modelId?: string; readerMemory?: string } {
   const prefs = readReaderPrefs();
   const modelId = prefs.autoModel ? undefined : sanitizeModelId(prefs.modelId);
-  const brief = describeReaderMemory(readReaderMemory(), READING_LEVEL_COPY[prefs.readingLevel].label).brief;
+  const brief = memoryPrompt(readReaderMemory());
   return {
     readingLevel: prefs.readingLevel,
     ...(modelId ? { modelId } : {}),

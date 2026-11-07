@@ -2,8 +2,8 @@
 
 import { useEffect, useId, useState } from 'react';
 import { clearHomeChatTurns } from '@/lib/chat-surface';
-import { describeReaderMemory, type ReaderMemory } from '@/lib/reader-memory';
-import { READER_MEMORY_EVENT, clearReaderMemory, readReaderMemory } from '@/lib/reader-memory-client';
+import { type ReaderMemory } from '@/lib/reader-memory';
+import { READER_MEMORY_EVENT, clearReaderMemory, deleteReaderNote, readReaderMemory } from '@/lib/reader-memory-client';
 import {
   notifyConversationDeleted,
   notifyMemoryCleared,
@@ -137,7 +137,8 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
     }
   }
 
-  const knownModel = models?.some((item) => item.id === prefs.modelId) ?? false;
+  const concreteModels = (models ?? []).filter((item) => !/^(auto|automatic)$/i.test(item.id.trim()) && !/^(auto|automatic)$/i.test(item.model.trim()));
+  const knownModel = concreteModels.some((item) => item.id === prefs.modelId);
 
   return (
     <div className="prefs-backdrop" onClick={onClose}>
@@ -197,8 +198,8 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                   {modelsError ? <p className="prefs-error">{modelsError}</p> : null}
                   <div className="prefs-choices" role="radiogroup" aria-label="问答模型">
                     {models === null && !modelsError ? <p className="prefs-hint">正在读取已配置的模型…</p> : null}
-                    {models?.length === 0 ? <p className="prefs-hint">当前没有配置问答模型。追问会退回可核验的原文证据。</p> : null}
-                    {models?.map((item) => (
+                    {models !== null && !modelsError && concreteModels.length === 0 ? <p className="prefs-hint">当前没有可手选的问答模型。追问会退回可核验的原文证据。</p> : null}
+                    {concreteModels.map((item) => (
                       <button
                         key={item.id}
                         type="button"
@@ -247,10 +248,10 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
           {tab === 'profile' ? (
             <HabitPanel
               habit={habit}
-              levelLabel={READING_LEVEL_COPY[prefs.readingLevel].label}
               confirmClear={confirmHabitClear}
               onAskClear={() => setConfirmHabitClear(true)}
               onCancelClear={() => setConfirmHabitClear(false)}
+              onDelete={(id) => setHabit(deleteReaderNote(id))}
               onClear={() => {
                 setHabit(clearReaderMemory());
                 setConfirmHabitClear(false);
@@ -310,42 +311,50 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
 
 function HabitPanel({
   habit,
-  levelLabel,
   confirmClear,
   onAskClear,
   onCancelClear,
+  onDelete,
   onClear,
 }: {
   habit: ReaderMemory;
-  levelLabel: string;
   confirmClear: boolean;
   onAskClear: () => void;
   onCancelClear: () => void;
+  onDelete: (id: string) => void;
   onClear: () => void;
 }) {
-  const view = describeReaderMemory(habit, levelLabel);
-  const hasHabit = Boolean(view.brief);
   return (
     <>
       <h3>记忆</h3>
-      <p className="prefs-lead">根据你的提问自动更新，只调整表述，不改变数据和引用来源。</p>
-      <p className="prefs-label">提问风格</p>
-      <p className="prefs-profile">{view.style}</p>
-      <p className="prefs-label">常问公司</p>
-      <p className="prefs-profile">{view.companies}</p>
-      <p className="prefs-label">用户画像</p>
-      <p className="prefs-profile">{view.portrait}</p>
-      <div className="prefs-memory-head">
-        <p className="prefs-label">记忆管理</p>
-        {confirmClear ? (
-          <span className="prefs-confirm">
-            <button type="button" className="prefs-text" onClick={onCancelClear}>取消</button>
-            <button type="button" className="prefs-text danger" onClick={onClear}>确认清除</button>
-          </span>
-        ) : (
-          <button type="button" className="prefs-text danger" disabled={!hasHabit} onClick={onAskClear}>清除记忆</button>
-        )}
-      </div>
+      <p className="prefs-lead">记住你的关注方向、提问习惯，持续优化后续应答</p>
+      {habit.notes.length === 0 ? (
+        <p className="prefs-hint">还没有记忆。多问几家公司，或直接说「记住……」，会记在这里。</p>
+      ) : (
+        <ul className="prefs-notes">
+          {habit.notes.map((note) => (
+            <li key={note.id}>
+              <div>
+                <p>{note.text}</p>
+                <small>{note.source === 'saved' ? '你要求记住' : '根据提问记下'}</small>
+              </div>
+              <button type="button" onClick={() => onDelete(note.id)}>删除</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {habit.notes.length > 0 ? (
+        <div className="prefs-memory-head">
+          {confirmClear ? (
+            <span className="prefs-confirm">
+              <button type="button" className="prefs-text" onClick={onCancelClear}>取消</button>
+              <button type="button" className="prefs-text danger" onClick={onClear}>确认清除</button>
+            </span>
+          ) : (
+            <button type="button" className="prefs-text danger" onClick={onAskClear}>全部清除</button>
+          )}
+        </div>
+      ) : null}
     </>
   );
 }

@@ -40,6 +40,10 @@ export function CheckAdminClient() {
   const [busy, setBusy] = useState<string[]>([]);
   const locks = useRef(new Set<string>());
   const [parses, setParses] = useState<Array<{ id: string; label: string; parsedAt: string | null; started: number; sawParsing: boolean }>>([]);
+  const [opsKey, setOpsKey] = useState<string | null>(null);
+  const [discardTarget, setDiscardTarget] = useState<ManagedCheckCell | null>(null);
+  const [discardPassword, setDiscardPassword] = useState('');
+  const [discardPasswordError, setDiscardPasswordError] = useState('');
   const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
@@ -113,6 +117,35 @@ export function CheckAdminClient() {
       await load();
     } catch (error) { setActionMsg(error instanceof Error ? error.message : '处理状态保存失败'); await load(); }
     finally { unlock(key); }
+  };
+
+  const confirmDiscard = async () => {
+    if (!discardTarget?.announcementId) return;
+    if (!discardPassword) {
+      setDiscardPasswordError('请输入删除密码');
+      return;
+    }
+    const cell = discardTarget;
+    const password = discardPassword;
+    try {
+      const res = await fetch('/api/crawl/discard', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ announcementId: cell.announcementId, password }),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string; note?: string };
+      if (!res.ok) {
+        setDiscardPasswordError(body.error || '删除失败');
+        return;
+      }
+      setDiscardTarget(null);
+      setDiscardPassword('');
+      setActionMsg(body.note || `已删除 ${cell.code} ${cell.period}`);
+      await load();
+    } catch (error) {
+      setDiscardPasswordError(error instanceof Error ? error.message : '删除失败');
+    }
   };
 
   const parseRow = async (cell: ManagedCheckCell) => {
@@ -270,7 +303,7 @@ export function CheckAdminClient() {
               <th style={s.th}>库内折算</th>
               <th style={s.th}>原始值</th>
               <th style={s.th}>原始结论 / 审核</th>
-              <th style={s.th}>处理进度 / 备注（全表）</th>
+              <th style={s.th}>状态</th>
               <th style={s.th}>操作</th>
             </tr>
           </thead>
@@ -316,29 +349,34 @@ export function CheckAdminClient() {
                     {cell.reviewStatus === 'approved' ? '已审核通过' : cell.reviewStatus === 'flagged' ? '人工标异' : cell.reviewStale ? '数据已变化，需重新审核' : '未审核'}
                   </div>
                 </td>
-                <td style={{ ...s.td, minWidth: 220 }}>
-                  <select aria-label={`${cell.code} ${cell.metricLabel}处理状态`} style={{ ...s.input, fontSize: 12, padding: '3px 5px' }} value={cell.progressStatus}
-                    disabled={busy.includes(checkReviewKey(cell))} onChange={e => void progressRow(cell, e.target.value as CheckProgressStatus)}>
-                    {(['open', 'in_progress', 'resolved'] as const).map(status => <option key={status} value={status}>{CHECK_PROGRESS_LABEL[status]}</option>)}
-                  </select>
-                  <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                    <input aria-label={`${cell.code} ${cell.metricLabel}处理备注`} style={{ ...s.input, width: 140, minWidth: 0, fontSize: 12, padding: '3px 5px' }} maxLength={300}
-                      placeholder="简短处理备注" value={currentNote(cell)} onChange={e => setNotes(current => ({ ...current, [noteKey(cell)]: e.target.value }))} />
-                    <button type="button" style={s.btn} disabled={busy.includes(checkReviewKey(cell))} onClick={() => void progressRow(cell, cell.progressStatus)}>保存</button>
-                  </div>
-                  <div style={{ ...s.muted, fontSize: 11, marginTop: 3 }}>
-                    {cell.progressStale ? '数据已变化，已重新打开；上轮备注保留。' : null}
-                    {cell.progressUpdatedAt ? `更新：${new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'short' }).format(new Date(cell.progressUpdatedAt))}（上海）` : ''}
-                  </div>
+                <td style={s.td}>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 650,
+                      color: cell.progressStatus === 'resolved' ? '#15803d' : cell.progressStatus === 'in_progress' ? '#b45309' : '#6b7a8d',
+                    }}
+                    title={cell.progressUpdatedAt
+                      ? `更新：${new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'short' }).format(new Date(cell.progressUpdatedAt))}（上海）`
+                      : undefined}
+                  >
+                    {CHECK_PROGRESS_LABEL[cell.progressStatus]}
+                  </span>
+                  {cell.progressStale ? <div style={{ ...s.muted, fontSize: 11, marginTop: 3 }}>数据已变化，已重新打开</div> : null}
                 </td>
                 <td style={s.td}>
-                  <div style={{ display: 'flex', gap: 6, whiteSpace: 'nowrap' }}>
-                    <button type="button" style={s.btn} disabled={!cell.announcementId || busy.includes(`parse:${cell.announcementId}`)} onClick={() => void parseRow(cell)}>
-                      {busy.includes(`parse:${cell.announcementId}`) ? '解析中…' : '解析'}
-                    </button>
-                    <button type="button" style={s.btn} disabled={cell.reviewStatus === 'approved' || busy.includes(checkReviewKey(cell)) || busy.includes(`parse:${cell.announcementId}`)} onClick={() => void reviewRow(cell, 'approved')}>审核通过</button>
-                    <button type="button" style={s.btn} disabled={cell.reviewStatus === 'flagged' || busy.includes(checkReviewKey(cell)) || busy.includes(`parse:${cell.announcementId}`)} onClick={() => void reviewRow(cell, 'flagged')}>标记异常</button>
-                    <button type="button" style={s.btn} disabled={cell.progressStatus === 'resolved' || busy.includes(checkReviewKey(cell))} onClick={() => void progressRow(cell, 'resolved')}>已处理</button>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, whiteSpace: 'nowrap', position: 'relative' }}>
+                    <button type="button" style={textAct} disabled={cell.reviewStatus === 'approved' || busy.includes(checkReviewKey(cell)) || busy.includes(`parse:${cell.announcementId}`)} onClick={() => void reviewRow(cell, 'approved')}>审核通过</button>
+                    <button type="button" style={textAct} disabled={cell.reviewStatus === 'flagged' || busy.includes(checkReviewKey(cell)) || busy.includes(`parse:${cell.announcementId}`)} onClick={() => void reviewRow(cell, 'flagged')}>标记异常</button>
+                    <button type="button" style={textAct} aria-label={`${cell.code} ${cell.metricLabel}更多操作`} aria-expanded={opsKey === checkReviewKey(cell)} onClick={() => setOpsKey((current) => current === checkReviewKey(cell) ? null : checkReviewKey(cell))}>⋯</button>
+                    {opsKey === checkReviewKey(cell) ? (
+                      <div role="menu" style={opsMenu}>
+                        <button type="button" style={menuItem} disabled={!cell.announcementId || busy.includes(`parse:${cell.announcementId}`)} onClick={() => { setOpsKey(null); void parseRow(cell); }}>{busy.includes(`parse:${cell.announcementId}`) ? '解析中…' : '解析'}</button>
+                        <button type="button" style={menuItem} disabled={cell.progressStatus === 'in_progress' || busy.includes(checkReviewKey(cell))} onClick={() => { setOpsKey(null); void progressRow(cell, 'in_progress'); }}>处理中</button>
+                        <button type="button" style={menuItem} disabled={cell.progressStatus === 'resolved' || busy.includes(checkReviewKey(cell))} onClick={() => { setOpsKey(null); void progressRow(cell, 'resolved'); }}>已处理</button>
+                        <button type="button" style={{ ...menuItem, color: '#b91c1c' }} disabled={!cell.announcementId} onClick={() => { setOpsKey(null); setDiscardPassword(''); setDiscardPasswordError(''); setDiscardTarget(cell); }}>删除</button>
+                      </div>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -350,6 +388,20 @@ export function CheckAdminClient() {
       <p style={{ ...s.muted, marginTop: 14 }}>
         第三方≠官方真值集；已做单位容错（元/千元/万元等折算 · 约 1% 相对容差）。Q3 库内若为单季，营收/净利/EPS 会加同公司 H1 折成累计再比（ROE 不折算）。审核通过仅清除待审差异，不改原始差异或处理进度；已处理不等于数据正确。可用处理状态切到处理中、已处理或未处理（重新打开）。数据实质变化后重新打开并使旧审核失效，旧处理说明仍保留；无变化重复解析不重开。解析仅作用于所点行对应报告，可完成后再次解析。本页仅作核对证据，不宣称准确率。
       </p>
+      {discardTarget ? (
+        <div style={{ position: 'fixed', inset: 0, background: '#12213f66', display: 'grid', placeItems: 'center', zIndex: 40 }} onClick={() => setDiscardTarget(null)}>
+          <div role="dialog" aria-label="确认删除" style={{ width: 320, background: '#fff', borderRadius: 12, padding: 16 }} onClick={(event) => event.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>确认删除？</h3>
+            <p style={{ ...s.muted, margin: '0 0 10px' }}>{discardTarget.code} {discardTarget.name || ''} · {discardTarget.period}</p>
+            <input type="password" autoComplete="off" placeholder="删除密码" value={discardPassword} onChange={(event) => { setDiscardPassword(event.target.value); setDiscardPasswordError(''); }} style={{ ...s.input, width: '100%', boxSizing: 'border-box' }} />
+            {discardPasswordError ? <p style={{ ...s.err, margin: '8px 0 0' }}>{discardPasswordError}</p> : null}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+              <button type="button" style={textAct} onClick={() => setDiscardTarget(null)}>取消</button>
+              <button type="button" style={{ ...textAct, color: '#b91c1c' }} onClick={() => void confirmDiscard()}>删除</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AdminMain>
   );
 }
@@ -363,5 +415,40 @@ const periodLinkStyle: CSSProperties = {
   color: '#1f4fad',
   textDecoration: 'none',
   fontWeight: 600,
+};
+
+const textAct: CSSProperties = {
+  border: 0,
+  background: 'transparent',
+  padding: '0 6px',
+  fontSize: 12,
+  fontWeight: 600,
+  color: '#1f4fad',
+  cursor: 'pointer',
+};
+
+const menuItem: CSSProperties = {
+  border: 0,
+  background: 'transparent',
+  textAlign: 'left',
+  padding: '6px 10px',
+  fontSize: 12,
+  color: '#31465f',
+  cursor: 'pointer',
+};
+
+const opsMenu: CSSProperties = {
+  position: 'absolute',
+  right: 0,
+  top: '100%',
+  zIndex: 8,
+  minWidth: 96,
+  display: 'flex',
+  flexDirection: 'column',
+  background: '#fff',
+  border: '1px solid #e6ebf2',
+  borderRadius: 8,
+  boxShadow: '0 8px 20px #13213b14',
+  padding: 4,
 };
 

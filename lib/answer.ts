@@ -73,7 +73,7 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
   const skillAppend = spoken || opts.readingLevel === 'professional' ? '' : industrySkillSystemAppend(industry);
   const levelLine = opts.readingLevel ? readingLevelInstruction(opts.readingLevel, spoken) : '';
   const memoryLine = opts.readerMemory
-    ? `读者习惯只用于调整表述，不得当作财报事实，也不得据此编造数字：${opts.readerMemory}`
+    ? `回答前先遵守这些读者记忆。它们只调整关注点和表述，不得当作财报事实，也不得据此编造数字：${opts.readerMemory}`
     : '';
   const continuity = (
     '历史对话只用于理解指代（如「它」「同比」），不是事实依据；以前的回答可能不准确。'

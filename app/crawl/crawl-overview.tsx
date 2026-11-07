@@ -2357,23 +2357,6 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
             <option value="">全部期次</option>
             {periodOptions.map((token) => <option key={token} value={token}>{token}</option>)}
           </select>
-          <div className="co-toolbar-right">
-            <button
-              type="button"
-              className="co-table-refresh"
-              aria-label="刷新列表"
-              title="刷新"
-              disabled={tableRefreshing}
-              onClick={() => void refreshTable()}
-            >
-              <Icon name="refresh" size={14} className={tableRefreshing ? 'co-spin' : undefined} />
-            </button>
-            <span className="co-sort-hint" aria-live="polite">
-              {loading ? '…' : `${filings.length} 份`}
-            </span>
-          </div>
-        </div>
-        <div className="co-filterbar">
           <div className="co-filter-tabs" role="tablist" aria-label="快速筛选">
             <button type="button" role="tab" className={`co-filter-tab${quickFilter === 'all' ? ' on' : ''}`} aria-selected={quickFilter === 'all'} onClick={() => setQuickFilter('all')}>全部</button>
             <button type="button" role="tab" className={`co-filter-tab${filterCounts.failed > 0 ? ' bad' : ''}${quickFilter === 'failed' ? ' on' : ''}`} aria-selected={quickFilter === 'failed'} onClick={() => setQuickFilter(quickFilter === 'failed' ? 'all' : 'failed')}>
@@ -2391,6 +2374,21 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
             <button type="button" className="co-batch-run" disabled={batchBusy || !selectedFilings.length} onClick={() => runBatchCrawl()}>批量抓取</button>
             <button type="button" className="co-batch-run" disabled={batchBusy || !selectedFilings.length} onClick={() => runBatchParse()}>批量解析</button>
             <button type="button" className="co-batch-run" disabled={batchBusy || !selectedFilings.length} onClick={() => runBatchVerdict()}>批量智析</button>
+          </div>
+          <div className="co-toolbar-right">
+            <button
+              type="button"
+              className="co-table-refresh"
+              aria-label="刷新列表"
+              title="刷新"
+              disabled={tableRefreshing}
+              onClick={() => void refreshTable()}
+            >
+              <Icon name="refresh" size={14} className={tableRefreshing ? 'co-spin' : undefined} />
+            </button>
+            <span className="co-sort-hint" aria-live="polite">
+              {loading ? '…' : `${filings.length} 份`}
+            </span>
           </div>
         </div>
 

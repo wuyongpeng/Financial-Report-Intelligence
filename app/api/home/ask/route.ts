@@ -1,5 +1,5 @@
 import { apiError, ApiError, readObject, requiredText } from '@/lib/api';
-import { sanitizeModelId } from '@/lib/reader-prefs';
+import { sanitizeModelId, sanitizeReadingLevel } from '@/lib/reader-prefs';
 import { generateHomeAskAnswer } from '@/lib/home-ask';
 import type { HomeRosterRow } from '@/lib/home-roster-snapshot';
 
@@ -59,6 +59,8 @@ export async function POST(request: Request) {
       mode,
       spoken: body.spoken === true,
       modelId: sanitizeModelId(body.modelId),
+      readingLevel: sanitizeReadingLevel(body.readingLevel),
+      readerMemory: typeof body.readerMemory === 'string' ? body.readerMemory.replace(/\s+/g, ' ').trim().slice(0, 400) : undefined,
     });
     return Response.json(
       { answer: result.answer, openCode: result.openCode ?? null, mode: result.mode },

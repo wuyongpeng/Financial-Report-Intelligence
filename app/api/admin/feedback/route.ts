@@ -1,4 +1,4 @@
-import { apiError } from '@/lib/api';
+import { apiError, ApiError, readObject } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
 
@@ -22,9 +22,10 @@ export async function GET(request: Request) {
         page: string | null;
         url: string | null;
         user_agent: string | null;
+        handling_status: string | null;
         created_at: string;
       }>>`
-        SELECT id, category, message, contact, page, url, user_agent, created_at
+        SELECT id, category, message, contact, page, url, user_agent, handling_status, created_at
         FROM user_feedback
         WHERE id < ${beforeId}
         ORDER BY id DESC
@@ -38,14 +39,36 @@ export async function GET(request: Request) {
         page: string | null;
         url: string | null;
         user_agent: string | null;
+        handling_status: string | null;
         created_at: string;
       }>>`
-        SELECT id, category, message, contact, page, url, user_agent, created_at
+        SELECT id, category, message, contact, page, url, user_agent, handling_status, created_at
         FROM user_feedback
         ORDER BY id DESC
         LIMIT ${limit}
       `;
     return Response.json({ items: rows }, { headers: { 'cache-control': 'no-store' } });
+  } catch (error) {
+    return apiError(error);
+  }
+}
+
+const HANDLING = new Set(['open', 'in_progress', 'resolved']);
+
+export async function PATCH(request: Request) {
+  try {
+    await ensureBackendSchema();
+    const body = await readObject(request);
+    const id = Number(body.id);
+    const status = typeof body.status === 'string' ? body.status : '';
+    if (!Number.isInteger(id) || id <= 0 || !HANDLING.has(status)) {
+      throw new ApiError(400, '状态无效');
+    }
+    const rows = await getDb()`
+      UPDATE user_feedback SET handling_status=${status} WHERE id=${id} RETURNING id
+    `;
+    if (!rows.length) throw new ApiError(404, '反馈不存在');
+    return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     return apiError(error);
   }

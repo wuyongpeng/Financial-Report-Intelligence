@@ -4,7 +4,7 @@ import { parseChatRequest } from '../contracts/chat';
 import { ApiError } from '../lib/api';
 import { modelMessages } from '../lib/answer';
 import { selectPinnedProviders, type LlmProvider } from '../lib/llm-providers';
-import { applyReaderActivity, describeReaderMemory } from '../lib/reader-memory';
+import { applyReaderActivity, explicitMemoryText, memoryPrompt } from '../lib/reader-memory';
 import {
   normalizeReaderPrefs,
   readingLevelInstruction,
@@ -59,16 +59,15 @@ test('reading levels change the prompt without dropping the citation rule', () =
   assert.doesNotMatch(untouched[0].content, /解读档位/);
 });
 
-test('reader memory records companies and question habits without inventing a portrait', () => {
-  const seen = applyReaderActivity({ companies: [], topics: [] }, { code: '600519', name: '贵州茅台', question: '营收为什么下降' });
-  const again = applyReaderActivity(seen, { code: '600519', name: '贵州茅台', question: '和去年同比' });
-  const view = describeReaderMemory(again, '入门');
-  assert.equal(again.companies[0]?.count, 2);
-  assert.match(view.style, /变化原因/);
-  assert.match(view.style, /对比/);
-  assert.match(view.companies, /贵州茅台/);
-  assert.match(view.portrait, /入门读者/);
-  assert.equal(describeReaderMemory({ companies: [], topics: [] }, '入门').brief, '');
+test('reader memory keeps concrete notes and drops them from the prompt when empty', () => {
+  const seen = applyReaderActivity({ notes: [] }, { code: '600519', name: '贵州茅台', question: '营收为什么下降', at: '2026-01-01T00:00:00.000Z' });
+  const saved = applyReaderActivity(seen, { question: '记住我以后要简短回答', at: '2026-01-02T00:00:00.000Z' });
+  assert.ok(saved.notes.some((note) => note.text === '关注贵州茅台' && note.source === 'observed'));
+  assert.ok(saved.notes.some((note) => note.text === '提问常围绕变化原因'));
+  assert.ok(saved.notes.some((note) => note.source === 'saved' && note.text.includes('简短')));
+  assert.match(memoryPrompt(saved), /关注贵州茅台/);
+  assert.equal(memoryPrompt({ notes: [] }), '');
+  assert.equal(explicitMemoryText('营收为什么下降'), null);
 });
 
 test('a pinned model is used alone; an unknown id keeps failover', () => {

@@ -1151,6 +1151,7 @@ export default function ReportHome() {
           rows,
           history: readerHistory(getHomeChatTurns().slice(0, -1)),
           ...(readerChatFields().modelId ? { modelId: readerChatFields().modelId } : {}),
+          readingLevel: readerChatFields().readingLevel,
           ...(readerChatFields().readerMemory ? { readerMemory: readerChatFields().readerMemory } : {}),
         }),
       });
@@ -1212,6 +1213,7 @@ export default function ReportHome() {
           history: readerHistory(getHomeChatTurns().slice(0, -1)),
           mode: 'chitchat',
           ...(readerChatFields().modelId ? { modelId: readerChatFields().modelId } : {}),
+          readingLevel: readerChatFields().readingLevel,
           ...(readerChatFields().readerMemory ? { readerMemory: readerChatFields().readerMemory } : {}),
           spoken: Boolean(opts?.fromVoice || voice.active),
         }),

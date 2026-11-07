@@ -4,6 +4,7 @@
  */
 import { fetchChatCompletionsFrom } from './llm-gate';
 import { llmConfigured, parseLlmProviders, selectPinnedProviders } from './llm-providers';
+import { readingLevelInstruction, type ReadingLevel } from './reader-prefs';
 import { orderVerdictProviders } from './report-verdict-llm';
 import {
   extractOpenCodeFromAnswer,
@@ -84,8 +85,14 @@ export async function generateHomeAskAnswer(input: {
   /** Voice reply: one short spoken sentence. Typed home chat may use two. */
   spoken?: boolean;
   modelId?: string;
+  readingLevel?: ReadingLevel;
+  readerMemory?: string;
 }): Promise<HomeRosterAnswer> {
   const mode: HomeAskMode = input.mode === 'chitchat' ? 'chitchat' : 'roster';
+  const style = [
+    input.readingLevel ? readingLevelInstruction(input.readingLevel, Boolean(input.spoken)) : '',
+    input.readerMemory ? `回答前先遵守这些读者记忆，不得据此编造数字：${input.readerMemory}` : '',
+  ].filter(Boolean).join('\n');
 
   if (mode === 'chitchat') {
     const prompt = homeChitchatUserPrompt({
@@ -94,7 +101,7 @@ export async function generateHomeAskAnswer(input: {
     });
     const spoken = Boolean(input.spoken);
     const llm = await generateHomeAskLlm({
-      system: homeChitchatSystemPrompt(spoken),
+      system: `${homeChitchatSystemPrompt(spoken)}${style ? `\n${style}` : ''}`,
       prompt,
       maxTokens: 480,
       clipMax: spoken ? 80 : 160,
@@ -110,7 +117,7 @@ export async function generateHomeAskAnswer(input: {
     history: input.history,
   });
   const llm = await generateHomeAskLlm({
-    system: homeAskSystemPrompt(),
+    system: `${homeAskSystemPrompt()}${style ? `\n${style}` : ''}`,
     prompt,
     maxTokens: 220,
     clipMax: 280,

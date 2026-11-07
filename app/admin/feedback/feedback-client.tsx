@@ -18,7 +18,14 @@ type FeedbackItem = {
   page: string | null;
   url: string | null;
   user_agent: string | null;
+  handling_status: string | null;
   created_at: string;
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  open: '未处理',
+  in_progress: '处理中',
+  resolved: '已处理',
 };
 
 function fmtTime(iso: string) {
@@ -81,6 +88,23 @@ export function FeedbackAdminClient() {
 
   const lastId = items.length ? items[items.length - 1].id : null;
 
+  async function setStatus(id: number, status: 'in_progress' | 'resolved' | 'open') {
+    setError('');
+    try {
+      const res = await fetch('/api/admin/feedback', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id, status }),
+      });
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(body.error || '状态没有保存');
+      setItems((prev) => prev.map((item) => item.id === id ? { ...item, handling_status: status } : item));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '状态没有保存');
+    }
+  }
+
   return (
     <AdminMain>
       <AdminHeader
@@ -109,14 +133,15 @@ export function FeedbackAdminClient() {
               <th style={s.th}>反馈</th>
               <th style={s.th}>联系方式</th>
               <th style={s.th}>页面</th>
+              <th style={s.th}>状态</th>
             </tr>
           </thead>
           <tbody>
             {!loading && items.length === 0 ? (
-              <tr><td colSpan={5} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
+              <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
             ) : null}
             {!loading && items.length > 0 && filteredItems.length === 0 ? (
-              <tr><td colSpan={5} style={{ ...s.td, color: '#8b97a9' }}>暂无匹配</td></tr>
+              <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无匹配</td></tr>
             ) : null}
             {filteredItems.map((item) => (
               <tr key={item.id}>
@@ -125,6 +150,17 @@ export function FeedbackAdminClient() {
                 <td style={{ ...s.td, maxWidth: 420, whiteSpace: 'pre-wrap' }}>{item.message}</td>
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.contact || '—'}</td>
                 <td style={s.td} title={item.url ?? undefined}>{item.page || item.url || '—'}</td>
+                <td style={{ ...s.td, whiteSpace: 'nowrap' }}>
+                  <span style={{
+                    fontWeight: 650,
+                    color: item.handling_status === 'resolved' ? '#15803d' : item.handling_status === 'in_progress' ? '#b45309' : '#6b7a8d',
+                  }}
+                  >
+                    {STATUS_LABEL[item.handling_status || 'open'] || '未处理'}
+                  </span>
+                  <button type="button" style={textAct} disabled={item.handling_status === 'in_progress'} onClick={() => void setStatus(item.id, 'in_progress')}>处理中</button>
+                  <button type="button" style={textAct} disabled={item.handling_status === 'resolved'} onClick={() => void setStatus(item.id, 'resolved')}>已处理</button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -148,3 +184,13 @@ export function FeedbackAdminClient() {
     </AdminMain>
   );
 }
+
+const textAct = {
+  border: 0,
+  background: 'transparent',
+  padding: '0 6px',
+  fontSize: 12,
+  fontWeight: 600,
+  color: '#1f4fad',
+  cursor: 'pointer',
+} as const;

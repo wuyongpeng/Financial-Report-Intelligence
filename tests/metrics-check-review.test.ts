@@ -103,9 +103,9 @@ test('server persistence is independent and snapshot-validated; UI actions use e
   assert.match(route, /isolation level repeatable read/);
   assert.doesNotMatch(route, /metrics_overview|password|requireAdmin/);
   assert.match(client, /isPendingCheck\(cell\)/);
-  const actions = client.slice(client.indexOf("<div style={{ display: 'flex', gap: 6, whiteSpace: 'nowrap' }}>"));
-  assert.ok(actions.indexOf('parseRow(cell)') < actions.indexOf("reviewRow(cell, 'approved')"));
+  const actions = client.slice(client.indexOf("display: 'inline-flex', alignItems: 'center', gap: 2"));
   assert.ok(actions.indexOf("reviewRow(cell, 'approved')") < actions.indexOf("reviewRow(cell, 'flagged')"));
+  assert.ok(actions.indexOf("reviewRow(cell, 'flagged')") < actions.indexOf('parseRow(cell)'));
   assert.match(client, /fetch\('\/api\/crawl\/trigger'/);
   assert.match(client, /announcementIds: \[id\]/);
   assert.match(client, /if \(!id \|\| !lock\(`parse:\$\{id\}`\)\) return/);
@@ -172,7 +172,7 @@ test('progress input validates action/state/short note; append-only events prese
 test('feedback admin hides browser column only and keeps feedback data API/storage unchanged', () => {
   const client = readFileSync(new URL('../app/admin/feedback/feedback-client.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(client, />浏览器<|title=\{item.user_agent/);
-  assert.match(client, /colSpan=\{5\}/);
+  assert.match(client, /colSpan=\{6\}/);
   assert.match(client, /\{item.message\}/);
   assert.match(client, /\{item.contact \|\| '—'\}/);
   const api = readFileSync(new URL('../app/api/admin/feedback/route.ts', import.meta.url), 'utf8');
