@@ -84,6 +84,7 @@ import {
 } from '@/lib/chat-surface';
 import {
   homeRosterSourcePreference,
+  isHomeDiscoveryQuestion,
   isHomeRosterQuestion,
 } from '@/lib/home-roster-intent';
 import { answerHomeRosterLocally } from '@/lib/home-roster-answer';
@@ -1486,6 +1487,12 @@ export default function ReportHome() {
       const listedCandidates = listedAll.length ? listedAll : resolveListedCompanies(parsed.companyQuery || raw);
       if (!listedCandidates.length) {
         // 像在问公司但名录 0：滚空态，不装懂。无公司实体闲聊 → 受控短答 AI。
+        // No named issuer. Industry / set questions still go to the list AI;
+        // only a missing company's own numbers stay on the empty state.
+        if (isHomeDiscoveryQuestion(raw) || (parsed.hasQuestionIntent && !/营收|净利润|同比|财报|年报|季报|业绩|增长原因|毛利率|现金流/.test(raw) && /公司|企业|行业|产业|赛道|板块|股票|名单/.test(raw))) {
+          await runHomeRosterAsk(raw, { fromVoice });
+          return;
+        }
         if (looksLikeUnresolvedCompanyAsk(raw)) {
           document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
           return;

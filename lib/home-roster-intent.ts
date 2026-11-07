@@ -21,23 +21,35 @@ const OPEN_RE =
 const HOME_SCOPE_RE =
   /首页|主页|监控池|列表里|卡片上|当前展示|现在展示/;
 
-/** 「A股有哪些和造汽车相关的公司」— theme scan, not one named issuer. */
-const INDUSTRY_ASK_RE =
-  /有哪些|哪些公司|什么公司|哪几家|哪家|相关的公司|有关的公司|涉及.{0,8}公司/;
-const INDUSTRY_CUE_RE =
-  /行业|产业|赛道|板块|概念|相关|造车|汽车|新能源|半导体|白酒|银行|医药|光伏|锂电|家电|军工|券商|保险|消费|制造|a股|A股/;
+const DISCOVERY_LIST_RE =
+  /有哪些|哪些公司|什么公司|哪几家|哪家|有谁|有什么|相关的公司|有关的公司|同行|同业|做.{0,10}的|从事|涉及.{0,8}公司|找.{0,6}公司/;
+const DISCOVERY_SET_RE =
+  /公司|企业|个股|股票|名单|行业|产业|产业链|赛道|板块|概念|a股|A股/;
+const ISSUER_FACT_RE =
+  /营收|净利润|同比|财报|年报|季报|业绩|增长原因|下降原因|毛利率|现金流/;
 
 /**
- * Industry / theme discovery on the home list.
- * 「有哪些公司」alone stays a plain list; this catches 「和造汽车相关的公司」.
+ * Set / theme questions that should use the homepage list, not a single company.
+ * 「有哪些公司」alone stays a plain list. A named issuer's numbers stay off this path.
  */
-export function isHomeIndustryRosterQuestion(text: string): boolean {
+export function isHomeDiscoveryQuestion(text: string): boolean {
   const q = normalizeVoiceText(text);
-  if (!q || q.length > 40) return false;
-  if (!INDUSTRY_ASK_RE.test(q) || !INDUSTRY_CUE_RE.test(q)) return false;
-  // A single issuer's finance question must not become a roster scan.
-  if (/营收|净利润|同比|财报|年报|季报|业绩|增长原因/.test(q) && !/有哪些|哪些公司|相关的公司/.test(q)) return false;
-  return true;
+  if (!q || q.length > 48) return false;
+  if (DISCOVERY_LIST_RE.test(q) && DISCOVERY_SET_RE.test(q)) {
+    if (ISSUER_FACT_RE.test(q) && !/哪些公司|什么公司|相关的公司|同行|同业|行业|产业|赛道|板块/.test(q)) return false;
+    return true;
+  }
+  if (/行业|产业|产业链|赛道|板块/.test(q) && /怎么样|如何|怎样|介绍|说说|讲讲|有哪些|哪些|情况/.test(q)) {
+    return !ISSUER_FACT_RE.test(q) || /行业|产业|赛道|板块/.test(q);
+  }
+  if (/有没有|有谁/.test(q) && /做|造|生产|从事|属于/.test(q)) return true;
+  if (/比较|对比|相比/.test(q) && /和|跟|与/.test(q) && !ISSUER_FACT_RE.test(q)) return true;
+  return false;
+}
+
+/** @deprecated alias — theme scans are discovery questions. */
+export function isHomeIndustryRosterQuestion(text: string): boolean {
+  return isHomeDiscoveryQuestion(text);
 }
 
 export function isHomeRosterListQuestion(text: string): boolean {
@@ -82,7 +94,7 @@ export function isHomeRosterQuestion(text: string): boolean {
   const q = normalizeVoiceText(text);
   if (!q) return false;
   if (isHomeRosterListQuestion(q)) return true;
-  if (isHomeIndustryRosterQuestion(q)) return true;
+  if (isHomeDiscoveryQuestion(q)) return true;
   if (isHomeRosterPresenceQuestion(q)) return true;
   if (isHomeRosterWorthQuestion(q)) return true;
   if (parseHomeRosterOpenQuery(q)) return true;
@@ -95,7 +107,9 @@ export function homeRosterSourcePreference(
   text: string,
 ): 'pool' | 'filtered' | 'visible' {
   const q = normalizeVoiceText(text);
-  if (/监控池|全部公司|都收入|收入了哪些/.test(q) || isHomeIndustryRosterQuestion(q)) return 'pool';
+  if (/监控池|全部公司|都收入|收入了哪些/.test(q)) return 'pool';
+  // Theme scans need the whole pool. A plain 「首页有哪些公司」stays on what's on screen.
+  if (isHomeDiscoveryQuestion(q) && !isHomeRosterListQuestion(q)) return 'pool';
   if (/筛选|当前列表|列表里/.test(q)) return 'filtered';
   return 'visible';
 }

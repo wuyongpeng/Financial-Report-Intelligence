@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   homeRosterSourcePreference,
+  isHomeDiscoveryQuestion,
   isHomeIndustryRosterQuestion,
   isHomeRosterQuestion,
   isHomeRosterListQuestion,
@@ -87,6 +88,14 @@ test('isHomeRosterQuestion catches list / presence / worth / open', () => {
   assert.equal(isHomeRosterQuestion('有哪些和白酒相关的公司'), true);
   assert.equal(isHomeIndustryRosterQuestion('贵州茅台营收多少'), false);
   assert.equal(homeRosterSourcePreference('有哪些和造汽车相关的公司'), 'pool');
+  assert.equal(isHomeDiscoveryQuestion('科技公司有哪些'), true);
+  assert.equal(isHomeDiscoveryQuestion('做机器人的公司'), true);
+  assert.equal(isHomeDiscoveryQuestion('有没有做芯片的'), true);
+  assert.equal(isHomeDiscoveryQuestion('这个行业怎么样'), true);
+  assert.equal(isHomeDiscoveryQuestion('比较家电和白酒'), true);
+  assert.equal(isHomeRosterQuestion('贵州茅台营收有哪些原因'), false);
+  assert.equal(isHomeDiscoveryQuestion('比较茅台和五粮液的营收'), false);
+  assert.equal(homeRosterSourcePreference('做机器人的公司'), 'pool');
 });
 
 test('homeRosterSourcePreference picks pool vs visible', () => {
