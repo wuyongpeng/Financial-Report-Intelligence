@@ -19,7 +19,7 @@ export type HomeOverflowMenuProps = {
 };
 
 export default function HomeOverflowMenu({
-  showSources = true,
+  showSources = false,
   showCopyLink = false,
   pageLabel,
 }: HomeOverflowMenuProps) {
@@ -173,12 +173,12 @@ export default function HomeOverflowMenu({
             <Link
               role="menuitem"
               className="hom-item"
-              href="/sources"
+              href="/admin/crawl"
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setOpen(false)}
             >
-              数据采集
+              数据运营
             </Link>
           ) : null}
           <button

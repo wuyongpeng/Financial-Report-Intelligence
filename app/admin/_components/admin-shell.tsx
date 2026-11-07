@@ -3,13 +3,34 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 
-const NAV = [
-  { href: '/admin/metrics', label: '解析总览' },
-  { href: '/admin/check', label: '指标核对' },
-  { href: '/admin/audit', label: '访问审计' },
-  { href: '/admin/survey', label: '用户调研' },
-  { href: '/admin/feedback', label: '反馈收集' },
+/** Unified ops console: data loop (crawl/parse) + user loop (audit/survey/feedback). */
+export const ADMIN_NAV_GROUPS = [
+  {
+    id: 'data',
+    label: '数据侧',
+    items: [
+      { href: '/admin/crawl', label: '数据采集' },
+      { href: '/admin/metrics', label: '解析总览' },
+      { href: '/admin/check', label: '指标核对' },
+    ],
+  },
+  {
+    id: 'user',
+    label: '用户侧',
+    items: [
+      { href: '/admin/audit', label: '访问审计' },
+      { href: '/admin/survey', label: '用户调研' },
+      { href: '/admin/feedback', label: '反馈收集' },
+    ],
+  },
 ] as const;
+
+/** Pages that must show the admin password gate. Crawl/metrics/check stay open for demo. */
+export const ADMIN_SENSITIVE_HREFS = new Set<string>([
+  '/admin/audit',
+  '/admin/survey',
+  '/admin/feedback',
+]);
 
 export function useAdminSession() {
   const [ready, setReady] = useState(false);
@@ -128,38 +149,49 @@ export function AdminHeader({
   subtitle,
   activeHref,
   onLogout,
+  showLogout = true,
   children,
 }: {
   title: string;
   subtitle?: string;
   activeHref: string;
-  onLogout: () => void;
+  onLogout?: () => void;
+  /** Open pages (crawl/metrics/check) hide logout until an admin session exists. */
+  showLogout?: boolean;
   children?: ReactNode;
 }) {
   return (
     <header style={headSticky} aria-label={title}>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <h1 style={brand}>Eva 运营管理</h1>
+        <h1 style={brand}>Eva 数据运营</h1>
         {subtitle ? <p style={{ ...muted, margin: '4px 0 0' }}>{subtitle}</p> : null}
-        <nav style={nav} aria-label="管理页">
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              style={{
-                ...navLink,
-                ...(item.href === activeHref ? navLinkActive : null),
-              }}
-            >
-              {item.label}
-            </Link>
+        <nav style={nav} aria-label="数据运营">
+          {ADMIN_NAV_GROUPS.map((group, gi) => (
+            <span key={group.id} style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              {gi > 0 ? <span style={navDivider} aria-hidden="true" /> : null}
+              <span style={navGroupLabel}>{group.label}</span>
+              {group.items.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  style={{
+                    ...navLink,
+                    ...(item.href === activeHref ? navLinkActive : null),
+                  }}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </span>
           ))}
         </nav>
         {children}
       </div>
       <div style={{ display: 'flex', flexShrink: 0, gap: 8, alignItems: 'center' }}>
         <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
-        <button type="button" style={btnGhost} onClick={onLogout}>退出</button>
+        {showLogout && onLogout ? (
+          <button type="button" style={btnGhost} onClick={onLogout}>退出</button>
+        ) : null}
       </div>
     </header>
   );
@@ -273,7 +305,13 @@ const td: CSSProperties = {
 const brand: CSSProperties = {
   margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: '0.01em', color: '#203047', lineHeight: 1.25,
 };
-const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 };
+const nav: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' };
+const navGroupLabel: CSSProperties = {
+  fontSize: 11, color: '#8b97a9', fontWeight: 600, letterSpacing: '0.04em', marginRight: 2,
+};
+const navDivider: CSSProperties = {
+  width: 1, height: 18, background: '#d5dde8', margin: '0 4px',
+};
 const navLink: CSSProperties = {
   fontSize: 12, color: '#5b6d86', textDecoration: 'none',
   padding: '5px 10px', borderRadius: 999, border: '1px solid #d5dde8', background: '#fff',

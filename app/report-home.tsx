@@ -167,7 +167,7 @@ function recentPeriodsLabel(item: CrawlCompanyCoverage) {
 }
 
 function shortParseError(err: string | null | undefined) {
-  if (!err) return '解析未完成，可在数据采集页重试';
+  if (!err) return '解析未完成，可在数据运营·采集页重试';
   const one = err.replace(/\s+/g, ' ').trim();
   return one.length > 72 ? `${one.slice(0, 72)}…` : one;
 }
@@ -1430,7 +1430,7 @@ export default function ReportHome() {
         paused?: boolean;
       };
       if (!response.ok) {
-        setWaitToast(payload.error ?? '采集触发失败，请稍后在「数据采集」重试');
+        setWaitToast(payload.error ?? '采集触发失败，请稍后在「数据运营」重试');
         closeBlockingDialog({ resumeListen: true });
         return;
       }
@@ -1451,7 +1451,7 @@ export default function ReportHome() {
     e?.preventDefault();
     e?.stopPropagation();
     if (crawlingCodes.includes(item.code)) {
-      router.push(`/sources?focus=${encodeURIComponent(item.code)}`);
+      router.push(`/admin/crawl?focus=${encodeURIComponent(item.code)}`);
       return;
     }
     setCrawlingCodes((prev) => (prev.includes(item.code) ? prev : [...prev, item.code]));
@@ -1474,7 +1474,7 @@ export default function ReportHome() {
       setWaitToast(`网络异常：${String(err)}`);
       return;
     }
-    router.push(`/sources?focus=${encodeURIComponent(item.code)}`);
+    router.push(`/admin/crawl?focus=${encodeURIComponent(item.code)}`);
   }
 
   /** Empty-state light entry: report current search for admin roster backfill (no blocking dialog). */
@@ -1945,9 +1945,9 @@ export default function ReportHome() {
                 >
                   {parseFailed ? (
                     <Link
-                      href={`/sources?focus=${item.code}`}
+                      href={`/admin/crawl?focus=${item.code}`}
                       className="rh-connected-badge rh-connected-badge-failed"
-                      title="打开数据采集页处理解析失败"
+                      title="打开数据运营·采集处理解析失败"
                       onClick={(e) => e.stopPropagation()}
                     >
                       解析失败

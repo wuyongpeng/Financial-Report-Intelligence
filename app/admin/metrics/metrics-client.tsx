@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import {
   AdminHeader,
   AdminHelpTip,
-  AdminLoginForm,
   AdminMain,
   adminStyles as s,
   useAdminSession,
@@ -109,7 +108,7 @@ export function MetricsAdminClient() {
       });
       if (res.status === 401) {
         session.setAdmin(false);
-        setError('管理员登录已失效，请重新登录');
+        setError('加载失败：未授权');
         return;
       }
       if (!res.ok) {
@@ -300,8 +299,8 @@ export function MetricsAdminClient() {
   }, []);
 
   useEffect(() => {
-    if (session.admin) void load();
-  }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (session.ready) void load();
+  }, [session.ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(() => {
     if (!payload) return [];
@@ -496,29 +495,39 @@ export function MetricsAdminClient() {
     return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
   }
 
-  if (!session.admin) {
-    return (
-      <AdminLoginForm
-        title="解析总览"
-        hint="需要管理员密码后才能查看四核解析展示效果。"
-        password={session.password}
-        setPassword={session.setPassword}
-        loginError={session.loginError}
-        loggingIn={session.loggingIn}
-        onSubmit={() => { void session.submitLogin(); }}
-      />
-    );
-  }
-
   return (
     <AdminMain>
       <AdminHeader
         title="解析总览"
+        subtitle="四核指标解析效果；确认/标记需管理员"
         activeHref="/admin/metrics"
-        onLogout={() => { void session.logout(); }}
+        showLogout={session.admin}
+        onLogout={session.admin ? () => { void session.logout(); } : undefined}
       >
         {error ? <p style={{ ...s.err, margin: '8px 0 0' }}>{error}</p> : null}
         {actionMsg ? <p style={{ ...s.muted, margin: '8px 0 0', color: '#15803d' }}>{actionMsg}</p> : null}
+        {!session.admin ? (
+          <form
+            style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 8 }}
+            onSubmit={(e) => { e.preventDefault(); void session.submitLogin(); }}
+          >
+            <span style={{ ...s.muted, margin: 0 }}>写操作需管理员</span>
+            <input
+              type="password"
+              name="password"
+              autoComplete="current-password"
+              placeholder="管理员密码"
+              style={{ ...s.input, width: 140 }}
+              value={session.password}
+              disabled={session.loggingIn}
+              onChange={(e) => session.setPassword(e.target.value)}
+            />
+            <button type="submit" style={s.btn} disabled={session.loggingIn}>
+              {session.loggingIn ? '登录中…' : '登录'}
+            </button>
+            {session.loginError ? <span style={s.err}>{session.loginError}</span> : null}
+          </form>
+        ) : null}
       </AdminHeader>
 
       {payload ? (
@@ -630,16 +639,18 @@ export function MetricsAdminClient() {
           </button>
           <button
             type="button"
-            style={{ ...s.btnAck, opacity: batchBusy || rowBusyId ? 0.45 : 1 }}
-            disabled={batchBusy || Boolean(rowBusyId)}
+            style={{ ...s.btnAck, opacity: batchBusy || rowBusyId || !session.admin ? 0.45 : 1 }}
+            disabled={batchBusy || Boolean(rowBusyId) || !session.admin}
+            title={session.admin ? undefined : '需管理员登录'}
             onClick={() => { void batchAck(); }}
           >
             批量审核通过
           </button>
           <button
             type="button"
-            style={{ ...s.btnFlag, opacity: batchBusy || rowBusyId ? 0.45 : 1 }}
-            disabled={batchBusy || Boolean(rowBusyId)}
+            style={{ ...s.btnFlag, opacity: batchBusy || rowBusyId || !session.admin ? 0.45 : 1 }}
+            disabled={batchBusy || Boolean(rowBusyId) || !session.admin}
+            title={session.admin ? undefined : '需管理员登录'}
             onClick={() => { void batchFlag(); }}
           >
             批量标记异常
@@ -783,10 +794,11 @@ export function MetricsAdminClient() {
                           type="button"
                           style={{
                             ...s.btnAck,
-                            opacity: row.announcementId && !busy && !batchBusy ? 1 : 0.45,
-                            cursor: row.announcementId && !busy && !batchBusy ? 'pointer' : 'not-allowed',
+                            opacity: session.admin && row.announcementId && !busy && !batchBusy ? 1 : 0.45,
+                            cursor: session.admin && row.announcementId && !busy && !batchBusy ? 'pointer' : 'not-allowed',
                           }}
-                          disabled={!row.announcementId || busy || batchBusy}
+                          disabled={!session.admin || !row.announcementId || busy || batchBusy}
+                          title={session.admin ? undefined : '需管理员登录'}
                           onClick={() => { void ackRow(row); }}
                         >
                           {busy ? '…' : '审核通过'}
@@ -797,10 +809,11 @@ export function MetricsAdminClient() {
                           type="button"
                           style={{
                             ...s.btnFlag,
-                            opacity: row.announcementId && !busy && !batchBusy ? 1 : 0.45,
-                            cursor: row.announcementId && !busy && !batchBusy ? 'pointer' : 'not-allowed',
+                            opacity: session.admin && row.announcementId && !busy && !batchBusy ? 1 : 0.45,
+                            cursor: session.admin && row.announcementId && !busy && !batchBusy ? 'pointer' : 'not-allowed',
                           }}
-                          disabled={!row.announcementId || busy || batchBusy}
+                          disabled={!session.admin || !row.announcementId || busy || batchBusy}
+                          title={session.admin ? undefined : '需管理员登录'}
                           onClick={() => askFlag(row)}
                         >
                           标记异常
@@ -810,10 +823,11 @@ export function MetricsAdminClient() {
                         type="button"
                         style={{
                           ...s.btnDanger,
-                          opacity: row.announcementId && !busy && !batchBusy ? 1 : 0.45,
-                          cursor: row.announcementId && !busy && !batchBusy ? 'pointer' : 'not-allowed',
+                          opacity: session.admin && row.announcementId && !busy && !batchBusy ? 1 : 0.45,
+                          cursor: session.admin && row.announcementId && !busy && !batchBusy ? 'pointer' : 'not-allowed',
                         }}
-                        disabled={!row.announcementId || busy || batchBusy}
+                        disabled={!session.admin || !row.announcementId || busy || batchBusy}
+                        title={session.admin ? undefined : '需管理员登录'}
                         onClick={() => askDiscard(row)}
                       >
                         删除

@@ -1,4 +1,3 @@
-import { requireAdmin } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import type { HeadlineMetricName } from '@/lib/crawl-display';
@@ -30,9 +29,8 @@ type RawMetricRow = {
   audit_opinion_page: number | null;
 };
 
-export async function GET(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
+/** Open read for demo ops console; mutate routes (ack/flag) still require admin. */
+export async function GET(_request: Request) {
   try {
     await ensureBackendSchema();
     const db = getDb();

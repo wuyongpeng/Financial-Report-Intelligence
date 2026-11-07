@@ -108,7 +108,7 @@ DOWNLOAD_PAUSE_MS=1200 \
 npm run worker
 ```
 
-也可在首页 / `/crawl` 点「触发温和抓取」（`POST /api/crawl/trigger`，每次 backlog 仅下载 1 + 解析 1；`APP_DEMO_ACCESS=true` 或登录会话或 `INTERNAL_INGEST_TOKEN` 可授权）。
+也可在「数据运营 → 数据采集」(`/admin/crawl`，旧 `/crawl` `/sources` 会跳转) 点「触发温和抓取」（`POST /api/crawl/trigger`，每次 backlog 仅下载 1 + 解析 1；`APP_DEMO_ACCESS=true` 或登录会话或 `INTERNAL_INGEST_TOKEN` 可授权）。
 
 ## 本机开发与真实数据验收
 

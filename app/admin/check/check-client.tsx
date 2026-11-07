@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import {
   AdminHeader,
   AdminHelpTip,
-  AdminLoginForm,
   AdminMain,
   adminStyles as s,
   useAdminSession,
@@ -43,7 +42,7 @@ export function CheckAdminClient() {
       const res = await fetch('/api/admin/check', { cache: 'no-store', credentials: 'same-origin' });
       if (res.status === 401) {
         session.setAdmin(false);
-        setError('管理员登录已失效，请重新登录');
+        setError('加载失败：未授权');
         return;
       }
       if (!res.ok) {
@@ -59,8 +58,8 @@ export function CheckAdminClient() {
   }, [session]);
 
   useEffect(() => {
-    if (session.admin) void load();
-  }, [session.admin]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (session.ready) void load();
+  }, [session.ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = useMemo(() => {
     if (!payload) return [];
@@ -77,26 +76,14 @@ export function CheckAdminClient() {
     return <AdminMain><p style={{ color: '#6b7a8d' }}>加载中…</p></AdminMain>;
   }
 
-  if (!session.admin) {
-    return (
-      <AdminLoginForm
-        title="指标核对"
-        hint="需要管理员密码后才能查看第三方对照结果。"
-        password={session.password}
-        setPassword={session.setPassword}
-        loginError={session.loginError}
-        loggingIn={session.loggingIn}
-        onSubmit={() => { void session.submitLogin(); }}
-      />
-    );
-  }
-
   return (
     <AdminMain>
       <AdminHeader
         title="指标核对"
+        subtitle="第三方对照（只读开放）"
         activeHref="/admin/check"
-        onLogout={() => { void session.logout(); }}
+        showLogout={session.admin}
+        onLogout={session.admin ? () => { void session.logout(); } : undefined}
       />
 
       {error ? <p style={s.err}>{error}</p> : null}

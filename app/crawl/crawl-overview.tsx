@@ -591,7 +591,7 @@ function queueDisplayName(item: Pick<QueueItem, 'name' | 'label' | 'period' | 't
 }
 
 
-export default function CrawlOverview() {
+export default function CrawlOverview({ embedded = false }: { embedded?: boolean } = {}) {
   const searchParams = useSearchParams();
   const focusParam = (searchParams.get('focus') ?? '').trim();
   const focusCode = /^\d{6}$/.test(focusParam) ? focusParam : '';
@@ -1930,12 +1930,17 @@ export default function CrawlOverview() {
   });
   const verdictSkippedCount = Math.max(live?.verdictQueue?.skippedCount ?? 0, verdictSkips.length);
 
+  const shellClass = embedded ? 'co-shell co-shell-embedded' : 'app-shell co-shell';
+  const ShellTag = embedded ? 'div' : 'main';
+
   return (
-    <main className="app-shell co-shell">
+    <ShellTag className={shellClass}>
       <section className="co-page">
         <div className="co-title-row">
-          <Link href="/" className="co-back-home" aria-label="返回首页"><Icon name="arrowLeft" size={14} /> 返回首页</Link>
-          <h1>数据源采集</h1>
+          {embedded ? null : (
+            <Link href="/" className="co-back-home" aria-label="返回首页"><Icon name="arrowLeft" size={14} /> 返回首页</Link>
+          )}
+          {embedded ? null : <h1>数据源采集</h1>}
           <span className="co-title-meta">
             {loading ? '加载中' : ''}
           </span>
@@ -2624,6 +2629,6 @@ export default function CrawlOverview() {
           </aside>
         </div>
       ) : null}
-    </main>
+    </ShellTag>
   );
 }

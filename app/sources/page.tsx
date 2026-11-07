@@ -1,10 +1,14 @@
-import SourcesClient from './sources-client';
+import { redirect } from 'next/navigation';
 
-export const metadata = {
-  title: 'Eva - 财报智能分析助手',
-  description: '公告发现管线、抓取覆盖与解析状态总览。',
-};
-
-export default function SourcesPage() {
-  return <SourcesClient />;
+/** Legacy /sources → unified ops console crawl tab (keep ?focus=). */
+export default async function SourcesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const focusRaw = params.focus;
+  const focus = Array.isArray(focusRaw) ? focusRaw[0] : focusRaw;
+  const qs = focus ? `?focus=${encodeURIComponent(focus)}` : '';
+  redirect(`/admin/crawl${qs}`);
 }

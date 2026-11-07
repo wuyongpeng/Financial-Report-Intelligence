@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { requireAdmin } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
@@ -46,9 +45,8 @@ async function loadThirdParty(): Promise<ThirdPartyRow[]> {
   });
 }
 
-export async function GET(request: Request) {
-  const denied = requireAdmin(request);
-  if (denied) return denied;
+/** Open read for demo ops console (third-party cross-check). */
+export async function GET(_request: Request) {
   try {
     await ensureBackendSchema();
     const thirdParty = await loadThirdParty();

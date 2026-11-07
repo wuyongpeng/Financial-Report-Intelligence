@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
-export default function SystemPage() {
-  redirect('/sources');
+export default function LegacyOpsRedirectPage() {
+  redirect('/admin/crawl');
 }
