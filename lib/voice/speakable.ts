@@ -28,7 +28,7 @@ function groupedNumberToSpeech(value: string): string {
 
 /** Pronunciation only; do not write this result into chat, source data or the UI. */
 export function normalizeSpeechPronunciation(raw: string): string {
-  return raw.replace(/(?<![A-Za-z0-9_])eva(?![A-Za-z0-9_])/gi, '伊娃')
+  return raw.replace(/(?<![A-Za-z0-9_])eva(?![A-Za-z0-9_])/gi, 'Eva')
     .replace(/[+−-]?\d[\d,.]*/g, (token, offset: number, source: string) => {
       // A final comma is punctuation, not part of the numeric grouping.
       const number = token.replace(/[,.]+$/, ''); const punctuation = token.slice(number.length);

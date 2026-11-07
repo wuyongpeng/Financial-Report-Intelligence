@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { normalizeSpeechPronunciation, speakableText } from '../lib/voice/speakable';
 
-test('all brand spellings speak 伊娃 without changing the original display copy or other English words', () => {
+test('brand stays English Eva without changing the original display copy or other English words', () => {
   const original = 'Eva，问EVA，eva的回答。evaluate Revaluation EvaX';
-  assert.equal(speakableText(original), '伊娃，问伊娃，伊娃的回答。evaluate Revaluation EvaX');
+  assert.equal(speakableText(original), 'Eva，问Eva，Eva的回答。evaluate Revaluation EvaX');
   assert.ok(original.startsWith('Eva'));
+  assert.ok(!speakableText(original).includes('伊娃'));
+  assert.ok(!speakableText(original).includes('ˈiːvə'));
 });
 
 test('legal grouped financial numbers speak exact Chinese integers and decimal digits', () => {
@@ -25,5 +27,5 @@ test('ordinary punctuation, enumerations, malformed groups, identifiers and ungr
   for (const raw of ['1,2,3', '一,二,三', '1, 234', '12,34,567', '1,234,56', '3835.54亿元', '000001', 'v1,234.5.6', '1,234.56,789', 'ID1,234', 'A,B,C']) {
     assert.equal(normalizeSpeechPronunciation(raw), raw, raw);
   }
-  assert.equal(speakableText('**Eva**：3,835.54亿元【E1】，另有1,234, 5,678。'), '伊娃：三千八百三十五点五四亿元，另有一千二百三十四, 五千六百七十八。');
+  assert.equal(speakableText('**Eva**：3,835.54亿元【E1】，另有1,234, 5,678。'), 'Eva：三千八百三十五点五四亿元，另有一千二百三十四, 五千六百七十八。');
 });
