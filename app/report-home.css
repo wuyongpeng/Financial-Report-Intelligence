@@ -59,9 +59,10 @@
 .rh-search-submit{border:0;border-radius:999px;width:48px;height:48px;min-height:48px;padding:0;display:inline-flex;align-items:center;justify-content:center;line-height:1;flex:none;transition:background .15s,color .15s,transform .12s,box-shadow .15s}
 .rh-search-submit svg,.rh-search-glyph{display:block;width:18px;height:18px}
 .rh-search-submit:disabled{opacity:.45;cursor:not-allowed}
-.rh-search-voice{background:#e8edf5;color:#3064db;box-shadow:none}
+.rh-search-voice{background:#1d4ed8;color:#fff;box-shadow:none}
 .rh-home button.rh-search-cancel{background:#fff;color:#b45309;border:1px solid #f3d7a1;font-size:12px;font-weight:650}
-.rh-search-voice:hover:not(:disabled){background:#dce5f4;color:#2754c0}
+.rh-search-voice:hover:not(:disabled){background:#1e40af;color:#fff}
+.rh-search-voice .rh-search-glyph{width:20px;height:20px}
 .rh-search-send{background:#3064db;color:#fff;box-shadow:0 1px 2px #2754c033}
 .rh-search-send:hover:not(:disabled){background:#2754c0;transform:translateY(-1px);box-shadow:0 4px 10px #2754c033}
 .rh-search-send:active:not(:disabled){transform:translateY(0)}

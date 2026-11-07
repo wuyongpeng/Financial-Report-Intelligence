@@ -3216,12 +3216,12 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 </svg>
               );
               const waveGlyph = (
-                <svg className="cd-composer-glyph" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-                  <rect x="4" y="9" width="2.2" height="6" rx="1.1" fill="currentColor" />
-                  <rect x="8.2" y="6" width="2.2" height="12" rx="1.1" fill="currentColor" />
-                  <rect x="12.4" y="3.5" width="2.2" height="17" rx="1.1" fill="currentColor" />
-                  <rect x="16.6" y="6" width="2.2" height="12" rx="1.1" fill="currentColor" />
-                  <rect x="20.8" y="9" width="2.2" height="6" rx="1.1" fill="currentColor" />
+                <svg className="cd-composer-glyph" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                  <rect x="2.2" y="9" width="2.8" height="6" rx="1.4" fill="currentColor" />
+                  <rect x="6.4" y="5.5" width="2.8" height="13" rx="1.4" fill="currentColor" />
+                  <rect x="10.6" y="2" width="2.8" height="20" rx="1.4" fill="currentColor" />
+                  <rect x="14.8" y="7.5" width="2.8" height="9" rx="1.4" fill="currentColor" />
+                  <rect x="19" y="4.2" width="2.8" height="15.6" rx="1.4" fill="currentColor" />
                 </svg>
               );
               // Grok-like: stop (asking/voice) > send (text/clips) > idle waveform
