@@ -27,11 +27,10 @@ function groupedNumberToSpeech(value: string): string {
 }
 
 /**
- * Spoken form of the standalone brand. Not the lexicon entry "Eva", which
- * Seed TTS reads as the Chinese name 伊娃. The session pronunciation dictionary
- * rewrites this token to English "ee vuh". evaluate, EvaX and EVA-01 stay untouched.
+ * Spoken form of standalone Eva: /ˈiːvə/. No trailing h — "Eevah" and "vuh"
+ * were pronounced with an extra /h/. evaluate, EvaX and EVA-01 stay untouched.
  */
-export const EVA_BRAND_SPEECH = 'Eevah';
+export const EVA_BRAND_SPEECH = 'Eeva';
 
 /** Pronunciation only; do not write this result into chat, source data or the UI. */
 export function normalizeSpeechPronunciation(raw: string): string {
