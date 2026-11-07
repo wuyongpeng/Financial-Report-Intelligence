@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '@/app/voice-float.css';
-import { VoiceActivity, voiceActivityState } from '@/components/voice-activity';
+import { VoiceActivity, VoiceActivityStatus, voiceActivityState } from '@/components/voice-activity';
 
 export type VoiceFloatProps = {
   listening: boolean;
@@ -202,7 +202,10 @@ export function VoiceFloat({
         title="拖动可移动位置"
       >
         <VoiceActivity state={voiceActivityState({ listening, speaking, busy, arming })} risk={reportAuditRisk} />
-        <b>{title}</b>
+        <VoiceActivityStatus
+          state={arming ? 'arming' : listening ? 'listening' : speaking ? 'speaking' : busy ? 'thinking' : 'idle'}
+          label={title}
+        />
         {headExtra}
       </div>
       <div className="eva-voice-float-text">{body}</div>

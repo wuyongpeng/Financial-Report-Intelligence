@@ -1,6 +1,6 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { VoiceBlob } from '@/components/voice-blob';
 import { getVoiceLevels, getServerVoiceLevels, subscribeVoiceLevels } from '@/lib/voice/client-level';
 
@@ -28,6 +28,18 @@ export function VoiceActivity({ state, risk = false }: { state: VoiceActivitySta
           <i key={index} style={{ height: 4 + (height - 4) * level, opacity: 0.45 + level * 0.55 }} />
         ))}
       </span>
+    </span>
+  );
+}
+
+
+/** Audio bars replace the visible listening label; assistive status remains available. */
+export function VoiceActivityStatus({ state, className = '', label }: {
+  state: VoiceActivityState; className?: string; label?: string;
+}) {
+  return (
+    <span className={`eva-voice-status ${className}${state === 'listening' ? ' eva-voice-status-sr-only' : ''}`} role="status">
+      {label ?? voiceActivityLabels[state]}
     </span>
   );
 }

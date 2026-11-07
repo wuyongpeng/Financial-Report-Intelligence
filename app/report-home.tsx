@@ -66,7 +66,7 @@ import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed 
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
-import { VoiceActivity, voiceActivityState, voiceActivityLabels } from '@/components/voice-activity';
+import { VoiceActivity, VoiceActivityStatus, voiceActivityState } from '@/components/voice-activity';
 import '@/app/voice-float.css';
 import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
@@ -2336,7 +2336,7 @@ export default function ReportHome() {
               onClick={() => setVoicePanelOpen((open) => !open)}
             >
               <VoiceActivity state={voiceActivityState(voice)} />
-              <span className="rh-eva-status" role="status">{voiceActivityLabels[voiceActivityState(voice)]}</span>
+              <VoiceActivityStatus state={voiceActivityState(voice)} className="rh-eva-status" />
             </button>
             <div className="rh-eva-controls">
               <button type="button" className="rh-eva-control" aria-label={voicePanelOpen ? '收起语音对话' : '展开语音对话'} aria-expanded={voicePanelOpen} aria-controls="rh-eva-conversation" title="语音对话" onClick={() => setVoicePanelOpen((open) => !open)}>
