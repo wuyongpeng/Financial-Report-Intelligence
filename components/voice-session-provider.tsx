@@ -1,4 +1,5 @@
 'use client';
+import { finalAsrTranscript } from '@/lib/voice/final-transcript';
 
 import { isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import {
@@ -420,7 +421,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
           }
         }
         if (ev.type === 'final') {
-          if (!takeOver(ev.text)) {
+          const finalText = finalAsrTranscript(ev.text, voicePartialRef.current);
+          if (!takeOver(finalText)) {
             if (bargeRef.current && activeRef.current) void listenTurnRef.current(true);
             return;
           }
@@ -433,7 +435,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
           asrSessionRef.current?.close();
           asrSessionRef.current = null;
           setListening(false);
-          void handleUtteranceRef.current(ev.text || voicePartialRef.current);
+          void handleUtteranceRef.current(finalText);
         }
         if (ev.type === 'error') fail(ev.message);
       });

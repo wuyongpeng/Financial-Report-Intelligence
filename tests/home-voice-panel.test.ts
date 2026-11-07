@@ -26,7 +26,7 @@ test('manual folding stays folded for replies; end/restart explicitly collapse e
   assert.ok(home.includes('setVoicePanelOpen(false); // A fresh session never unfolds old history.'));
   assert.ok(home.includes('function endHomeVoice() {\n    setVoicePanelOpen(false);'));
   const trueAssignments = home.split('\n').filter((line) => line.includes('setVoicePanelOpen(true)'));
-  assert.equal(trueAssignments.length, 3);
+  assert.equal(trueAssignments.length, 1);
   assert.ok(trueAssignments.every((line) => line.includes('shouldExpandHomeVoicePanel(')));
   assert.ok(!home.match(/useEffect\([^]*?\[voiceTurns[^]*?setVoicePanelOpen\(true/));
 });
@@ -46,6 +46,9 @@ test('header and questions live inside one draggable styled shell, not separate 
   assert.ok(rule('.rh-eva-panel').includes('border:0'));
   assert.ok(rule('.rh-eva-dock').includes('gap:0'));
   assert.ok(rule('.rh-eva-dock').includes('max-height:calc(100dvh - 16px)'));
-  assert.ok(rule('.rh-eva-dock.is-open').includes('calc(100vw - 24px)'));
+  assert.ok(!rule('.rh-eva-dock.is-open').includes('width:'));
+  assert.ok(rule('.rh-eva-dock').includes('max-width:calc(100vw - 24px)'));
+  assert.ok(rule('.rh-eva-panel').includes('contain:inline-size'));
+  assert.ok(rule('.rh-eva-panel-log').includes('overflow-wrap:anywhere'));
   assert.ok(rule('.rh-eva-panel-log').includes('overflow:auto'));
 });

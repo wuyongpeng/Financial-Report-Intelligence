@@ -74,7 +74,7 @@ import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
 import { speakAnswer } from '@/lib/voice/client-tts';
-import { HomeVoiceTurns, assertHomeVoiceTurn, acceptsHomeBargeSpeech, type HomeVoiceTurn } from '@/lib/voice/home-turn';
+import { HomeVoiceTurns, assertHomeVoiceTurn, acceptsHomeBargeSpeech, HOME_UNMATCHED_RECEIPT, HOME_VOICE_FAILURE_RECEIPT, type HomeVoiceTurn } from '@/lib/voice/home-turn';
 import {
   appendHomeChatTurn,
   clearHomeChatTurns,
@@ -302,6 +302,7 @@ export default function ReportHome() {
   const [waitToast, setWaitToast] = useState<string | null>(null);
   /** Ephemeral home-AI reply (typed + voice); never seeds detail chat. */
   const [homeAnswer, setHomeAnswer] = useState<string | null>(null);
+  const voicePanelLogRef = useRef<HTMLDivElement>(null);
   const [voiceTurns, setVoiceTurns] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
   const [starred, setStarred] = useState<string[]>(() => readStarredCodes());
@@ -385,6 +386,13 @@ export default function ReportHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coverage]);
 
+  function pushTurn(role: 'user' | 'assistant', content: string) {
+    appendHomeChatTurn(role, content);
+    if (role === 'assistant') homeVoiceTurnsRef.current.recordReply();
+    setVoiceTurns(getHomeChatTurns());
+    if (shouldExpandHomeVoicePanel(role, content, homeVoiceApiRef.current.active)) setVoicePanelOpen(true);
+  }
+
   function clearHomeResumeTimers() {
     homeResumeTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     homeResumeTimersRef.current.clear();
@@ -451,16 +459,16 @@ export default function ReportHome() {
   }
   useLayoutEffect(() => { homeSpeakRef.current = speakHomeLine; });
 
+  useLayoutEffect(() => {
+    const log = voicePanelLogRef.current;
+    if (voicePanelOpen && log) log.scrollTop = log.scrollHeight;
+  }, [voicePanelOpen, voiceTurns]);
+
   // Global voice session: register home routing; provider exclusively owns ASR.
   useEffect(() => {
     homeMountedRef.current = true;
     const turns = homeVoiceTurnsRef.current;
     const resumeTimers = homeResumeTimersRef.current;
-    const pushTurn = (role: 'user' | 'assistant', content: string) => {
-      appendHomeChatTurn(role, content);
-      setVoiceTurns(getHomeChatTurns());
-      if (shouldExpandHomeVoicePanel(role, content, homeVoiceApiRef.current.active)) setVoicePanelOpen(true);
-    };
     const speakLine = async (line: string) => {
       const spoken = sanitizeHomeAssistantText(line) || line.trim();
       if (!spoken) return;
@@ -564,19 +572,29 @@ export default function ReportHome() {
     };
     const handler = async (text: string): Promise<VoiceUtteranceResult> => {
       if (isFeedbackDrawerOpen()) return { action: 'hold' };
-      if (shouldExpandHomeVoicePanel('user', text, homeVoiceApiRef.current.active)) setVoicePanelOpen(true);
+      if (!shouldExpandHomeVoicePanel('user', text, homeVoiceApiRef.current.active)) return { action: 'resume' };
       const turn = homeVoiceTurnsRef.current.begin();
+      homeVoiceTurnsRef.current.recordUser(turn, text, (content) => pushTurn('user', content));
       homeSpeakingTextRef.current = '';
       try {
         const result = await route(text, turn);
         assertHomeVoiceTurn(turn);
         if (!homeVoiceApiRef.current.active || voiceNavigatingRef.current) return { action: 'hold' };
+        if (result.action === 'resume' && !dialogRef.current && homeVoiceTurnsRef.current.needsReceipt(turn)) {
+          await speakLine(HOME_UNMATCHED_RECEIPT);
+          assertHomeVoiceTurn(turn);
+        }
         if (result.action === 'end') homeVoiceApiRef.current.end();
         else if (result.action === 'resume') homeVoiceApiRef.current.resumeListen();
         return { action: 'hold' }; // This page now owns natural resume; stale provider handlers cannot.
-      } catch (error) {
+      } catch {
         if (turn.signal.aborted) return { action: 'hold' };
-        throw error;
+        pushTurn('assistant', HOME_VOICE_FAILURE_RECEIPT);
+        setSubmitting(false);
+        homeVoiceApiRef.current.setBusy(false);
+        homeVoiceApiRef.current.setSpeaking(false);
+        if (homeVoiceApiRef.current.active && !dialogRef.current && !isFeedbackDrawerOpen()) homeVoiceApiRef.current.resumeListen();
+        return { action: 'hold' };
       }
     };
     voice.setUtteranceHandler(handler);
@@ -1055,12 +1073,6 @@ export default function ReportHome() {
     })();
   }
 
-  function pushTurn(role: 'user' | 'assistant', content: string) {
-    appendHomeChatTurn(role, content);
-    setVoiceTurns(getHomeChatTurns());
-    if (shouldExpandHomeVoicePanel(role, content, homeVoiceApiRef.current.active)) setVoicePanelOpen(true);
-  }
-
   async function deliverHomeAnswer(answer: string, opts?: { fromVoice?: boolean }) {
     assertHomeVoiceTurn(homeVoiceTurnsRef.current.current);
     const line = sanitizeHomeAssistantText(answer);
@@ -1091,7 +1103,6 @@ export default function ReportHome() {
       industry,
       viewMode,
     });
-    pushTurn('user', raw);
     setHomeAnswer(null);
 
     const local = answerHomeRosterLocally(raw, rows);
@@ -1161,7 +1172,6 @@ export default function ReportHome() {
     assertHomeVoiceTurn(turn);
     homeSpeakingTextRef.current = '';
     armHomeInterrupt(turn);
-    pushTurn('user', raw);
     if (!opts?.fromVoice) setSearch('');
     setHomeAnswer(null);
     // Local refuse for clear invest asks — no LLM needed.
@@ -1196,7 +1206,7 @@ export default function ReportHome() {
       await deliverHomeAnswer(answer, opts);
     } catch {
       assertHomeVoiceTurn(turn);
-      await deliverHomeAnswer(homeChitchatFallback(), opts);
+      await deliverHomeAnswer(opts?.fromVoice ? HOME_VOICE_FAILURE_RECEIPT : homeChitchatFallback(), opts);
     }
   }
 
@@ -1298,14 +1308,14 @@ export default function ReportHome() {
     if (isFeedbackDrawerOpen()) return;
     const compact = raw.replace(/\s+/g, '');
     if (isVoiceGreetingOrNoise(raw) && /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact)) return;
+    homeVoiceTurnsRef.current.recordUser(turn, raw, (content) => pushTurn('user', content));
     setSubmitting(true);
     if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);
     armHomeInterrupt(turn);
     try {
-      const semantic = await requestAssistantTurn({ question: raw, surface: 'home', history: getHomeChatTurns().slice(-8) }, turn?.signal ?? new AbortController().signal);
+      const semantic = await requestAssistantTurn({ question: raw, surface: 'home', history: getHomeChatTurns().slice(0, -1).slice(-8) }, turn?.signal ?? new AbortController().signal);
       assertHomeVoiceTurn(turn);
       if (semantic.kind !== 'domain') {
-        pushTurn('user', raw);
         if (!opts?.fromVoice) setSearch('');
         if (semantic.kind === 'feedback') {
           pushTurn('assistant', FEEDBACK_REVIEW_LINE);
@@ -2529,7 +2539,7 @@ export default function ReportHome() {
           {voice.toast ? <div className="rh-eva-notice" role="alert">{voice.toast}</div> : null}
           {voice.active && voicePanelOpen ? (
             <div id="rh-eva-conversation" className="rh-eva-panel" role="region" aria-label="语音对话">
-              <div className="rh-eva-panel-log">
+              <div ref={voicePanelLogRef} className="rh-eva-panel-log" role="log" aria-live="polite">
                 {voiceTurns.length === 0 ? (
                   <p className="rh-eva-panel-empty">但说无妨...</p>
                 ) : voiceTurns.map((turn, index) => (
