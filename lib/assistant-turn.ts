@@ -41,7 +41,7 @@ export async function requestAssistantTurn(input: {
 }, signal: AbortSignal): Promise<AssistantTurn> {
   try {
     const prefs = readReaderPrefs();
-    const modelId = sanitizeModelId(prefs.modelId);
+    const modelId = prefs.autoModel ? undefined : sanitizeModelId(prefs.modelId);
     const response = await fetch('/api/assistant/turn', {
       method: 'POST',
       signal,

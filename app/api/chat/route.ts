@@ -68,6 +68,7 @@ export async function POST(request: Request) {
       spoken: Boolean(input.spoken),
       readingLevel: input.readingLevel,
       modelId: input.modelId,
+      readerMemory: input.readerMemory,
     };
     if (!input.stream) {
       const result = replay ?? await generateAnswer(context!, history, request.signal, undefined, answerOpts);

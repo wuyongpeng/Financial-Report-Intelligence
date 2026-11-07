@@ -19,15 +19,19 @@ export const SPEECH_RATES = [
 
 export type ReaderPrefs = {
   readingLevel: ReadingLevel;
-  /** `auto` follows the deployed failover order. Any other value pins one provider id. */
+  /** When true, follow the deployed failover order. When false, `modelId` pins one provider. */
+  autoModel: boolean;
+  /** `auto` means no pin. Any other value is a provider id used only while autoModel is off. */
   modelId: string;
   welcome: boolean;
   speechRate: number;
+  /** Session cache: send prior turns of the same report. */
   memory: boolean;
 };
 
 export const DEFAULT_READER_PREFS: ReaderPrefs = {
   readingLevel: 'beginner',
+  autoModel: true,
   modelId: 'auto',
   welcome: false,
   speechRate: 1,
@@ -67,9 +71,12 @@ export function snapSpeechRate(value: unknown): number {
 
 export function normalizeReaderPrefs(raw: unknown): ReaderPrefs {
   const row = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const modelId = sanitizeModelId(row.modelId) ?? 'auto';
+  const autoModel = typeof row.autoModel === 'boolean' ? row.autoModel : modelId === 'auto';
   return {
     readingLevel: sanitizeReadingLevel(row.readingLevel) ?? DEFAULT_READER_PREFS.readingLevel,
-    modelId: sanitizeModelId(row.modelId) ?? 'auto',
+    autoModel,
+    modelId,
     welcome: row.welcome === true,
     speechRate: snapSpeechRate(row.speechRate ?? DEFAULT_READER_PREFS.speechRate),
     memory: row.memory !== false,

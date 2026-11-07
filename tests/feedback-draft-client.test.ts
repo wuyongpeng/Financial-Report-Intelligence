@@ -54,7 +54,7 @@ test('existing drafts, hand-edited text and intentionally cleared text are never
 
 test('existing form is reused; AI subscription never calls the human submit path', () => {
   const source = readFileSync(new URL('../app/home-overflow-menu.tsx', import.meta.url), 'utf8');
-  const subscriber = source.slice(source.indexOf('const unsubscribe = subscribeFeedbackDraft'), source.indexOf('async function copyPageLink'));
+  const subscriber = source.slice(source.indexOf('const unsubscribe = subscribeFeedbackDraft'), source.indexOf('async function submitFeedback'));
   assert.ok(subscriber.includes('preserveFeedbackDraft(draftRef.current'));
   assert.ok(!subscriber.includes('submitFeedback') && !subscriber.includes('fetch('));
   assert.ok(source.includes('id="hom-feedback-message"'));

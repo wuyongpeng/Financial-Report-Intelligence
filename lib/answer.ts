@@ -29,6 +29,8 @@ export type AnswerOptions = {
   readingLevel?: ReadingLevel;
   /** Pin one configured provider. Omit to keep automatic failover. */
   modelId?: string;
+  /** Short habit line. Wording only — never evidence. */
+  readerMemory?: string;
 };
 
 const SPOKEN_HINT = (
@@ -70,6 +72,9 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
   // Industry frameworks push multi-section essays — skip in voice mode and for the professional level.
   const skillAppend = spoken || opts.readingLevel === 'professional' ? '' : industrySkillSystemAppend(industry);
   const levelLine = opts.readingLevel ? readingLevelInstruction(opts.readingLevel, spoken) : '';
+  const memoryLine = opts.readerMemory
+    ? `读者习惯只用于调整表述，不得当作财报事实，也不得据此编造数字：${opts.readerMemory}`
+    : '';
   const continuity = (
     '历史对话只用于理解指代（如「它」「同比」），不是事实依据；以前的回答可能不准确。'
     + '只回答本轮用户消息里「当前问题」这一句；禁止复述、澄清或回答历史里的旧问题'
@@ -102,7 +107,7 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
     + softHint
     + style
   );
-  const systemContent = [systemBase, skillAppend, levelLine].filter(Boolean).join('\n\n');
+  const systemContent = [systemBase, skillAppend, levelLine, memoryLine].filter(Boolean).join('\n\n');
   const safeHistory = historyForModel(history);
   return [
     { role: 'system', content: systemContent },

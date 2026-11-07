@@ -22,6 +22,7 @@
 .prefs-row-label{font-size:14px;font-weight:650}
 .prefs-hint{margin:4px 0 0;color:#6b7a8d;font-size:13px;line-height:1.5}
 .prefs-label{margin:18px 0 8px;font-size:13px;font-weight:650;color:#31465f}
+.prefs-profile{margin:0;font-size:14px;line-height:1.6;color:#203047}
 .prefs-error{margin:0 0 10px;color:#b91c1c;font-size:13px}
 .prefs-switch{width:44px;height:26px;border:0;border-radius:999px;background:#d5dde8;padding:3px;cursor:pointer;flex:none}
 .prefs-switch span{display:block;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #13213b33;transition:transform .15s}

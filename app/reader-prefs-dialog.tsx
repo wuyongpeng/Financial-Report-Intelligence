@@ -2,6 +2,8 @@
 
 import { useEffect, useId, useState } from 'react';
 import { clearHomeChatTurns } from '@/lib/chat-surface';
+import { describeReaderMemory, type ReaderMemory } from '@/lib/reader-memory';
+import { READER_MEMORY_EVENT, clearReaderMemory, readReaderMemory } from '@/lib/reader-memory-client';
 import {
   notifyConversationDeleted,
   notifyMemoryCleared,
@@ -17,13 +19,14 @@ import {
 } from '@/lib/reader-prefs';
 import './reader-prefs-dialog.css';
 
-type PrefsTab = 'general' | 'model' | 'voice' | 'memory';
+type PrefsTab = 'general' | 'model' | 'voice' | 'profile' | 'cache';
 
 const TABS: Array<{ id: PrefsTab; label: string }> = [
   { id: 'general', label: '常规' },
   { id: 'model', label: '模型' },
   { id: 'voice', label: '语音' },
-  { id: 'memory', label: '记忆' },
+  { id: 'profile', label: '记忆' },
+  { id: 'cache', label: '缓存' },
 ];
 
 type ModelChoice = { id: string; model: string };
@@ -39,6 +42,8 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
   const [memoryError, setMemoryError] = useState('');
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [habit, setHabit] = useState<ReaderMemory>(() => readReaderMemory());
+  const [confirmHabitClear, setConfirmHabitClear] = useState(false);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -68,7 +73,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
   }, [tab]);
 
   useEffect(() => {
-    if (tab !== 'memory') return;
+    if (tab !== 'cache') return;
     let cancel = false;
     setMemoryError('');
     fetch('/api/conversations', { cache: 'no-store', credentials: 'same-origin' })
@@ -85,6 +90,12 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
       });
     return () => { cancel = true; };
   }, [tab]);
+
+  useEffect(() => {
+    const sync = () => setHabit(readReaderMemory());
+    window.addEventListener(READER_MEMORY_EVENT, sync);
+    return () => window.removeEventListener(READER_MEMORY_EVENT, sync);
+  }, []);
 
   function patch(next: Partial<ReaderPrefs>) {
     setPrefs(updateReaderPrefs(next));
@@ -120,7 +131,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
       setMemories([]);
       setConfirmClear(false);
     } catch {
-      setMemoryError('记忆没有清除，请重试');
+      setMemoryError('缓存没有清除，请重试');
     } finally {
       setMemoryBusy(false);
     }
@@ -159,7 +170,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
           {tab === 'general' ? (
             <>
               <h3>解读风格</h3>
-              <p className="prefs-lead">决定追问怎么讲。数字和出处保持不变。</p>
+              <p className="prefs-lead">调整表述风格，数据和引用来源保持不变。</p>
               <div className="prefs-choices" role="radiogroup" aria-label="解读风格">
                 {READING_LEVELS.map((level) => (
                   <LevelChoice
@@ -175,43 +186,41 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
           {tab === 'model' ? (
             <>
               <h3>问答模型</h3>
-              <p className="prefs-lead">默认自动切换。手动选择后，这次问答只用该模型，失败不会悄悄换另一个。</p>
-              {modelsError ? <p className="prefs-error">{modelsError}</p> : null}
-              <div className="prefs-choices" role="radiogroup" aria-label="问答模型">
-                <button
-                  type="button"
-                  role="radio"
-                  className="prefs-choice"
-                  aria-checked={prefs.modelId === 'auto' || (models !== null && !knownModel)}
-                  onClick={() => patch({ modelId: 'auto' })}
-                >
-                  <b>自动切换</b>
-                  <span>按已配置顺序尝试，失败后再换下一个</span>
-                </button>
-                {models === null && !modelsError ? <p className="prefs-hint">正在读取已配置的模型…</p> : null}
-                {models?.length === 0 ? <p className="prefs-hint">当前没有配置问答模型。追问会退回可核验的原文证据。</p> : null}
-                {models?.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    role="radio"
-                    className="prefs-choice"
-                    aria-checked={prefs.modelId === item.id}
-                    onClick={() => patch({ modelId: item.id })}
-                  >
-                    <b>{item.model}</b>
-                  </button>
-                ))}
-              </div>
-              {models !== null && prefs.modelId !== 'auto' && !knownModel ? (
-                <p className="prefs-hint">上次选择的模型当前不在配置里，问答会按自动切换。</p>
+              <PrefsSwitch
+                on={prefs.autoModel}
+                label="自动切换"
+                hint="按已配置顺序尝试，失败后再换下一个"
+                onChange={(autoModel) => patch({ autoModel })}
+              />
+              {!prefs.autoModel ? (
+                <>
+                  {modelsError ? <p className="prefs-error">{modelsError}</p> : null}
+                  <div className="prefs-choices" role="radiogroup" aria-label="问答模型">
+                    {models === null && !modelsError ? <p className="prefs-hint">正在读取已配置的模型…</p> : null}
+                    {models?.length === 0 ? <p className="prefs-hint">当前没有配置问答模型。追问会退回可核验的原文证据。</p> : null}
+                    {models?.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="radio"
+                        className="prefs-choice"
+                        aria-checked={prefs.modelId === item.id}
+                        onClick={() => patch({ modelId: item.id })}
+                      >
+                        <b>{item.model}</b>
+                      </button>
+                    ))}
+                  </div>
+                  {models !== null && prefs.modelId !== 'auto' && !knownModel ? (
+                    <p className="prefs-hint">上次选择的模型当前不在配置里，问答会按自动切换。</p>
+                  ) : null}
+                </>
               ) : null}
             </>
           ) : null}
           {tab === 'voice' ? (
             <>
               <h3>语音</h3>
-              <p className="prefs-lead">只影响开麦后的问候和朗读速度。</p>
               <PrefsSwitch
                 on={prefs.welcome}
                 label="启用欢迎语"
@@ -235,18 +244,30 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
               </div>
             </>
           ) : null}
-          {tab === 'memory' ? (
+          {tab === 'profile' ? (
+            <HabitPanel
+              habit={habit}
+              levelLabel={READING_LEVEL_COPY[prefs.readingLevel].label}
+              confirmClear={confirmHabitClear}
+              onAskClear={() => setConfirmHabitClear(true)}
+              onCancelClear={() => setConfirmHabitClear(false)}
+              onClear={() => {
+                setHabit(clearReaderMemory());
+                setConfirmHabitClear(false);
+              }}
+            />
+          ) : null}
+          {tab === 'cache' ? (
             <>
-              <h3>记忆</h3>
-              <p className="prefs-lead">记住同一份财报里的追问上文。关闭后，新问题不再带上之前的对话。</p>
+              <h3>缓存</h3>
               <PrefsSwitch
                 on={prefs.memory}
-                label="启用记忆"
+                label="会话缓存"
                 hint="开启后，追问会带上这次会话里已经问过的内容。"
                 onChange={(memory) => patch({ memory })}
               />
               <div className="prefs-memory-head">
-                <p className="prefs-label">记忆管理</p>
+                <p className="prefs-label">会话缓存管理</p>
                 {confirmClear ? (
                   <span className="prefs-confirm">
                     <button type="button" className="prefs-text" disabled={memoryBusy} onClick={() => setConfirmClear(false)}>取消</button>
@@ -259,7 +280,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                     disabled={memoryBusy || !memories?.length}
                     onClick={() => setConfirmClear(true)}
                   >
-                    清除记忆
+                    清除缓存
                   </button>
                 )}
               </div>
@@ -284,6 +305,48 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
         </section>
       </div>
     </div>
+  );
+}
+
+function HabitPanel({
+  habit,
+  levelLabel,
+  confirmClear,
+  onAskClear,
+  onCancelClear,
+  onClear,
+}: {
+  habit: ReaderMemory;
+  levelLabel: string;
+  confirmClear: boolean;
+  onAskClear: () => void;
+  onCancelClear: () => void;
+  onClear: () => void;
+}) {
+  const view = describeReaderMemory(habit, levelLabel);
+  const hasHabit = Boolean(view.brief);
+  return (
+    <>
+      <h3>记忆</h3>
+      <p className="prefs-lead">根据你的提问自动更新，只调整表述，不改变数据和引用来源。</p>
+      <p className="prefs-label">提问风格</p>
+      <p className="prefs-profile">{view.style}</p>
+      <p className="prefs-label">常问公司</p>
+      <p className="prefs-profile">{view.companies}</p>
+      <p className="prefs-label">用户画像</p>
+      <p className="prefs-profile">{view.portrait}</p>
+      <div className="prefs-memory-head">
+        <p className="prefs-label">记忆管理</p>
+        {confirmClear ? (
+          <span className="prefs-confirm">
+            <button type="button" className="prefs-text" onClick={onCancelClear}>取消</button>
+            <button type="button" className="prefs-text danger" onClick={onClear}>确认清除</button>
+          </span>
+        ) : (
+          <button type="button" className="prefs-text danger" disabled={!hasHabit} onClick={onAskClear}>清除记忆</button>
+        )}
+      </div>
+    </>
   );
 }
 

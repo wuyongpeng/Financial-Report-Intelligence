@@ -1,5 +1,8 @@
+import { describeReaderMemory } from './reader-memory';
+import { readReaderMemory } from './reader-memory-client';
 import {
   DEFAULT_READER_PREFS,
+  READING_LEVEL_COPY,
   READER_PREFS_KEY,
   normalizeReaderPrefs,
   sanitizeModelId,
@@ -33,10 +36,15 @@ export function updateReaderPrefs(patch: Partial<ReaderPrefs>): ReaderPrefs {
 }
 
 /** Fields the detail ask should send. Omitted modelId means server-side auto failover. */
-export function readerChatFields(): { readingLevel: ReaderPrefs['readingLevel']; modelId?: string } {
+export function readerChatFields(): { readingLevel: ReaderPrefs['readingLevel']; modelId?: string; readerMemory?: string } {
   const prefs = readReaderPrefs();
-  const modelId = sanitizeModelId(prefs.modelId);
-  return modelId ? { readingLevel: prefs.readingLevel, modelId } : { readingLevel: prefs.readingLevel };
+  const modelId = prefs.autoModel ? undefined : sanitizeModelId(prefs.modelId);
+  const brief = describeReaderMemory(readReaderMemory(), READING_LEVEL_COPY[prefs.readingLevel].label).brief;
+  return {
+    readingLevel: prefs.readingLevel,
+    ...(modelId ? { modelId } : {}),
+    ...(brief ? { readerMemory: brief } : {}),
+  };
 }
 
 export function readerHistory<T>(rows: T[]): T[] {

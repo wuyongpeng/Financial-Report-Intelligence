@@ -28,6 +28,7 @@ import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
+import { noteReaderActivity } from '@/lib/reader-memory-client';
 import { CONVERSATION_DELETED_EVENT, MEMORY_CLEARED_EVENT, readReaderPrefs, readerChatFields } from '@/lib/reader-prefs-client';
 import {
   clampAttributionTitle,
@@ -682,6 +683,9 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     })();
     return () => abort.abort();
   }, [selected.id]);
+  useEffect(() => {
+    noteReaderActivity({ code: selected.code, name: selected.company_name });
+  }, [selected.code, selected.company_name]);
   useEffect(() => {
     const onCleared = () => {
       conversationIds.current.clear();
@@ -2644,6 +2648,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       }
     }
     try {
+      if (replacing == null) noteReaderActivity({ question: typed, code: selected.code, name: selected.company_name });
       await ensureGuestCookie();
       const remember = readReaderPrefs().memory;
       let conversationId = remember ? conversationIds.current.get(id) : undefined;
@@ -2658,7 +2663,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const styleRewrite = spoken ? (voiceAnswerStyleRef.current ?? undefined) : undefined;
       const rewrite = extra?.rewrite ?? styleRewrite;
       const chatPrefs = readerChatFields();
-      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(rewrite ? { rewrite } : {}), ...(spoken ? { spoken: true } : {}), readingLevel: chatPrefs.readingLevel, ...(chatPrefs.modelId ? { modelId: chatPrefs.modelId } : {}), stream:true }) });
+      const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(rewrite ? { rewrite } : {}), ...(spoken ? { spoken: true } : {}), readingLevel: chatPrefs.readingLevel, ...(chatPrefs.modelId ? { modelId: chatPrefs.modelId } : {}), ...(chatPrefs.readerMemory ? { readerMemory: chatPrefs.readerMemory } : {}), stream:true }) });
       if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
@@ -2899,7 +2904,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const collapseGate = paneCollapseGate({ source: sourceCollapsed, middle: middleCollapsed, chat: chatCollapsed });
   const paneFlex = effectivePaneFlex(colRatios, { middleCollapsed });
   return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''} ${middleCollapsed?'cd-middle-collapsed':''}`} >
-    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions">{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}<HomeOverflowMenu showSources={false} showCopyLink pageLabel={`${selected.company_name} ${period(selected)}`} /></div></header>
+    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions">{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}<HomeOverflowMenu showSources={false} pageLabel={`${selected.company_name} ${period(selected)}`} /></div></header>
     {hasReportAuditRisk(selected) ? (
       <button
         type="button"

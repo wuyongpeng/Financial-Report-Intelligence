@@ -20,6 +20,8 @@ export type ChatRequest = {
   readingLevel?: ReadingLevel;
   /** Pin one configured provider id. Omit for automatic failover. */
   modelId?: string;
+  /** Habit line for wording only. */
+  readerMemory?: string;
 };
 
 export type ChatResponse = AnswerResult & {
@@ -57,6 +59,9 @@ export function parseChatRequest(body: Record<string, unknown>): ChatRequest {
     modelId = sanitizeModelId(body.modelId);
     if (!modelId) throw new ApiError(400, 'modelId 参数无效');
   }
+  const readerMemory = typeof body.readerMemory === 'string'
+    ? body.readerMemory.replace(/\s+/g, ' ').trim().slice(0, 180)
+    : '';
   return {
     reportId,
     question,
@@ -69,6 +74,7 @@ export function parseChatRequest(body: Record<string, unknown>): ChatRequest {
     spoken: optionalBoolean(body.spoken, 'spoken') ?? false,
     readingLevel,
     modelId,
+    ...(readerMemory ? { readerMemory } : {}),
   };
 }
 
