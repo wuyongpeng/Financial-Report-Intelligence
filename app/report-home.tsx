@@ -39,11 +39,20 @@ import {
 } from '@/lib/home-search';
 import {
   buildVoiceConfirmPrompt,
+  buildVoiceJoinPrompt,
   buildVoicePickPrompt,
   needsVoiceCompanyConfirm,
   parseVoiceConfirmReply,
+  parseVoiceJoinReply,
   parseVoicePickChoice,
 } from '@/lib/home-voice-flow';
+import {
+  HOME_CHITCHAT_SNAPSHOT_PLACEHOLDER,
+  homeChitchatFallback,
+  homeGreetingNudge,
+  isLikelyHomeChitchat,
+  looksLikeUnresolvedCompanyAsk,
+} from '@/lib/home-chitchat';
 import { metricYoyHoverDetail, type Report } from '@/lib/detail-model';
 import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
@@ -308,6 +317,7 @@ export default function ReportHome() {
   const voiceConfirmYesRef = useRef<(d: VoiceConfirmDialog) => Promise<void>>(async () => undefined);
   const voicePickRef = useRef<(d: VoicePickDialog, index: number) => Promise<void>>(async () => undefined);
   const closeBlockingDialogRef = useRef<(opts?: { resumeListen?: boolean }) => void>(() => undefined);
+  const confirmMissingCompanyRef = useRef<() => Promise<void>>(async () => undefined);
   /** User typed/edited the super-entry while a voice session was active. */
   const searchEditedDuringVoiceRef = useRef(false);
   /** Mirrors dialog synchronously so utterance handler can hold while modal is open. */
@@ -391,6 +401,7 @@ export default function ReportHome() {
           return { action: 'hold' };
         }
         await speakLine('请说确定或不是');
+        if (voice.active && dialogRef.current) voice.resumeListen();
         return { action: 'hold' };
       }
       if (openDialog?.kind === 'voice-pick') {
@@ -409,10 +420,31 @@ export default function ReportHome() {
           return { action: 'hold' };
         }
         await speakLine('请说序号或公司名字');
+        if (voice.active && dialogRef.current) voice.resumeListen();
+        return { action: 'hold' };
+      }
+      if (openDialog?.kind === 'missing-company') {
+        const reply = parseVoiceJoinReply(text);
+        if (reply === 'yes') {
+          voice.setBusy(true);
+          try {
+            await confirmMissingCompanyRef.current();
+          } finally {
+            voice.setBusy(false);
+          }
+          return { action: 'hold' };
+        }
+        if (reply === 'no') {
+          closeBlockingDialogRef.current({ resumeListen: true });
+          setWaitToast('好的，已取消加入');
+          return { action: 'hold' };
+        }
+        await speakLine('请说加入或取消');
+        if (voice.active && dialogRef.current) voice.resumeListen();
         return { action: 'hold' };
       }
       if (openDialog) {
-        // missing-company / missing-report / voice-confirm / voice-pick: keep mic held
+        // missing-report (and any future blocking dialog): keep mic held
         return { action: 'hold' };
       }
 
@@ -431,8 +463,13 @@ export default function ReportHome() {
         await speakLine(voiceHowToAskSpeech(null, 'home'));
         return { action: 'resume' };
       }
-      // Greetings / filler must not fill the super-entry or trigger search.
+      // Greetings: short product nudge. Pure filler (嗯/啊) stays silent.
       if (isVoiceGreetingOrNoise(text)) {
+        const compact = text.replace(/\s+/g, '');
+        const fillerOnly = /^(?:嗯+|啊+|呃+|额+|哦+|噢+|喔+|唉+|哎+|唔+|诶+|哈哈+|嘿嘿+|呵呵+)(?:啊|呀)?$/u.test(compact);
+        if (!fillerOnly) {
+          await speakLine(homeGreetingNudge());
+        }
         return { action: 'resume' };
       }
       // Fresh ASR utterance supersedes any prior keyboard edits on the box.
@@ -724,6 +761,40 @@ export default function ReportHome() {
     }
   }
 
+  /** After dialog TTS, reopen mic so user can answer while modal stays open. */
+  function resumeDialogListen() {
+    if (!voice.active || voiceNavigatingRef.current) return;
+    window.setTimeout(() => {
+      if (voice.active && dialogRef.current && !voiceNavigatingRef.current) {
+        voice.resumeListen();
+      }
+    }, 120);
+  }
+
+  async function promptBlockingDialog(line: string) {
+    setHomeAnswer(line);
+    await speakBlockingPrompt(line);
+    resumeDialogListen();
+  }
+
+  /** missing-company: align TTS + oral yes/no with on-screen 加入/取消. */
+  async function openMissingCompanyDialog(opts: {
+    listed: ListedNameCode;
+    query?: string;
+    fromVoice?: boolean;
+  }) {
+    const fromVoice = Boolean(opts.fromVoice);
+    openBlockingDialog({
+      kind: 'missing-company',
+      listed: opts.listed,
+      query: opts.query,
+      fromVoice,
+    });
+    if (fromVoice && voice.active) {
+      await promptBlockingDialog(buildVoiceJoinPrompt(opts.listed));
+    }
+  }
+
   /** After watch-pool join: carry original utterance into detail when possible. */
   async function afterJoinContinue(opts: {
     code: string;
@@ -930,7 +1001,41 @@ export default function ReportHome() {
     }
   }
 
-  function buildVoicePickCandidates(listedRows: ListedNameCode[]): VoicePickCandidate[] {
+  async function runHomeChitchatAsk(raw: string, opts?: { fromVoice?: boolean }) {
+    appendHomeChatTurn('user', raw);
+    setHomeAnswer(null);
+    // Local refuse for clear invest asks — no LLM needed.
+    if (/买|卖|加仓|减仓|荐股|目标价|能不能买|该不该买|值得买/.test(raw)) {
+      await deliverHomeAnswer(
+        '我不做证券买卖建议。可以说公司名或六位代码，我帮你看已入库财报里的经营数据。',
+        opts,
+      );
+      return;
+    }
+    try {
+      const response = await fetch('/api/home/ask', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          question: raw,
+          rosterSnapshot: HOME_CHITCHAT_SNAPSHOT_PLACEHOLDER,
+          rows: [],
+          history: getHomeChatTurns().slice(0, -1),
+          mode: 'chitchat',
+        }),
+      });
+      if (!response.ok) throw new Error(`home chitchat ${response.status}`);
+      const payload = await response.json() as { answer?: string };
+      const answer = typeof payload.answer === 'string' ? payload.answer.trim() : '';
+      if (!answer) throw new Error('empty home chitchat');
+      await deliverHomeAnswer(answer, opts);
+    } catch {
+      await deliverHomeAnswer(homeChitchatFallback(), opts);
+    }
+  }
+
+    function buildVoicePickCandidates(listedRows: ListedNameCode[]): VoicePickCandidate[] {
     return listedRows.map((listed) => ({
       ...listed,
       inPool: coverage.some((c) => c.code === listed.code),
@@ -951,9 +1056,7 @@ export default function ReportHome() {
       hasQuestionIntent: opts.hasQuestionIntent,
       period: opts.period,
     });
-    const prompt = buildVoicePickPrompt(candidates);
-    setHomeAnswer(prompt);
-    void speakBlockingPrompt(prompt);
+    await promptBlockingDialog(buildVoicePickPrompt(candidates));
   }
 
   async function maybeConfirmOrProceed(opts: {
@@ -983,14 +1086,11 @@ export default function ReportHome() {
         period,
         inPoolCompany: company,
       });
-      const prompt = buildVoiceConfirmPrompt(listed);
-      setHomeAnswer(prompt);
-      void speakBlockingPrompt(prompt);
+      await promptBlockingDialog(buildVoiceConfirmPrompt(listed));
       return;
     }
     if (!company) {
-      openBlockingDialog({
-        kind: 'missing-company',
+      await openMissingCompanyDialog({
         listed,
         query: raw,
         fromVoice: Boolean(fromVoice),
@@ -1060,7 +1160,7 @@ export default function ReportHome() {
       }
       const listed = resolveListedCompany(raw);
       if (listed) {
-        openBlockingDialog({ kind: 'missing-company', listed, query: raw, fromVoice });
+        await openMissingCompanyDialog({ listed, query: raw, fromVoice });
         return;
       }
       // 名录外无效六位码：与短串一致，滚到公司区空态（不弹阻塞框）
@@ -1125,6 +1225,16 @@ export default function ReportHome() {
         document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
+      // 0 hits: company-like short filter stays empty; clear chitchat (笑话/天气…) may answer.
+      if (fromVoice && isLikelyHomeChitchat(raw)) {
+        setSubmitting(true);
+        try {
+          await runHomeChitchatAsk(raw, { fromVoice: true });
+        } finally {
+          setSubmitting(false);
+        }
+        return;
+      }
       document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
@@ -1135,7 +1245,15 @@ export default function ReportHome() {
       const listedAll = resolveListedCompanies(raw);
       const listedCandidates = listedAll.length ? listedAll : resolveListedCompanies(parsed.companyQuery || raw);
       if (!listedCandidates.length) {
-        // 有问句意图但名录 0 命中：不弹「没有识别到上市公司」，滚到空态；不把自由文本交给 AI
+        // 像在问公司但名录 0：滚空态，不装懂。无公司实体闲聊 → 受控短答 AI。
+        if (looksLikeUnresolvedCompanyAsk(raw)) {
+          document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+        if (isLikelyHomeChitchat(raw) || fromVoice) {
+          await runHomeChitchatAsk(raw, { fromVoice });
+          return;
+        }
         document.getElementById('rh-companies')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
@@ -1174,8 +1292,7 @@ export default function ReportHome() {
           await navigateWithAsk(preferred, raw, parsed.period, { fromVoice });
           return;
         }
-        openBlockingDialog({
-          kind: 'missing-company',
+        await openMissingCompanyDialog({
           listed: listedCandidates[0],
           query: raw,
           fromVoice: false,
@@ -1207,8 +1324,7 @@ export default function ReportHome() {
   async function resolveVoiceConfirmYes(d: VoiceConfirmDialog) {
     const listed = d.listed;
     if (d.next === 'join' || !d.inPoolCompany) {
-      openBlockingDialog({
-        kind: 'missing-company',
+      await openMissingCompanyDialog({
         listed,
         query: d.query,
         fromVoice: true,
@@ -1248,9 +1364,8 @@ export default function ReportHome() {
       }
       return;
     }
-    // Not in pool — keep original utterance for after-join continue.
-    openBlockingDialog({
-      kind: 'missing-company',
+    // Not in pool — keep original utterance for after-join continue + join TTS.
+    await openMissingCompanyDialog({
       listed: { code: listed.code, name: listed.name },
       query: d.query,
       fromVoice: true,
@@ -1294,6 +1409,7 @@ export default function ReportHome() {
       setDialogBusy(false);
     }
   }
+  confirmMissingCompanyRef.current = confirmMissingCompany;
 
   async function confirmMissingReport() {
     if (!dialog || dialog.kind !== 'missing-report') return;
@@ -1948,7 +2064,7 @@ export default function ReportHome() {
                 <li key={listed.code}>
                   <button
                     type="button"
-                    onClick={() => openBlockingDialog({ kind: 'missing-company', listed, query: search.trim(), fromVoice: voice.active })}
+                    onClick={() => { void openMissingCompanyDialog({ listed, query: search.trim(), fromVoice: voice.active }); }}
                   >
                     <span className="rh-listed-candidate-name">{listed.name}</span>
                     <span className="rh-listed-candidate-code">{listed.code}</span>
@@ -1970,7 +2086,7 @@ export default function ReportHome() {
                     <li key={listed.code}>
                       <button
                         type="button"
-                        onClick={() => openBlockingDialog({ kind: 'missing-company', listed, query: search.trim(), fromVoice: voice.active })}
+                        onClick={() => { void openMissingCompanyDialog({ listed, query: search.trim(), fromVoice: voice.active }); }}
                       >
                         <span className="rh-listed-candidate-name">{listed.name}</span>
                         <span className="rh-listed-candidate-code">{listed.code}</span>
@@ -1986,7 +2102,7 @@ export default function ReportHome() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => openBlockingDialog({ kind: 'missing-company', listed: listedOutsidePool, query: search.trim(), fromVoice: voice.active })}
+                  onClick={() => { void openMissingCompanyDialog({ listed: listedOutsidePool, query: search.trim(), fromVoice: voice.active }); }}
                 >
                   加入监控池
                 </button>
@@ -2052,6 +2168,7 @@ export default function ReportHome() {
                 <p>
                   已识别到「{dialog.listed.name}」（{dialog.listed.code}），但不在当前监控池。
                   {dialog.query && hasQuestionIntent(dialog.query) ? ' 加入后将继续用刚才的问题进入详情。' : ''}
+                  {dialog.fromVoice ? ' 可以说「加入」或「取消」。' : ''}
                 </p>
                 <div className="rh-dialog-actions">
                   <button type="button" className="rh-dialog-cancel" disabled={dialogBusy} onClick={() => closeBlockingDialog({ resumeListen: true })}>

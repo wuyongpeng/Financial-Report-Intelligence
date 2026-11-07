@@ -1,6 +1,6 @@
 /**
- * Server-side home ask: inject roster snapshot into LLM context.
- * Client should try answerHomeRosterLocally first; this is the fallback.
+ * Server-side home ask: roster Q&A or constrained home chitchat.
+ * Client should try answerHomeRosterLocally first for roster; chitchat always hits LLM (or fallback).
  */
 import { fetchChatCompletionsFrom } from './llm-gate';
 import { llmConfigured, parseLlmProviders } from './llm-providers';
@@ -11,9 +11,16 @@ import {
   homeAskUserPrompt,
   type HomeRosterAnswer,
 } from './home-roster-answer';
+import {
+  homeChitchatFallback,
+  homeChitchatSystemPrompt,
+  homeChitchatUserPrompt,
+} from './home-chitchat';
 import type { HomeRosterRow } from './home-roster-snapshot';
 
 const HOME_ASK_TIMEOUT_MS = Number(process.env.LLM_HOME_ASK_TIMEOUT_MS ?? 12_000);
+
+export type HomeAskMode = 'roster' | 'chitchat';
 
 function clipAnswer(text: string, max = 280) {
   const t = text.replace(/\s+/g, ' ').trim();
@@ -21,18 +28,23 @@ function clipAnswer(text: string, max = 280) {
   return chars.length <= max ? t : `${chars.slice(0, max - 1).join('')}…`;
 }
 
-async function generateHomeAskLlm(prompt: string): Promise<string | null> {
+async function generateHomeAskLlm(opts: {
+  system: string;
+  prompt: string;
+  maxTokens: number;
+  clipMax: number;
+}): Promise<string | null> {
   if (!llmConfigured()) return null;
   const providers = orderVerdictProviders(parseLlmProviders()).slice(0, 2);
   const body = {
     temperature: 0.3,
-    max_tokens: 220,
+    max_tokens: opts.maxTokens,
     enable_thinking: false,
     thinking: { type: 'disabled' },
     chat_template_kwargs: { enable_thinking: false },
     messages: [
-      { role: 'system', content: homeAskSystemPrompt() },
-      { role: 'user', content: prompt },
+      { role: 'system', content: opts.system },
+      { role: 'user', content: opts.prompt },
     ],
   };
   for (const provider of providers) {
@@ -49,7 +61,7 @@ async function generateHomeAskLlm(prompt: string): Promise<string | null> {
         choices?: Array<{ message?: { content?: string } }>;
       };
       const content = json.choices?.[0]?.message?.content?.trim();
-      if (content) return clipAnswer(content);
+      if (content) return clipAnswer(content, opts.clipMax);
     } catch (error) {
       console.warn('[home-ask] generation failed', { provider: provider.id, message: String(error) });
     } finally {
@@ -64,13 +76,36 @@ export async function generateHomeAskAnswer(input: {
   rosterSnapshot: string;
   rows: HomeRosterRow[];
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  mode?: HomeAskMode;
 }): Promise<HomeRosterAnswer> {
+  const mode: HomeAskMode = input.mode === 'chitchat' ? 'chitchat' : 'roster';
+
+  if (mode === 'chitchat') {
+    const prompt = homeChitchatUserPrompt({
+      question: input.question,
+      history: input.history,
+    });
+    const llm = await generateHomeAskLlm({
+      system: homeChitchatSystemPrompt(),
+      prompt,
+      maxTokens: 160,
+      clipMax: 100,
+    });
+    if (llm) return { answer: llm, mode: 'llm' };
+    return { answer: homeChitchatFallback(), mode: 'local' };
+  }
+
   const prompt = homeAskUserPrompt({
     question: input.question,
     rosterSnapshot: input.rosterSnapshot,
     history: input.history,
   });
-  const llm = await generateHomeAskLlm(prompt);
+  const llm = await generateHomeAskLlm({
+    system: homeAskSystemPrompt(),
+    prompt,
+    maxTokens: 220,
+    clipMax: 280,
+  });
   if (llm) {
     const openCode = extractOpenCodeFromAnswer(llm, input.rows);
     return { answer: llm, openCode, mode: 'llm' };

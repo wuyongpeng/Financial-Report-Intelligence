@@ -73,6 +73,8 @@ export function needsVoiceCompanyConfirm(opts: {
 
 const YES_RE = /^(确定|确认|是的?|对的?|没错|好的?|可以|行|嗯+|yes|ok)\s*[。.!！]?$/i;
 const NO_RE = /^(不是|不对|否|错了|取消|重新|换一个?|no)\s*[。.!！]?$/i;
+/** Join-monitor dialog: also accept 加入 / 加入监控池. */
+const JOIN_YES_RE = /^(加入(?:监控池)?|确认加入|确定加入)\s*[。.!！]?$/i;
 
 export function parseVoiceConfirmReply(text: string): VoiceConfirmReply {
   const t = text.replace(/\s+/g, '').trim();
@@ -152,6 +154,20 @@ export function buildVoicePickPrompt(candidates: ListedNameCode[]): string {
     .join('，');
   const more = n > 8 ? `等共 ${n} 家` : '';
   return `检索到多个匹配结果，你想选择哪一个？${lines}${more}。可以说序号或名字。`;
+}
+
+
+/** Spoken yes/no while「加入监控池」dialog is open. */
+export function parseVoiceJoinReply(text: string): VoiceConfirmReply {
+  const t = text.replace(/\s+/g, '').trim();
+  if (!t) return null;
+  if (JOIN_YES_RE.test(t)) return 'yes';
+  return parseVoiceConfirmReply(text);
+}
+
+/** TTS / banner aligned with missing-company dialog actions. */
+export function buildVoiceJoinPrompt(listed: ListedNameCode): string {
+  return `已识别到「${listed.name}」（${listed.code}），是否加入监控池？可以说加入或取消。`;
 }
 
 export function buildVoiceConfirmPrompt(listed: ListedNameCode): string {

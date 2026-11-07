@@ -49,11 +49,13 @@ export async function POST(request: Request) {
       // Allow empty roster asks; snapshot may still describe empty state.
     }
     const history = parseHistory(body.history);
+    const mode = body.mode === 'chitchat' ? 'chitchat' as const : 'roster' as const;
     const result = await generateHomeAskAnswer({
       question,
       rosterSnapshot,
       rows,
       history,
+      mode,
     });
     return Response.json(
       { answer: result.answer, openCode: result.openCode ?? null, mode: result.mode },
