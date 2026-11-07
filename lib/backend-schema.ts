@@ -124,6 +124,29 @@ async function migrate() {
     )`;
     await tx`CREATE INDEX IF NOT EXISTS metrics_overview_acks_code_period_idx
       ON metrics_overview_acks (code, period)`;
+    // Independent cross-check review, scoped to a company/period/metric snapshot.
+    await tx`CREATE TABLE IF NOT EXISTS metrics_check_reviews (
+      code TEXT NOT NULL,
+      period TEXT NOT NULL,
+      metric TEXT NOT NULL CHECK (metric IN ('revenue','net_profit','eps','roe')),
+      fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('approved','flagged')),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (code, period, metric)
+    )`;
+    // Append-only treatment notes: changing data never erases earlier handling history.
+    await tx`CREATE TABLE IF NOT EXISTS metrics_check_progress (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT NOT NULL,
+      period TEXT NOT NULL,
+      metric TEXT NOT NULL CHECK (metric IN ('revenue','net_profit','eps','roe')),
+      fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('open','in_progress','resolved')),
+      note TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS metrics_check_progress_latest_idx
+      ON metrics_check_progress (code, period, metric, updated_at DESC, id DESC)`;
     /* Human review state for /admin/metrics: acked ↔ flagged (mutual exclusive). */
     await tx`CREATE TABLE IF NOT EXISTS metrics_overview_reviews (
       announcement_id TEXT PRIMARY KEY REFERENCES announcements(id) ON DELETE CASCADE,

@@ -1,93 +1,52 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { apiError } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
-import {
-  buildCheckCells,
-  CHECK_METRICS,
-  type CheckMetric,
-  type DbMetricRow,
-  type ThirdPartyRow,
-} from '@/lib/metrics-check';
+import { loadCheckSnapshot } from '@/lib/metrics-check-server';
+import { applyCheckReviews, summarizeCheckReviews, parseCheckReviewInput, findCheckReviewTarget, type CheckReview, type CheckProgress, applyCheckProgress, summarizeCheckProgress, parseCheckProgressInput } from '@/lib/metrics-check-review';
 
 export const dynamic = 'force-dynamic';
 
-function isFiniteOrNull(value: unknown): value is number | null {
-  return value === null || (typeof value === 'number' && Number.isFinite(value));
-}
-
-function isThirdPartyRow(value: unknown): value is ThirdPartyRow {
-  if (!value || typeof value !== 'object') return false;
-  const row = value as Record<string, unknown>;
-  return typeof row.code === 'string'
-    && /^\d{6}$/.test(row.code)
-    && typeof row.period === 'string'
-    && row.period.length > 0
-    && isFiniteOrNull(row.revenueYi)
-    && isFiniteOrNull(row.netProfitYi)
-    && isFiniteOrNull(row.eps)
-    && isFiniteOrNull(row.roe)
-    && (row.name === undefined || typeof row.name === 'string');
-}
-
-async function loadThirdParty(): Promise<ThirdPartyRow[]> {
-  const raw = await readFile(resolve(process.cwd(), 'data/third-party-metrics.json'), 'utf8');
-  const parsed = JSON.parse(raw) as unknown;
-  if (!Array.isArray(parsed)) throw new Error('third-party-metrics.json must be an array');
-  const rows = parsed.filter(isThirdPartyRow);
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = `${row.code}:${row.period}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-/** Open read for demo ops console (third-party cross-check). */
-export async function GET(_request: Request) {
+/** Open ops console; independent from metrics overview and deletion authorization. */
+export async function GET() {
   try {
     await ensureBackendSchema();
-    const thirdParty = await loadThirdParty();
-    const codes = [...new Set(thirdParty.map((row) => row.code))];
-    const periodSet = new Set(thirdParty.map((row) => row.period));
-    // Q3 YTD fold needs companion H1/Q2 rows even if that period is absent from third-party.
-    for (const period of [...periodSet]) {
-      const m = period.match(/^(20\d{2})Q3$/i);
-      if (m) {
-        periodSet.add(`${m[1]}H1`);
-        periodSet.add(`${m[1]}Q2`);
-      }
-    }
-    const periods = [...periodSet];
     const db = getDb();
-    const dbRows = codes.length === 0 ? [] : await db<DbMetricRow[]>`
-      SELECT m.code, c.name, m.period, m.metric, m.value, m.unit
-      FROM financial_metrics m
-      LEFT JOIN companies c ON c.code = m.code
-      WHERE m.code IN ${db(codes)}
-        AND m.period IN ${db(periods)}
-        AND m.metric IN ${db(CHECK_METRICS)}
-    `;
-    const normalized: DbMetricRow[] = dbRows
-      .filter((row): row is DbMetricRow => CHECK_METRICS.includes(row.metric as CheckMetric))
-      .map((row) => ({
-        code: row.code,
-        name: row.name,
-        period: row.period,
-        metric: row.metric as CheckMetric,
-        value: Number(row.value),
-        unit: row.unit,
-      }));
-    const { cells, summary, periodNote } = buildCheckCells(thirdParty, normalized);
-    return Response.json({
-      periodNote,
-      summary,
-      cells,
-      thirdPartyCount: thirdParty.length,
-    }, { headers: { 'cache-control': 'no-store' } });
+    const snapshot = await loadCheckSnapshot(db);
+    const reviews = await db<CheckReview[]>`SELECT code, period, metric, fingerprint, status FROM metrics_check_reviews`;
+    const progress = await db<CheckProgress[]>`SELECT DISTINCT ON (code, period, metric)
+      code, period, metric, fingerprint, status, note, updated_at::text AS "updatedAt"
+      FROM metrics_check_progress ORDER BY code, period, metric, updated_at DESC, id DESC`;
+    const cells = applyCheckProgress(applyCheckReviews(snapshot.cells, reviews), progress);
+    return Response.json({ ...snapshot, cells, reviewSummary: summarizeCheckReviews(cells), progressSummary: summarizeCheckProgress(cells) }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     return apiError(error);
   }
+}
+
+export async function POST(request: Request) {
+  let body: unknown;
+  try { body = await request.json(); }
+  catch { return Response.json({ error: '请求体无效' }, { status: 400 }); }
+  const progress = parseCheckProgressInput(body);
+  const review = progress ? null : parseCheckReviewInput(body);
+  const input = progress ?? review;
+  if (!input) return Response.json({ error: '核对处理参数无效' }, { status: 400 });
+  try {
+    await ensureBackendSchema();
+    const result = await getDb().begin('isolation level repeatable read', async tx => {
+      const snapshot = await loadCheckSnapshot(tx);
+      const target = findCheckReviewTarget(snapshot.cells, input);
+      if (!target.ok) return target;
+      if (progress) {
+        await tx`INSERT INTO metrics_check_progress (code, period, metric, fingerprint, status, note, updated_at)
+          VALUES (${progress.code}, ${progress.period}, ${progress.metric}, ${progress.fingerprint}, ${progress.status}, ${progress.note}, NOW())`;
+      } else await tx`INSERT INTO metrics_check_reviews (code, period, metric, fingerprint, status, updated_at)
+        VALUES (${input.code}, ${input.period}, ${input.metric}, ${input.fingerprint}, ${input.status}, NOW())
+        ON CONFLICT (code, period, metric) DO UPDATE SET fingerprint=EXCLUDED.fingerprint,
+          status=EXCLUDED.status, updated_at=NOW()`;
+      return { ok: true as const };
+    });
+    if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+    return Response.json({ ok: true, status: input.status }, { headers: { 'cache-control': 'no-store' } });
+  } catch (error) { return apiError(error); }
 }
