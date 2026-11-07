@@ -28,14 +28,15 @@
 .rh-home-answer p{margin:0;font-size:14px;line-height:1.7;color:#334155;white-space:pre-wrap}
 .rh-home-answer-dismiss{position:absolute;top:10px;right:10px;border:0;background:transparent;color:#8494ab;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;padding:0}
 .rh-home-answer-dismiss:hover{background:#e2eaf8;color:#475569}
-.rh-eva-dock{position:fixed;right:22px;top:50%;transform:translateY(-50%);z-index:40;display:flex;align-items:flex-end;gap:12px}
-.rh-eva-orb{width:58px;height:58px;border:0;border-radius:50%;background:#3064db;color:#fff;font-size:13px;font-weight:700;letter-spacing:.02em;cursor:pointer;animation:rh-eva-beat 1.5s ease-in-out infinite}
-.rh-eva-orb.is-speak{background:#1d4ed8}
-@keyframes rh-eva-beat{
-  0%,100%{transform:scale(1);box-shadow:0 0 0 0 #3064db59}
-  18%{transform:scale(1.07)}
-  36%{transform:scale(1)}
-  54%{transform:scale(1.05);box-shadow:0 0 0 12px #3064db00}
+.rh-eva-dock{position:fixed;top:64px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.rh-home button.rh-eva-orb{width:52px;height:52px;padding:0;border:0;background:transparent;flex:none;line-height:0}
+.rh-eva-logo{display:block;width:52px;height:52px;transform-origin:center;animation:rh-eva-breathe 4s ease-in-out infinite}
+@keyframes rh-eva-breathe{
+  0%,100%{transform:scale(1);opacity:.85}
+  45%{transform:scale(1.06);opacity:1}
+}
+@media (prefers-reduced-motion: reduce){
+  .rh-eva-logo{animation:none;opacity:1}
 }
 .rh-eva-panel{width:min(300px,calc(100vw - 110px));max-height:min(420px,70vh);display:flex;flex-direction:column;background:#fff;border:1px solid #d4e2ff;border-radius:16px;box-shadow:0 12px 32px #24344c1f;overflow:hidden}
 .rh-eva-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #e6eefc}

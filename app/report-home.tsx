@@ -296,7 +296,7 @@ export default function ReportHome() {
   /** Ephemeral home-AI reply (typed + voice); never seeds detail chat. */
   const [homeAnswer, setHomeAnswer] = useState<string | null>(null);
   const [voiceTurns, setVoiceTurns] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const [voicePanelOpen, setVoicePanelOpen] = useState(false);
+  const [voicePanelOpen, setVoicePanelOpen] = useState(true);
   const [starred, setStarred] = useState<string[]>(() => readStarredCodes());
   const [submitting, setSubmitting] = useState(false);
   const [dialog, setDialog] = useState<DialogState | null>(null);
@@ -541,8 +541,8 @@ export default function ReportHome() {
 
   const voiceWasActiveRef = useRef(false);
   useEffect(() => {
+    if (!voiceWasActiveRef.current && voice.active) setVoicePanelOpen(true);
     if (voiceWasActiveRef.current && !voice.active) {
-      setVoicePanelOpen(false);
       if (!searchEditedDuringVoiceRef.current) setSearch('');
     }
     voiceWasActiveRef.current = voice.active;
@@ -2329,10 +2329,26 @@ export default function ReportHome() {
       )}
       {voice.active && (
         <div className={`rh-eva-dock${voicePanelOpen ? ' is-open' : ''}`}>
+          <button
+            type="button"
+            className="rh-eva-orb"
+            aria-label={voicePanelOpen ? '收起语音对话' : '展开语音对话'}
+            aria-expanded={voicePanelOpen}
+            onClick={() => setVoicePanelOpen((open) => !open)}
+          >
+            <svg className="rh-eva-logo" viewBox="0 0 256 256" role="img" aria-hidden="true">
+              <defs>
+                <clipPath id="rh-eva-logo-l"><rect x="0" y="0" width="128" height="256" /></clipPath>
+                <clipPath id="rh-eva-logo-r"><rect x="128" y="0" width="128" height="256" /></clipPath>
+              </defs>
+              <path fillRule="evenodd" fill="#0b2847" clipPath="url(#rh-eva-logo-l)" d="M128.29 251.04 L127.42 250.75 L124.50 237.34 L123.33 235.01 L122.17 227.43 L115.17 205.85 L113.42 197.10 L110.51 189.52 L110.51 187.77 L105.26 172.61 L104.67 168.53 L100.01 155.12 L86.31 148.41 L82.81 147.83 L69.98 142.00 L64.15 139.66 L62.40 139.66 L50.73 134.41 L47.82 133.83 L46.07 132.67 L43.15 132.08 L41.99 130.92 L38.49 130.33 L31.20 127.13 L32.07 125.67 L41.99 122.17 L43.74 122.17 L55.40 116.92 L58.31 116.34 L64.73 113.42 L66.48 113.42 L88.64 104.09 L94.47 102.34 L99.43 99.72 L114.00 55.40 L114.00 52.48 L122.75 25.08 L122.75 20.41 L123.92 19.24 L127.71 4.37 L129.17 5.25 L131.50 16.91 L139.66 43.15 L140.25 47.82 L142.00 51.90 L143.16 57.73 L148.41 73.48 L149.58 79.89 L155.99 99.72 L165.03 104.09 L169.69 105.26 L188.94 113.42 L197.10 115.75 L207.60 120.42 L220.43 124.50 L224.22 126.54 L222.76 128.00 L212.26 131.50 L199.44 137.33 L191.85 139.66 L176.69 146.66 L159.78 153.08 L156.57 155.12 L148.99 177.86 L148.99 180.19 L143.16 197.69 L143.16 199.44 L142.00 201.18 L140.25 209.93 L135.00 226.26 L135.00 228.59 L133.25 232.09 L133.83 234.42 L132.08 236.17 L130.33 245.50 L128.29 251.04 Z M128.29 148.99 L127.42 148.12 L126.83 145.79 L125.67 144.62 L125.67 143.45 L124.50 142.29 L125.08 140.54 L124.50 140.54 L124.21 141.41 L123.92 141.12 L121.00 135.87 L121.00 134.71 L119.84 134.12 L119.84 132.96 L117.50 130.62 L116.92 128.87 L116.05 128.58 L115.17 127.13 L115.75 125.38 L122.75 115.46 L122.75 114.30 L123.92 113.13 L125.08 110.21 L126.83 109.05 L126.25 107.88 L127.71 104.67 L130.33 108.46 L130.33 109.63 L132.67 113.71 L132.08 114.30 L133.25 114.30 L136.75 120.71 L140.25 125.38 L140.25 128.29 L136.16 132.96 L136.16 134.12 L135.00 136.46 L133.83 136.46 L134.41 137.04 L131.50 142.29 L130.33 143.45 L128.29 148.99 Z" />
+              <path fillRule="evenodd" fill="#183756" clipPath="url(#rh-eva-logo-r)" d="M128.29 251.04 L127.42 250.75 L124.50 237.34 L123.33 235.01 L122.17 227.43 L115.17 205.85 L113.42 197.10 L110.51 189.52 L110.51 187.77 L105.26 172.61 L104.67 168.53 L100.01 155.12 L86.31 148.41 L82.81 147.83 L69.98 142.00 L64.15 139.66 L62.40 139.66 L50.73 134.41 L47.82 133.83 L46.07 132.67 L43.15 132.08 L41.99 130.92 L38.49 130.33 L31.20 127.13 L32.07 125.67 L41.99 122.17 L43.74 122.17 L55.40 116.92 L58.31 116.34 L64.73 113.42 L66.48 113.42 L88.64 104.09 L94.47 102.34 L99.43 99.72 L114.00 55.40 L114.00 52.48 L122.75 25.08 L122.75 20.41 L123.92 19.24 L127.71 4.37 L129.17 5.25 L131.50 16.91 L139.66 43.15 L140.25 47.82 L142.00 51.90 L143.16 57.73 L148.41 73.48 L149.58 79.89 L155.99 99.72 L165.03 104.09 L169.69 105.26 L188.94 113.42 L197.10 115.75 L207.60 120.42 L220.43 124.50 L224.22 126.54 L222.76 128.00 L212.26 131.50 L199.44 137.33 L191.85 139.66 L176.69 146.66 L159.78 153.08 L156.57 155.12 L148.99 177.86 L148.99 180.19 L143.16 197.69 L143.16 199.44 L142.00 201.18 L140.25 209.93 L135.00 226.26 L135.00 228.59 L133.25 232.09 L133.83 234.42 L132.08 236.17 L130.33 245.50 L128.29 251.04 Z M128.29 148.99 L127.42 148.12 L126.83 145.79 L125.67 144.62 L125.67 143.45 L124.50 142.29 L125.08 140.54 L124.50 140.54 L124.21 141.41 L123.92 141.12 L121.00 135.87 L121.00 134.71 L119.84 134.12 L119.84 132.96 L117.50 130.62 L116.92 128.87 L116.05 128.58 L115.17 127.13 L115.75 125.38 L122.75 115.46 L122.75 114.30 L123.92 113.13 L125.08 110.21 L126.83 109.05 L126.25 107.88 L127.71 104.67 L130.33 108.46 L130.33 109.63 L132.67 113.71 L132.08 114.30 L133.25 114.30 L136.75 120.71 L140.25 125.38 L140.25 128.29 L136.16 132.96 L136.16 134.12 L135.00 136.46 L133.83 136.46 L134.41 137.04 L131.50 142.29 L130.33 143.45 L128.29 148.99 Z" />
+            </svg>
+          </button>
           {voicePanelOpen ? (
             <div className="rh-eva-panel" role="dialog" aria-label="语音对话">
               <div className="rh-eva-panel-head">
-                <b>Eva</b>
+                <b>语音</b>
                 <button type="button" onClick={() => voice.end()}>结束语音</button>
               </div>
               <div className="rh-eva-panel-log">
@@ -2346,15 +2362,6 @@ export default function ReportHome() {
               </div>
             </div>
           ) : null}
-          <button
-            type="button"
-            className={`rh-eva-orb${voice.listening || voice.arming ? ' is-live' : ''}${voice.speaking ? ' is-speak' : ''}`}
-            aria-label={voicePanelOpen ? '收起语音对话' : '展开语音对话'}
-            aria-expanded={voicePanelOpen}
-            onClick={() => setVoicePanelOpen((open) => !open)}
-          >
-            Eva
-          </button>
         </div>
       )}
     </section>
