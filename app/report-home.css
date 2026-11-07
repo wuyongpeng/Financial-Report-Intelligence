@@ -46,9 +46,6 @@
   .rh-eva-dock .eva-voice-blob{width:40px;height:40px}
 }
 .rh-eva-panel{width:min(360px,calc(100vw - 24px));max-height:min(420px,55dvh);display:flex;flex-direction:column;background:#fff;border:1px solid #d4e2ff;border-radius:16px;box-shadow:0 12px 32px #24344c1f;overflow:hidden}
-.rh-eva-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #e6eefc}
-.rh-eva-panel-head b{font-size:13px;color:#3064db}
-.rh-eva-panel-head button{border:0;background:#f4f7fb;color:#5b6d85;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
 .rh-eva-panel-log{overflow:auto;padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
 .rh-eva-panel-log p{margin:0;font-size:13px;line-height:1.55;white-space:pre-wrap}
 .rh-eva-panel-log .is-user{align-self:flex-end;max-width:92%;background:#f4f7fb;color:#334155;border-radius:12px 12px 4px 12px;padding:8px 10px}

@@ -72,6 +72,7 @@ import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
 import { isVoiceGreetingOrNoise } from '@/lib/voice/greeting-intent';
 import { speakAnswer } from '@/lib/voice/client-tts';
+import { HomeVoiceTurns, assertHomeVoiceTurn, acceptsHomeBargeSpeech, type HomeVoiceTurn } from '@/lib/voice/home-turn';
 import {
   appendHomeChatTurn,
   clearHomeChatTurns,
@@ -318,8 +319,15 @@ export default function ReportHome() {
   const coverageRef = useRef(coverage);
   coverageRef.current = coverage;
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const onSearchSubmitRef = useRef<(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) => Promise<void>>(async () => undefined);
+  const onSearchSubmitRef = useRef<(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean; homeTurn?: HomeVoiceTurn }) => Promise<void>>(async () => undefined);
   const voiceNavigatingRef = useRef(false);
+  const homeVoiceTurnsRef = useRef(new HomeVoiceTurns());
+  const homeSpeakingTextRef = useRef('');
+  const homeVoiceApiRef = useRef(voice);
+  useLayoutEffect(() => { homeVoiceApiRef.current = voice; }, [voice]);
+  const homeSpeakRef = useRef<(text: string) => Promise<void>>(async () => undefined);
+  const homeMountedRef = useRef(false);
+  const homeResumeTimersRef = useRef(new Set<number>());
   type VoiceConfirmDialog = Extract<DialogState, { kind: 'voice-confirm' }>;
   type VoicePickDialog = Extract<DialogState, { kind: 'voice-pick' }>;
   const voiceConfirmYesRef = useRef<(d: VoiceConfirmDialog) => Promise<void>>(async () => undefined);
@@ -374,8 +382,76 @@ export default function ReportHome() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coverage]);
 
-  // Global voice session: register home utterance handler; do not own ASR/float.
+  function clearHomeResumeTimers() {
+    homeResumeTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    homeResumeTimersRef.current.clear();
+  }
+
+  function scheduleHomeResume(callback: () => void, delay: number) {
+    const turn = homeVoiceTurnsRef.current.current;
+    const timer = window.setTimeout(() => {
+      homeResumeTimersRef.current.delete(timer);
+      if (homeMountedRef.current && homeVoiceTurnsRef.current.owns(turn)) callback();
+    }, delay);
+    homeResumeTimersRef.current.add(timer);
+  }
+
+  function armHomeInterrupt(turn: HomeVoiceTurn | null) {
+    if (!turn || !homeVoiceApiRef.current.active || turn.signal.aborted) return;
+    homeVoiceApiRef.current.armBargeIn(() => {
+      if (!homeVoiceTurnsRef.current.owns(turn)) return;
+      homeVoiceTurnsRef.current.cancel(turn);
+      homeSpeakingTextRef.current = '';
+      setSubmitting(false);
+      setDialogBusy(false);
+      homeVoiceApiRef.current.setBusy(false);
+      homeVoiceApiRef.current.setSpeaking(false);
+    }, (text) => {
+      const dialog = dialogRef.current;
+      const replies = dialog?.kind === 'voice-pick'
+        ? [...dialog.candidates.flatMap((c) => [c.name, c.code]), '第一个', '第二个', '第三个', '第四个', '第五个', '1', '2', '3', '4', '5', '取消']
+        : dialog?.kind === 'voice-confirm' || dialog?.kind === 'missing-company'
+          ? ['是', '好', '好的', '确定', '不是', '是的', '对', '不', '否', '行', '要', '不要', '可以', '加入', '取消', '不加入', '不用了'] : [];
+      return acceptsHomeBargeSpeech(text, homeSpeakingTextRef.current, replies);
+    });
+  }
+
+  function endHomeVoice() {
+    clearHomeResumeTimers();
+    homeVoiceTurnsRef.current.cancel();
+    homeSpeakingTextRef.current = '';
+    voice.end();
+  }
+
+  async function speakHomeLine(line: string) {
+    const turn = homeVoiceTurnsRef.current.current;
+    assertHomeVoiceTurn(turn);
+    homeSpeakingTextRef.current = line;
+    homeVoiceApiRef.current.setBusy(true);
+    homeVoiceApiRef.current.setSpeaking(true);
+    armHomeInterrupt(turn);
+    try {
+      await speakAnswer(line, turn?.signal);
+      assertHomeVoiceTurn(turn);
+    } catch (error) {
+      assertHomeVoiceTurn(turn);
+      // Non-cancellation TTS failure should not break routing.
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+    } finally {
+      if (homeVoiceTurnsRef.current.owns(turn)) {
+        homeSpeakingTextRef.current = '';
+        homeVoiceApiRef.current.setSpeaking(false);
+        homeVoiceApiRef.current.setBusy(false);
+      }
+    }
+  }
+  useLayoutEffect(() => { homeSpeakRef.current = speakHomeLine; });
+
+  // Global voice session: register home routing; provider exclusively owns ASR.
   useEffect(() => {
+    homeMountedRef.current = true;
+    const turns = homeVoiceTurnsRef.current;
+    const resumeTimers = homeResumeTimersRef.current;
     const pushTurn = (role: 'user' | 'assistant', content: string) => {
       appendHomeChatTurn(role, content);
       setVoiceTurns(getHomeChatTurns());
@@ -384,18 +460,10 @@ export default function ReportHome() {
       const spoken = sanitizeHomeAssistantText(line) || line.trim();
       if (!spoken) return;
       pushTurn('assistant', spoken);
-      voice.setBusy(true);
-      voice.setSpeaking(true);
-      try {
-        await speakAnswer(spoken, undefined);
-      } catch { /* ignore TTS */ }
-      finally {
-        voice.setSpeaking(false);
-        voice.setBusy(false);
-      }
+      await homeSpeakRef.current(spoken);
     };
 
-    const handler = async (text: string): Promise<VoiceUtteranceResult> => {
+    const route = async (text: string, turn: HomeVoiceTurn): Promise<VoiceUtteranceResult> => {
       const openDialog = dialogRef.current;
 
       // While a blocking dialog is open, only confirm/pick replies are accepted.
@@ -406,7 +474,7 @@ export default function ReportHome() {
           try {
             await voiceConfirmYesRef.current(openDialog);
           } finally {
-            voice.setBusy(false);
+            if (homeVoiceTurnsRef.current.owns(turn)) voice.setBusy(false);
           }
           return { action: 'hold' };
         }
@@ -416,7 +484,7 @@ export default function ReportHome() {
           return { action: 'hold' };
         }
         await speakLine('请说确定或不是');
-        if (voice.active && dialogRef.current) voice.resumeListen();
+        if (homeVoiceApiRef.current.active && dialogRef.current) voice.resumeListen();
         return { action: 'hold' };
       }
       if (openDialog?.kind === 'voice-pick') {
@@ -426,7 +494,7 @@ export default function ReportHome() {
           try {
             await voicePickRef.current(openDialog, choice.index);
           } finally {
-            voice.setBusy(false);
+            if (homeVoiceTurnsRef.current.owns(turn)) voice.setBusy(false);
           }
           return { action: 'hold' };
         }
@@ -435,7 +503,7 @@ export default function ReportHome() {
           return { action: 'hold' };
         }
         await speakLine('请说序号或公司名字');
-        if (voice.active && dialogRef.current) voice.resumeListen();
+        if (homeVoiceApiRef.current.active && dialogRef.current) voice.resumeListen();
         return { action: 'hold' };
       }
       if (openDialog?.kind === 'missing-company') {
@@ -445,7 +513,7 @@ export default function ReportHome() {
           try {
             await confirmMissingCompanyRef.current();
           } finally {
-            voice.setBusy(false);
+            if (homeVoiceTurnsRef.current.owns(turn)) voice.setBusy(false);
           }
           return { action: 'hold' };
         }
@@ -455,7 +523,7 @@ export default function ReportHome() {
           return { action: 'hold' };
         }
         await speakLine('请说加入或取消');
-        if (voice.active && dialogRef.current) voice.resumeListen();
+        if (homeVoiceApiRef.current.active && dialogRef.current) voice.resumeListen();
         return { action: 'hold' };
       }
       if (openDialog) {
@@ -486,9 +554,9 @@ export default function ReportHome() {
       searchEditedDuringVoiceRef.current = false;
       voice.setBusy(true);
       try {
-        await onSearchSubmitRef.current(text, { fromVoice: true });
+        await onSearchSubmitRef.current(text, { fromVoice: true, homeTurn: turn });
       } finally {
-        voice.setBusy(false);
+        if (homeVoiceTurnsRef.current.owns(turn)) voice.setBusy(false);
       }
       if (voiceNavigatingRef.current || dialogRef.current) {
         // Detail handoff or blocking dialog — do not resume mic.
@@ -496,13 +564,51 @@ export default function ReportHome() {
       }
       return { action: 'resume' };
     };
+    const handler = async (text: string): Promise<VoiceUtteranceResult> => {
+      const turn = homeVoiceTurnsRef.current.begin();
+      homeSpeakingTextRef.current = '';
+      try {
+        const result = await route(text, turn);
+        assertHomeVoiceTurn(turn);
+        if (!homeVoiceApiRef.current.active || voiceNavigatingRef.current) return { action: 'hold' };
+        if (result.action === 'end') homeVoiceApiRef.current.end();
+        else if (result.action === 'resume') homeVoiceApiRef.current.resumeListen();
+        return { action: 'hold' }; // This page now owns natural resume; stale provider handlers cannot.
+      } catch (error) {
+        if (turn.signal.aborted) return { action: 'hold' };
+        throw error;
+      }
+    };
     voice.setUtteranceHandler(handler);
     return () => {
-      // Unmount must NOT end the global session — only clear this page's handler.
+      // Abort only homepage work; keep the global session for the detail handoff.
+      homeMountedRef.current = false;
+      turns.cancel();
+      resumeTimers.forEach((timer) => window.clearTimeout(timer));
+      resumeTimers.clear();
+      homeSpeakingTextRef.current = '';
+      voice.stopMic();
+      voice.setBusy(false);
+      voice.setSpeaking(false);
+      voice.setSuppressAutoListen(false);
       voice.setUtteranceHandler(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useLayoutEffect(() => {
+    if (!voice.active) {
+      homeVoiceTurnsRef.current.cancel();
+      homeSpeakingTextRef.current = '';
+      clearHomeResumeTimers();
+      queueMicrotask(() => {
+        if (homeMountedRef.current && !homeVoiceApiRef.current.active) {
+          setSubmitting(false);
+          setDialogBusy(false);
+        }
+      });
+    }
+  }, [voice.active]);
 
   // If we landed on home while a session is already active (detail → 返回主页), resume listen.
   useEffect(() => {
@@ -757,13 +863,18 @@ export default function ReportHome() {
   }
 
   function closeBlockingDialog(opts?: { resumeListen?: boolean }) {
+    homeVoiceTurnsRef.current.cancel();
+    homeSpeakingTextRef.current = '';
+    const expectedTurn = homeVoiceTurnsRef.current.current;
+    voice.stopMic();
     dialogRef.current = null;
     setDialog(null);
     voice.setSuppressAutoListen(false);
     const shouldResume = opts?.resumeListen !== false;
     if (shouldResume && voice.active && !voiceNavigatingRef.current) {
-      window.setTimeout(() => {
-        if (voice.active && !dialogRef.current && !voiceNavigatingRef.current) {
+      scheduleHomeResume(() => {
+        if (homeVoiceTurnsRef.current.current !== expectedTurn) return;
+        if (homeVoiceApiRef.current.active && !dialogRef.current && !voiceNavigatingRef.current) {
           voice.resumeListen();
         }
       }, 200);
@@ -772,29 +883,25 @@ export default function ReportHome() {
   closeBlockingDialogRef.current = closeBlockingDialog;
 
   async function speakBlockingPrompt(line: string) {
-    voice.setBusy(true);
-    voice.setSpeaking(true);
-    try {
-      await speakAnswer(line, undefined);
-    } catch { /* ignore TTS */ }
-    finally {
-      voice.setSpeaking(false);
-      voice.setBusy(false);
-    }
+    await speakHomeLine(line);
   }
 
   /** After dialog TTS, reopen mic so user can answer while modal stays open. */
   function resumeDialogListen() {
+    const turn = homeVoiceTurnsRef.current.current;
     if (!voice.active || voiceNavigatingRef.current) return;
-    window.setTimeout(() => {
-      if (voice.active && dialogRef.current && !voiceNavigatingRef.current) {
+    scheduleHomeResume(() => {
+      if (!homeVoiceTurnsRef.current.owns(turn)) return;
+      if (homeVoiceApiRef.current.active && dialogRef.current && !voiceNavigatingRef.current) {
         voice.resumeListen();
       }
     }, 120);
   }
 
   async function promptBlockingDialog(line: string) {
+    const turn = homeVoiceTurnsRef.current.current;
     await speakBlockingPrompt(line);
+    assertHomeVoiceTurn(turn);
     resumeDialogListen();
   }
 
@@ -831,7 +938,7 @@ export default function ReportHome() {
     if (!company) {
       setWaitToast(`已加入「${opts.name}」，请稍后再试`);
       if (opts.fromVoice && voice.active) {
-        window.setTimeout(() => voice.resumeListen(), 200);
+        scheduleHomeResume(() => voice.resumeListen(), 200);
       }
       return;
     }
@@ -849,27 +956,33 @@ export default function ReportHome() {
       return;
     }
     if (voice.active) {
-      window.setTimeout(() => voice.resumeListen(), 200);
+      scheduleHomeResume(() => voice.resumeListen(), 200);
     }
   }
 
     async function navigateWithAsk(company: CrawlCompanyCoverage, question: string, period: ParsedPeriod, opts?: { fromVoice?: boolean }) {
+    const turn = homeVoiceTurnsRef.current.current;
+    assertHomeVoiceTurn(turn);
+    armHomeInterrupt(turn);
     const pre = coverageHasMatchingReport(company, period);
     let periodToken = period.token ?? null;
     let matched: Report | null = null;
 
     if (pre !== 'no') {
       try {
-        const response = await fetch(`/api/reports?code=${encodeURIComponent(company.code)}&limit=100`, { cache: 'no-store' });
+        const response = await fetch(`/api/reports?code=${encodeURIComponent(company.code)}&limit=100`, { cache: 'no-store', signal: turn?.signal });
         const payload = await readContractJson(response, parseReportListResponse);
+        assertHomeVoiceTurn(turn);
         matched = pickBestReport(payload.reports, period);
         if (matched?.metrics?.[0]?.period) periodToken = matched.metrics[0].period;
         else if (period.token) periodToken = period.token;
       } catch {
+        assertHomeVoiceTurn(turn);
         /* fall through — still navigate if coverage says yes */
       }
     }
 
+    assertHomeVoiceTurn(turn);
     const periodSpecific = Boolean(period.year || period.kind || period.token || period.quarter);
     if (periodSpecific && !matched && pre !== 'yes') {
       openBlockingDialog({ kind: 'missing-report', company, period, fromVoice: Boolean(opts?.fromVoice) });
@@ -934,24 +1047,21 @@ export default function ReportHome() {
   }
 
   async function deliverHomeAnswer(answer: string, opts?: { fromVoice?: boolean }) {
+    assertHomeVoiceTurn(homeVoiceTurnsRef.current.current);
     const line = sanitizeHomeAssistantText(answer);
     if (!line) return;
     pushTurn('assistant', line);
     const shouldSpeak = Boolean(opts?.fromVoice || voice.active);
     if (!shouldSpeak) setHomeAnswer(line);
     if (!shouldSpeak) return;
-    voice.setBusy(true);
-    voice.setSpeaking(true);
-    try {
-      await speakAnswer(line, undefined);
-    } catch { /* ignore TTS */ }
-    finally {
-      voice.setSpeaking(false);
-      voice.setBusy(false);
-    }
+    await speakHomeLine(line);
   }
 
   async function runHomeRosterAsk(raw: string, opts?: { fromVoice?: boolean }) {
+    const turn = homeVoiceTurnsRef.current.current;
+    assertHomeVoiceTurn(turn);
+    homeSpeakingTextRef.current = '';
+    armHomeInterrupt(turn);
     const pref = homeRosterSourcePreference(raw);
     const source = pref === 'pool'
       ? coverage
@@ -991,6 +1101,7 @@ export default function ReportHome() {
     try {
       const response = await fetch('/api/home/ask', {
         method: 'POST',
+        signal: turn?.signal,
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -1001,7 +1112,9 @@ export default function ReportHome() {
         }),
       });
       if (!response.ok) throw new Error(`home ask ${response.status}`);
+      assertHomeVoiceTurn(turn);
       const payload = await response.json() as { answer?: string; openCode?: string | null };
+      assertHomeVoiceTurn(turn);
       const answer = typeof payload.answer === 'string' ? payload.answer.trim() : '';
       if (!answer) throw new Error('empty home ask');
       await deliverHomeAnswer(answer, opts);
@@ -1018,6 +1131,7 @@ export default function ReportHome() {
         }
       }
     } catch {
+      assertHomeVoiceTurn(turn);
       await deliverHomeAnswer(
         rows.length
           ? `当前清单有 ${rows.length} 家。可以说「现在首页有哪些公司」，或点名打开一家；细问财报请进详情。`
@@ -1028,6 +1142,10 @@ export default function ReportHome() {
   }
 
   async function runHomeChitchatAsk(raw: string, opts?: { fromVoice?: boolean }) {
+    const turn = homeVoiceTurnsRef.current.current;
+    assertHomeVoiceTurn(turn);
+    homeSpeakingTextRef.current = '';
+    armHomeInterrupt(turn);
     pushTurn('user', raw);
     if (!opts?.fromVoice) setSearch('');
     setHomeAnswer(null);
@@ -1047,6 +1165,7 @@ export default function ReportHome() {
     try {
       const response = await fetch('/api/home/ask', {
         method: 'POST',
+        signal: turn?.signal,
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -1059,11 +1178,14 @@ export default function ReportHome() {
         }),
       });
       if (!response.ok) throw new Error(`home chitchat ${response.status}`);
+      assertHomeVoiceTurn(turn);
       const payload = await response.json() as { answer?: string };
+      assertHomeVoiceTurn(turn);
       const answer = typeof payload.answer === 'string' ? payload.answer.trim() : '';
       if (!answer) throw new Error('empty home chitchat');
       await deliverHomeAnswer(answer, opts);
     } catch {
+      assertHomeVoiceTurn(turn);
       await deliverHomeAnswer(homeChitchatFallback(), opts);
     }
   }
@@ -1143,9 +1265,26 @@ export default function ReportHome() {
     router.push(`/${company.code}`);
   }
 
-  async function onSearchSubmit(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean }) {
+  async function onSearchSubmit(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean; homeTurn?: HomeVoiceTurn }) {
+    if (!(override ?? search).trim() || (submitting && !opts?.fromVoice)) return;
+    const turn = opts?.homeTurn ?? homeVoiceTurnsRef.current.begin();
+    try {
+      await submitHomeSearch(override, { ...opts, homeTurn: turn });
+    } catch (error) {
+      if (!turn.signal.aborted) throw error;
+    } finally {
+      if (!opts?.homeTurn && homeVoiceTurnsRef.current.owns(turn)
+        && homeVoiceApiRef.current.active && !voiceNavigatingRef.current && !dialogRef.current) {
+        homeVoiceApiRef.current.resumeListen();
+      }
+    }
+  }
+
+  async function submitHomeSearch(override?: string, opts?: { fromPlaceholder?: boolean; fromVoice?: boolean; homeTurn?: HomeVoiceTurn }) {
+    const turn = opts?.homeTurn ?? homeVoiceTurnsRef.current.current;
+    assertHomeVoiceTurn(turn);
     const raw = (override ?? search).trim();
-    if (!raw || submitting) return;
+    if (!raw || (submitting && !opts?.fromVoice)) return;
     const fromVoice = Boolean(opts?.fromVoice);
     const userEdited = Boolean(fromVoice && searchEditedDuringVoiceRef.current);
     const commitMatchedVoiceSearch = (matchedCount: number) => {
@@ -1162,7 +1301,7 @@ export default function ReportHome() {
         pushTurn('user', raw);
         await deliverHomeAnswer(homeGreetingNudge(), { fromVoice });
       } finally {
-        setSubmitting(false);
+        if (homeVoiceTurnsRef.current.owns(turn)) setSubmitting(false);
       }
       return;
     }
@@ -1173,7 +1312,7 @@ export default function ReportHome() {
       try {
         await runHomeChitchatAsk(raw, { fromVoice });
       } finally {
-        setSubmitting(false);
+        if (homeVoiceTurnsRef.current.owns(turn)) setSubmitting(false);
       }
       return;
     }
@@ -1197,7 +1336,7 @@ export default function ReportHome() {
       try {
         await runHomeRosterAsk(raw, { fromVoice });
       } finally {
-        setSubmitting(false);
+        if (homeVoiceTurnsRef.current.owns(turn)) setSubmitting(false);
       }
       return;
     }
@@ -1286,7 +1425,7 @@ export default function ReportHome() {
         try {
           await runHomeChitchatAsk(raw, { fromVoice: true });
         } finally {
-          setSubmitting(false);
+          if (homeVoiceTurnsRef.current.owns(turn)) setSubmitting(false);
         }
         return;
       }
@@ -1371,7 +1510,7 @@ export default function ReportHome() {
         isActiveTypedAsk,
       });
     } finally {
-      setSubmitting(false);
+      if (homeVoiceTurnsRef.current.owns(turn)) setSubmitting(false);
     }
   }
 
@@ -1431,12 +1570,15 @@ export default function ReportHome() {
 
 
   async function confirmMissingCompany() {
-    if (!dialog || dialog.kind !== 'missing-company') return;
+    if (!dialog || dialog.kind !== 'missing-company' || dialogBusy) return;
+    const turn = homeVoiceTurnsRef.current.current;
+    assertHomeVoiceTurn(turn);
     const { listed, query, fromVoice } = dialog;
     setDialogBusy(true);
     try {
       const response = await fetch('/api/companies/watch', {
         method: 'POST',
+        signal: turn?.signal,
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ code: listed.code, name: listed.name }),
       });
@@ -1446,6 +1588,7 @@ export default function ReportHome() {
         note?: string;
         enabledCount?: number;
       };
+      assertHomeVoiceTurn(turn);
       if (!response.ok) {
         setWaitToast(payload.error ?? '加入监控池失败，请稍后重试');
         return;
@@ -1454,6 +1597,7 @@ export default function ReportHome() {
       dialogRef.current = null;
       setDialog(null);
       const companies = await refreshCoverage();
+      assertHomeVoiceTurn(turn);
       await afterJoinContinue({
         code: listed.code,
         name: listed.name,
@@ -1462,7 +1606,7 @@ export default function ReportHome() {
         companies,
       });
     } finally {
-      setDialogBusy(false);
+      if (homeVoiceTurnsRef.current.owns(turn)) setDialogBusy(false);
     }
   }
   confirmMissingCompanyRef.current = confirmMissingCompany;
@@ -1710,7 +1854,7 @@ export default function ReportHome() {
                 onClick={() => {
                   // Mirror detail: empty → quiet end; has text → flush & send.
                   if (!hasText) {
-                    voice.end();
+                    endHomeVoice();
                     return;
                   }
                   if (searchEditedDuringVoiceRef.current) voice.setPartial(pendingText);
@@ -2342,7 +2486,7 @@ export default function ReportHome() {
               <button type="button" className="rh-eva-control" aria-label={voicePanelOpen ? '收起语音对话' : '展开语音对话'} aria-expanded={voicePanelOpen} aria-controls="rh-eva-conversation" title="语音对话" onClick={() => setVoicePanelOpen((open) => !open)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8H4v-8a8 8 0 1 1 16 0Z" /><circle cx="8" cy="11.5" r=".8" fill="currentColor" stroke="none" /><circle cx="12" cy="11.5" r=".8" fill="currentColor" stroke="none" /><circle cx="16" cy="11.5" r=".8" fill="currentColor" stroke="none" /></svg>
               </button>
-              <button type="button" className="rh-eva-control is-end" aria-label="结束语音" title="结束语音" onClick={() => voice.end()}>
+              <button type="button" className="rh-eva-control is-end" aria-label="结束语音" title="结束语音" onClick={() => endHomeVoice()}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
@@ -2350,13 +2494,9 @@ export default function ReportHome() {
           {voice.toast ? <div className="rh-eva-notice" role="alert">{voice.toast}</div> : null}
           {voice.active && voicePanelOpen ? (
             <div id="rh-eva-conversation" className="rh-eva-panel" role="dialog" aria-label="语音对话">
-              <div className="rh-eva-panel-head">
-                <b>语音</b>
-                <button type="button" onClick={() => voice.end()}>结束语音</button>
-              </div>
               <div className="rh-eva-panel-log">
                 {voiceTurns.length === 0 ? (
-                  <p className="rh-eva-panel-empty">直接说就行</p>
+                  <p className="rh-eva-panel-empty">但说无妨...</p>
                 ) : voiceTurns.map((turn, index) => (
                   <p key={`${turn.role}-${index}`} className={turn.role === 'user' ? 'is-user' : 'is-eva'}>
                     {turn.content}

@@ -23,6 +23,7 @@ import {
   VOICE_IDLE_EXIT_TOAST,
   VOICE_SEND_COUNTDOWN_MS,
   shouldQuietEndOnEmptyFinalize,
+  isMeaningfulBargePartial,
 } from '@/lib/voice/timing';
 import { VoiceFloat } from '@/components/voice-float';
 import { correctAsrHomophones, type AsrCorrectContext } from '@/lib/voice/asr-correct';
@@ -68,6 +69,8 @@ type VoiceSessionApi = {
   stopMic: () => void;
   /** After hold (ask/TTS/nav), listen again if session still active. */
   resumeListen: () => void;
+  /** Homepage opt-in only: one provider-owned mic while AI/TTS is interruptible. */
+  armBargeIn: (onInterrupt: () => void, accept?: (text: string) => boolean) => void;
   /**
    * Stop the current listen turn and flush ASR.
    * Pass `{ userInitiated: true }` for explicit stop / 「说完了」:
@@ -128,7 +131,11 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   /** True while finalizeListen is waiting on ASR flush — block heal auto-listen. */
   const finalizingRef = useRef(false);
   const [floatHeadExtra, setFloatHeadExtraState] = useState<ReactNode | null>(null);
-  const listenTurnRef = useRef<() => Promise<void>>(async () => undefined);
+  const listenTurnRef = useRef<(barge?: boolean) => Promise<void>>(async () => undefined);
+  const bargeRef = useRef<{ onInterrupt: () => void; accept?: (text: string) => boolean } | null>(null);
+  const bargeArmedRef = useRef(false);
+  const captureOpeningRef = useRef<Promise<PcmCapture> | null>(null);
+  const systemTtsAbortRef = useRef<AbortController | null>(null);
   const handleUtteranceRef = useRef<(raw: string) => Promise<void>>(async () => undefined);
   /** One auto-reconnect after mid-session ASR drop; reset on successful listen / explicit end. */
   const asrReconnectRef = useRef(0);
@@ -173,6 +180,12 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
 
   const end = useCallback((message?: string) => {
     activeRef.current = false;
+    const barge = bargeRef.current;
+    bargeRef.current = null;
+    bargeArmedRef.current = false;
+    barge?.onInterrupt();
+    systemTtsAbortRef.current?.abort();
+    systemTtsAbortRef.current = null;
     resetVoiceLevels();
     suppressAutoListenRef.current = false;
     finalizingRef.current = false;
@@ -191,6 +204,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   }, [clearArmTimer, releaseVoiceIo]);
 
   const stopMic = useCallback(() => {
+    bargeRef.current = null;
+    bargeArmedRef.current = false;
     voiceGenRef.current += 1;
     releaseVoiceIo();
     setListening(false);
@@ -244,15 +259,18 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const handlerGen = voiceGenRef.current;
     let result: VoiceUtteranceResult | void;
     try {
       result = await handler(text);
     } catch (err) {
+      if (handlerGen !== voiceGenRef.current || !activeRef.current) return;
       setToast(err instanceof Error ? err.message : '语音处理失败');
       if (activeRef.current) void listenTurnRef.current();
       return;
     }
 
+    if (handlerGen !== voiceGenRef.current || !activeRef.current) return;
     const action = result && typeof result === 'object' ? result.action : 'resume';
     if (action === 'end') {
       end(result && 'toast' in result ? result.toast : undefined);
@@ -313,16 +331,19 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     }, 2500);
   }, [clearArmTimer, clearVoiceFinalTimer, clearVoiceTurnTimers, end]);
 
-  const listenTurn = useCallback(async () => {
+  const listenTurn = useCallback(async (barge = false) => {
     if (!activeRef.current) return;
+    systemTtsAbortRef.current?.abort();
+    systemTtsAbortRef.current = null;
     clearArmTimer();
     releaseVoiceIo();
     const gen = ++voiceGenRef.current;
     voiceUtteranceHandledRef.current = false;
-    suppressAutoListenRef.current = false;
+    suppressAutoListenRef.current = barge;
+    bargeArmedRef.current = barge;
     finalizingRef.current = false;
-    setSpeakingState(false);
-    setListening(true);
+    if (!barge) setSpeakingState(false);
+    setListening(!barge);
     voicePartialRef.current = '';
     setPartialState('');
 
@@ -332,17 +353,43 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         asrReconnectRef.current += 1;
         setToast(`${message}（正在重连…）`);
         window.setTimeout(() => {
-          if (activeRef.current) void listenTurnRef.current();
+          if (activeRef.current && gen === voiceGenRef.current) {
+            void listenTurnRef.current(barge && !interrupted && Boolean(bargeRef.current));
+          }
         }, 500);
         return;
       }
       end(message);
     };
 
+    let interrupted = !barge;
+    const takeOver = (text: string) => {
+      if (interrupted) return true;
+      const callback = bargeRef.current;
+      if (!callback || !(callback.accept ? callback.accept(text) : isMeaningfulBargePartial(text))) return false;
+      interrupted = true;
+      bargeArmedRef.current = false;
+      bargeRef.current = null;
+      callback.onInterrupt();
+      suppressAutoListenRef.current = false;
+      setSpeakingState(false);
+      setBusyState(false);
+      setListening(true);
+      return true;
+    };
+
     try {
+      // A pending permission/capture acquisition cannot be cancelled. Wait for its
+      // generation cleanup before opening another, so rapid interruptions use one mic.
+      while (captureOpeningRef.current) {
+        try { await captureOpeningRef.current; } catch { /* previous open failed */ }
+        if (gen !== voiceGenRef.current || !activeRef.current) return;
+      }
+      if (gen !== voiceGenRef.current || !activeRef.current) return;
       const session = openAsrSession((ev) => {
         if (gen !== voiceGenRef.current) return;
         if (ev.type === 'partial') {
+          if (!takeOver(ev.text)) return;
           const prev = voicePartialRef.current;
           if (armingRef.current && ev.text !== prev) {
             if (voiceArmTimerRef.current != null) {
@@ -372,6 +419,11 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
           }
         }
         if (ev.type === 'final') {
+          if (!takeOver(ev.text)) {
+            if (bargeRef.current && activeRef.current) void listenTurnRef.current(true);
+            return;
+          }
+          bargeArmedRef.current = false;
           clearArmTimer();
           clearVoiceFinalTimer();
           clearVoiceTurnTimers();
@@ -385,14 +437,18 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         if (ev.type === 'error') fail(ev.message);
       });
       asrSessionRef.current = session;
-      const capture = await startPcmCapture((chunk) => session.sendPcm(chunk));
+      const opening = startPcmCapture((chunk) => session.sendPcm(chunk));
+      captureOpeningRef.current = opening;
+      let capture: PcmCapture;
+      try { capture = await opening; }
+      finally { if (captureOpeningRef.current === opening) captureOpeningRef.current = null; }
       if (gen !== voiceGenRef.current || asrSessionRef.current !== session) {
         capture.stop();
         return;
       }
       pcmCaptureRef.current = capture;
       asrReconnectRef.current = 0;
-      voiceNoSpeechTimerRef.current = window.setTimeout(() => {
+      if (!barge) voiceNoSpeechTimerRef.current = window.setTimeout(() => {
         voiceNoSpeechTimerRef.current = null;
         if (gen !== voiceGenRef.current) return;
         if (!voicePartialRef.current.trim()) finalizeListen();
@@ -441,11 +497,16 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     setListening(false);
     setSpeakingState(true);
     setBusyState(true);
+    systemTtsAbortRef.current?.abort();
+    const abort = new AbortController();
+    systemTtsAbortRef.current = abort;
     void (async () => {
       try {
-        await speakAnswer(VOICE_CANCEL_LINE);
+        await speakAnswer(VOICE_CANCEL_LINE, abort.signal);
       } catch { /* ignore TTS */ }
       finally {
+        if (systemTtsAbortRef.current !== abort || abort.signal.aborted || !activeRef.current) return;
+        systemTtsAbortRef.current = null;
         setSpeakingState(false);
         setBusyState(false);
         if (activeRef.current) void listenTurnRef.current();
@@ -455,7 +516,16 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
 
   const resumeListen = useCallback(() => {
     if (!activeRef.current) return;
+    bargeRef.current = null;
+    bargeArmedRef.current = false;
     void listenTurn();
+  }, [listenTurn]);
+
+  const armBargeIn = useCallback((onInterrupt: () => void, accept?: (text: string) => boolean) => {
+    if (!activeRef.current) return;
+    bargeRef.current = { onInterrupt, accept };
+    if (bargeArmedRef.current && (asrSessionRef.current || captureOpeningRef.current)) return;
+    void listenTurn(true);
   }, [listenTurn]);
 
   const start = useCallback(async () => {
@@ -526,6 +596,12 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => () => {
     // Soft release IO if the whole tree goes away (HMR / leave app).
     activeRef.current = false;
+    const barge = bargeRef.current;
+    bargeRef.current = null;
+    bargeArmedRef.current = false;
+    barge?.onInterrupt();
+    systemTtsAbortRef.current?.abort();
+    systemTtsAbortRef.current = null;
     resetVoiceLevels();
     releaseVoiceIo();
   }, [releaseVoiceIo]);
@@ -549,6 +625,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     setSuppressAutoListen,
     stopMic,
     resumeListen,
+    armBargeIn,
     finalizeListen,
     cancelArmedSend,
     setHideFloat,
@@ -557,7 +634,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   }), [
     active, listening, speaking, busy, arming, partial, toast,
     start, end, setUtteranceHandler, setAsrCorrectContext, setFloatHeadExtra,
-    setPartial, setSuppressAutoListen, stopMic, resumeListen, finalizeListen, cancelArmedSend,
+    setPartial, setSuppressAutoListen, stopMic, resumeListen, armBargeIn, finalizeListen, cancelArmedSend,
   ]);
 
   // Typed ask sets busy via detail page — must NOT open the float.
