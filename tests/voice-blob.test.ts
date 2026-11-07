@@ -37,7 +37,7 @@ test('provided SVG geometry renders two eyes, blue by default and red only for a
   assert.ok(!blue.includes('<path'));
   assert.ok(blue.includes('width="15" height="35" rx="7.5"'));
   assert.ok(blue.includes('rotate(-9)'));
-  assert.deepEqual(VOICE_EYES, [{ x: 52, y: 69 }, { x: 101, y: 59 }]);
+  assert.deepEqual(VOICE_EYES, [{ x: 75, y: 105 }, { x: 125, y: 95 }]);
   assert.ok(blue.includes('viewBox="0 0 200 200"'));
   assert.equal((blue.match(/data-voice-eye/g) || []).length, 2);
   assert.ok(blue.includes('fill="#3C93F0"'));
@@ -143,5 +143,32 @@ test('all tilted pill eyes remain inside the 96-unit body over the full travel e
       const y0 = eye.y + y * Math.cos(angle);
       assert.ok(Math.hypot(x0 - 100, y0 - 100) + 7.5 + VOICE_EYE_TRAVEL < 96);
     }
+  }
+});
+
+
+test('the full eye pair is centered at rest and visibly crosses the face center in all directions', () => {
+  const viewport = { width: 1440, height: 900 };
+  assert.equal(VOICE_EYES.reduce((sum, eye) => sum + eye.x, 0) / 2, 100);
+  assert.equal(VOICE_EYES.reduce((sum, eye) => sum + eye.y, 0) / 2, 100);
+  for (const rect of [
+    { left: 1120, top: 82, width: 44, height: 44 },
+    { left: 1380, top: 82, width: 44, height: 44 },
+    { left: 180, top: 500, width: 32, height: 32 },
+    { left: 650, top: 400, width: 66, height: 66 },
+  ]) {
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const gaze = (x: number, y: number) => VOICE_EYES.reduce((mean, eye) => {
+      const offset = blobEyeOffset(x, y, eye.x, eye.y, rect, viewport);
+      return { x: mean.x + (eye.x + offset.x) / 2, y: mean.y + (eye.y + offset.y) / 2 };
+    }, { x: 0, y: 0 });
+    const left = gaze(0, cy); const right = gaze(1440, cy);
+    const up = gaze(cx, 0); const down = gaze(cx, 900);
+    assert.ok(left.x < 82 && right.x > 118, JSON.stringify({ rect, left, right }));
+    assert.ok(up.y < 82 && down.y > 118, JSON.stringify({ rect, up, down }));
+    assert.ok(Math.abs((100 - left.x) - (right.x - 100)) < .1);
+    assert.ok(Math.abs((100 - up.y) - (down.y - 100)) < .1);
+    assert.ok((right.x - 100) * rect.width / 200 > 2.8, 'visible pair displacement at physical render size');
   }
 });

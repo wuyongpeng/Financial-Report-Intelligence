@@ -1,5 +1,5 @@
-/** Geometry measured against the supplied circular avatar reference. */
-export const VOICE_EYES = [{ x: 52, y: 69 }, { x: 101, y: 59 }] as const;
+/** Center the pair on the circular face; keep the large tilted pill geometry. */
+export const VOICE_EYES = [{ x: 75, y: 105 }, { x: 125, y: 95 }] as const;
 export const VOICE_EYE_TRAVEL = 24;
 
 /** True direction from the rendered eye, with faster response near a viewport edge. */
@@ -21,7 +21,9 @@ export function blobEyeOffset(x: number, y: number, eyeX: number, eyeY: number,
   const edgeX = ux > 0 ? (viewport.width - centerX) / ux : ux < 0 ? -centerX / ux : Infinity;
   const edgeY = uy > 0 ? (viewport.height - centerY) / uy : uy < 0 ? -centerY / uy : Infinity;
   const edge = Math.max(0, Math.min(edgeX, edgeY));
-  const range = Math.max(24, Math.min(180, edge * 0.22));
+  // Normalize by the available ray length: each viewport edge produces equal gaze strength.
+  // Only a tiny SVG-scaled numerical floor; a 24 CSS-pixel floor hid rightward gaze near edges.
+  const range = Math.max(scale * 4, edge * 0.22);
   const travel = VOICE_EYE_TRAVEL * distance / (distance + range);
   return { x: ux * travel, y: uy * travel };
 }
