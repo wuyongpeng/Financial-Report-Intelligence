@@ -15,7 +15,6 @@ export type VoiceFloatProps = {
   onEnd: () => void;
   onFinalize?: () => void;
   onCancelArm?: () => void;
-  onBargeIn?: () => void;
   /** Extra head controls (e.g. auto-jump checkbox on detail). */
   headExtra?: React.ReactNode;
 };
@@ -67,7 +66,6 @@ export function VoiceFloat({
   onEnd,
   onFinalize,
   onCancelArm,
-  onBargeIn,
   headExtra,
 }: VoiceFloatProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -170,7 +168,7 @@ export function VoiceFloat({
     partial
     || hint
     || (speaking
-      ? '回答朗读中，说话或点「打断」可直接接着问'
+      ? '回答朗读中，支持随时打断'
       : busy
         ? '正在处理，请稍候…'
         : '说出公司名称、代码或问题；停顿即发送');
@@ -216,9 +214,6 @@ export function VoiceFloat({
         ) : null}
         {listening && !arming && onFinalize ? (
           <button type="button" className="primary" onClick={onFinalize}>说完了</button>
-        ) : null}
-        {(speaking || busy) && !listening && onBargeIn ? (
-          <button type="button" className="primary" onClick={onBargeIn}>打断</button>
         ) : null}
       </div>
     </div>

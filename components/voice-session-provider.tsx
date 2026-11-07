@@ -54,8 +54,6 @@ type VoiceSessionApi = {
   setUtteranceHandler: (handler: VoiceUtteranceHandler | null) => void;
   /** Lexicon context for ASR homophone rewrite (company/industry/hotwords). */
   setAsrCorrectContext: (ctx: AsrCorrectContext | null) => void;
-  /** Page-owned barge-in (abort TTS/ask then resume). Cleared on page unmount. */
-  setBargeInHandler: (handler: (() => void) | null) => void;
   /** Optional float head chrome (e.g. detail auto-jump checkbox). */
   setFloatHeadExtra: (node: ReactNode | null) => void;
   setSpeaking: (v: boolean) => void;
@@ -125,7 +123,6 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const voiceGenRef = useRef(0);
   const handlerRef = useRef<VoiceUtteranceHandler | null>(null);
   const asrCorrectCtxRef = useRef<AsrCorrectContext | null>(null);
-  const bargeInHandlerRef = useRef<(() => void) | null>(null);
   /** Detail local barge-in ASR collecting — block heal from opening a second mic. */
   const suppressAutoListenRef = useRef(false);
   /** True while finalizeListen is waiting on ASR flush — block heal auto-listen. */
@@ -486,10 +483,6 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     asrCorrectCtxRef.current = ctx;
   }, []);
 
-  const setBargeInHandler = useCallback((handler: (() => void) | null) => {
-    bargeInHandlerRef.current = handler;
-  }, []);
-
   const setSuppressAutoListen = useCallback((v: boolean) => {
     suppressAutoListenRef.current = v;
   }, []);
@@ -549,7 +542,6 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     end,
     setUtteranceHandler,
     setAsrCorrectContext,
-    setBargeInHandler,
     setFloatHeadExtra,
     setSpeaking: setSpeakingState,
     setBusy: setBusyState,
@@ -564,7 +556,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     clearToast: () => setToast(null),
   }), [
     active, listening, speaking, busy, arming, partial, toast,
-    start, end, setUtteranceHandler, setAsrCorrectContext, setBargeInHandler, setFloatHeadExtra,
+    start, end, setUtteranceHandler, setAsrCorrectContext, setFloatHeadExtra,
     setPartial, setSuppressAutoListen, stopMic, resumeListen, finalizeListen, cancelArmedSend,
   ]);
 
@@ -592,17 +584,6 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
           onEnd={() => end()}
           onCancelArm={arming ? () => cancelArmedSend() : undefined}
           onFinalize={listening && !arming ? () => finalizeListen({ userInitiated: true }) : undefined}
-          onBargeIn={(speaking || busy) && !listening
-            ? () => {
-                const h = bargeInHandlerRef.current;
-                if (h) h();
-                else {
-                  setSpeakingState(false);
-                  setBusyState(false);
-                  if (activeRef.current) void listenTurnRef.current();
-                }
-              }
-            : undefined}
           headExtra={floatHeadExtra}
         />
       ) : null}

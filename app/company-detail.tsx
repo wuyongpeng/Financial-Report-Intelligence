@@ -316,7 +316,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const pdfZoomRef = useRef(pdfZoom);
   pdfZoomRef.current = pdfZoom;
   const handleVoiceUtteranceRef = useRef<(raw: string) => Promise<void> | void>(async () => undefined);
-  const bargeInFromVoiceRef = useRef<() => void>(() => undefined);
   const [regenMenu, setRegenMenu] = useState<number | null>(null);
   const [jumpAsk, setJumpAsk] = useState<null | { href: string; title: string; detail: ReactNode }>(null);
   const [jumpBlocked, setJumpBlocked] = useState(false);
@@ -1289,9 +1288,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected.id, selected.audit_opinion_kind]);
 
-  // Global float: barge-in + auto-jump chrome (page-owned; cleared on leave).
+  // Global float: auto-jump chrome (page-owned; cleared on leave).
   useEffect(() => {
-    voice.setBargeInHandler(() => bargeInFromVoiceRef.current());
     voice.setFloatHeadExtra(
       <label className="eva-voice-float-jump" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 10, fontWeight: 400, fontSize: 12 }}>
         <input
@@ -1303,7 +1301,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       </label>,
     );
     return () => {
-      voice.setBargeInHandler(null);
       voice.setFloatHeadExtra(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1949,7 +1946,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
 
   /**
-   * Hard barge-in from a control (composer stop / 打断): abort ask + TTS, then listen again.
+   * Hard barge-in from the composer stop control: abort ask + TTS, then listen again.
    * Does not end the conversation — only 「结束语音」 / Escape does.
    */
   function bargeInFromVoice() {
@@ -1968,8 +1965,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voice.setSpeaking(false);
     voice.resumeListen();
   }
-
-  bargeInFromVoiceRef.current = bargeInFromVoice;
 
   /**
    * While TTS is playing (and optionally while ask is streaming), keep a local ASR open.
