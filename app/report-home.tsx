@@ -2556,7 +2556,7 @@ export default function ReportHome() {
               onClick={() => setVoicePanelOpen((open) => !open)}
             >
               <VoiceActivity state={voiceActivityState(voice)} />
-              <VoiceActivityStatus state={voiceActivityState(voice)} className="rh-eva-status" />
+              <VoiceActivityStatus state={voiceActivityState(voice)} readyHint={voice.readyHint} className="rh-eva-status" />
             </button>
             <div className="rh-eva-controls">
               <button type="button" className="rh-eva-control" aria-label={voicePanelOpen ? '收起语音对话' : '展开语音对话'} aria-expanded={voicePanelOpen} aria-controls="rh-eva-conversation" title="语音对话" onClick={() => setVoicePanelOpen((open) => !open)}>

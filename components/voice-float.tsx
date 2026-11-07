@@ -10,6 +10,9 @@ export type VoiceFloatProps = {
   speaking?: boolean;
   busy?: boolean;
   arming?: boolean;
+  connecting?: boolean;
+  linkFailed?: boolean;
+  readyHint?: boolean;
   partial?: string;
   hint?: string;
   onEnd: () => void;
@@ -24,6 +27,9 @@ export function VoiceFloat({
   speaking = false,
   busy = false,
   arming = false,
+  connecting = false,
+  linkFailed = false,
+  readyHint = false,
   partial = '',
   hint,
   onEnd,
@@ -62,16 +68,17 @@ export function VoiceFloat({
         data-voice-drag-surface=""
         title="拖动可移动位置"
       >
-        <VoiceActivity state={voiceActivityState({ listening, speaking, busy, arming })} risk={reportAuditRisk} />
+        <VoiceActivity state={voiceActivityState({ listening, speaking, busy, arming, connecting, linkFailed })} risk={reportAuditRisk} />
         <VoiceActivityStatus
-          state={arming ? 'arming' : listening ? 'listening' : speaking ? 'speaking' : busy ? 'thinking' : 'idle'}
-          label={title}
+          state={voiceActivityState({ listening, speaking, busy, arming, connecting, linkFailed })}
+          readyHint={readyHint}
+          label={connecting || linkFailed || readyHint ? undefined : title}
         />
         <button type="button" className="eva-voice-end" aria-label="结束语音" title="结束语音" onClick={onEnd}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
         </button>
       </div>
-      <div className="eva-voice-float-text">{body}</div>
+      {connecting ? null : <div className="eva-voice-float-text">{body}</div>}
       {footerExtra || (arming && onCancelArm) ? (
         <div className="eva-voice-float-footer">
           {footerExtra}

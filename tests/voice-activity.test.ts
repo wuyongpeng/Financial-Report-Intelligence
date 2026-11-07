@@ -10,10 +10,13 @@ test('voice visuals distinguish listening, thinking, reading and send confirmati
   assert.equal(voiceActivityState({ busy: true }), 'thinking');
   assert.equal(voiceActivityState({ busy: true, speaking: true }), 'speaking');
   assert.equal(voiceActivityState({ arming: true, listening: true }), 'arming');
+  assert.equal(voiceActivityState({ connecting: true }), 'connecting');
+  assert.equal(voiceActivityState({ connecting: true, linkFailed: true }), 'failed');
+  assert.equal(voiceActivityState({ connecting: true, listening: true }), 'listening');
 });
 
 test('every visual state has a readable text equivalent, not just animation or color', () => {
-  for (const state of ['idle', 'listening', 'thinking', 'speaking', 'arming'] as const) {
+  for (const state of ['idle', 'listening', 'thinking', 'speaking', 'arming', 'connecting', 'failed'] as const) {
     assert.ok(voiceActivityLabels[state].length > 0);
   }
 });

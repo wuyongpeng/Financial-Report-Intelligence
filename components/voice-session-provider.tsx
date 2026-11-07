@@ -13,12 +13,15 @@ import {
   type ReactNode,
 } from 'react';
 import { openAsrSession, micSecureContextError, type AsrSession } from '@/lib/voice/client-asr';
+import { playVoiceCue, primeVoiceCues } from '@/lib/voice/cues';
 import { startPcmCapture, type PcmCapture } from '@/lib/voice/client-pcm';
 import { speakAnswer } from '@/lib/voice/client-tts';
 import { resetVoiceLevels } from '@/lib/voice/client-level';
 import { isVoiceFarewell } from '@/lib/voice/farewell-intent';
 import {
   VOICE_CANCEL_LINE,
+  VOICE_CONNECT_FAIL,
+  VOICE_CONNECT_TIMEOUT_MS,
   VOICE_ENDPOINT_MS,
   VOICE_NO_SPEECH_MS,
   VOICE_IDLE_EMPTY_TURNS,
@@ -47,6 +50,12 @@ type VoiceSessionApi = {
   busy: boolean;
   /** Utterance settled; send fires when the countdown ends unless cancelled. */
   arming: boolean;
+  /** ASR socket or microphone is not ready yet. */
+  connecting: boolean;
+  /** Connect attempt failed; float shows the failure until the session ends. */
+  linkFailed: boolean;
+  /** Short “语音已就绪” after the first successful connect. */
+  readyHint: boolean;
   partial: string;
   toast: string | null;
   /** Start continuous realtime voice (idempotent if already active). */
@@ -108,6 +117,9 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const [speaking, setSpeakingState] = useState(false);
   const [busy, setBusyState] = useState(false);
   const [arming, setArming] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [linkFailed, setLinkFailed] = useState(false);
+  const [readyHint, setReadyHint] = useState(false);
   const [partial, setPartialState] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [hideFloat, setHideFloat] = useState(false);
@@ -124,6 +136,13 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const voiceArmTimerRef = useRef<number | null>(null);
   const armingRef = useRef(false);
   const armSendRef = useRef<() => void>(() => undefined);
+  const connectTimerRef = useRef<number | null>(null);
+  const readyHintTimerRef = useRef<number | null>(null);
+  const failCloseTimerRef = useRef<number | null>(null);
+  /** First successful socket+mic of this session. Later turns do not chime again. */
+  const sessionReadyRef = useRef(false);
+  const connectingRef = useRef(false);
+  const linkFailedRef = useRef(false);
   const voiceEmptyTurnsRef = useRef(0);
   const voiceGenRef = useRef(0);
   const handlerRef = useRef<VoiceUtteranceHandler | null>(null);
@@ -180,7 +199,29 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     asrSessionRef.current = null;
   }, [clearVoiceFinalTimer, clearVoiceTurnTimers]);
 
-  const end = useCallback((message?: string) => {
+  const clearConnectChrome = useCallback(() => {
+    if (connectTimerRef.current != null) {
+      window.clearTimeout(connectTimerRef.current);
+      connectTimerRef.current = null;
+    }
+    if (readyHintTimerRef.current != null) {
+      window.clearTimeout(readyHintTimerRef.current);
+      readyHintTimerRef.current = null;
+    }
+    if (failCloseTimerRef.current != null) {
+      window.clearTimeout(failCloseTimerRef.current);
+      failCloseTimerRef.current = null;
+    }
+    connectingRef.current = false;
+    linkFailedRef.current = false;
+    setConnecting(false);
+    setLinkFailed(false);
+    setReadyHint(false);
+  }, []);
+
+  const end = useCallback((message?: string, opts?: { cue?: 'close' | 'none' }) => {
+    const cue = opts?.cue ?? (sessionReadyRef.current ? 'close' : 'none');
+    sessionReadyRef.current = false;
     activeRef.current = false;
     const barge = bargeRef.current;
     bargeRef.current = null;
@@ -198,12 +239,14 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     releaseVoiceIo();
     voicePartialRef.current = '';
     setPartialState('');
+    clearConnectChrome();
     setListening(false);
     setSpeakingState(false);
     setBusyState(false);
     setActive(false);
     if (message) setToast(message);
-  }, [clearArmTimer, releaseVoiceIo]);
+    if (cue === 'close') playVoiceCue('close');
+  }, [clearArmTimer, clearConnectChrome, releaseVoiceIo]);
 
   const stopMic = useCallback(() => {
     bargeRef.current = null;
@@ -345,15 +388,40 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     bargeArmedRef.current = barge;
     finalizingRef.current = false;
     if (!barge) setSpeakingState(false);
-    setListening(!barge);
+    if (!barge) {
+      connectingRef.current = true;
+      setConnecting(true);
+      setLinkFailed(false);
+      setListening(false);
+    }
     voicePartialRef.current = '';
     setPartialState('');
 
+    const showConnectFailure = (message: string) => {
+      if (gen !== voiceGenRef.current || linkFailedRef.current) return;
+      linkFailedRef.current = true;
+      console.warn('[voice] connect failed', message);
+      releaseVoiceIo();
+      connectingRef.current = true;
+      setConnecting(true);
+      setLinkFailed(true);
+      setListening(false);
+      playVoiceCue('error');
+      if (failCloseTimerRef.current != null) window.clearTimeout(failCloseTimerRef.current);
+      failCloseTimerRef.current = window.setTimeout(() => {
+        failCloseTimerRef.current = null;
+        if (gen !== voiceGenRef.current) return;
+        end(undefined, { cue: 'none' });
+      }, 1600);
+    };
+
     const fail = (message: string) => {
       if (gen !== voiceGenRef.current) return;
-      if (activeRef.current && asrReconnectRef.current < 1) {
+      if (activeRef.current && asrReconnectRef.current < 1 && !sessionReadyRef.current) {
         asrReconnectRef.current += 1;
-        setToast(`${message}（正在重连…）`);
+        connectingRef.current = true;
+        setConnecting(true);
+        setListening(false);
         window.setTimeout(() => {
           if (activeRef.current && gen === voiceGenRef.current) {
             void listenTurnRef.current(barge && !interrupted && Boolean(bargeRef.current));
@@ -361,7 +429,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         }, 500);
         return;
       }
-      end(message);
+      if (!barge) showConnectFailure(message);
+      else end(message, { cue: 'none' });
     };
 
     let interrupted = !barge;
@@ -388,8 +457,44 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         if (gen !== voiceGenRef.current || !activeRef.current) return;
       }
       if (gen !== voiceGenRef.current || !activeRef.current) return;
+      let asrReady = false;
+      let micReady = false;
+      const finishConnect = () => {
+        if (gen !== voiceGenRef.current || !asrReady || !micReady) return;
+        if (connectTimerRef.current != null) {
+          window.clearTimeout(connectTimerRef.current);
+          connectTimerRef.current = null;
+        }
+        connectingRef.current = false;
+        setConnecting(false);
+        setLinkFailed(false);
+        if (!barge) setListening(true);
+        if (!sessionReadyRef.current) {
+          sessionReadyRef.current = true;
+          playVoiceCue('ready');
+          setReadyHint(true);
+          if (readyHintTimerRef.current != null) window.clearTimeout(readyHintTimerRef.current);
+          readyHintTimerRef.current = window.setTimeout(() => {
+            readyHintTimerRef.current = null;
+            setReadyHint(false);
+          }, 2000);
+        }
+      };
+      if (!barge) {
+        if (connectTimerRef.current != null) window.clearTimeout(connectTimerRef.current);
+        connectTimerRef.current = window.setTimeout(() => {
+          connectTimerRef.current = null;
+          if (gen !== voiceGenRef.current || (asrReady && micReady)) return;
+          showConnectFailure(VOICE_CONNECT_FAIL);
+        }, VOICE_CONNECT_TIMEOUT_MS);
+      }
       const session = openAsrSession((ev) => {
         if (gen !== voiceGenRef.current) return;
+        if (ev.type === 'ready') {
+          asrReady = true;
+          finishConnect();
+          return;
+        }
         if (ev.type === 'partial') {
           if (!takeOver(ev.text)) return;
           const prev = voicePartialRef.current;
@@ -440,7 +545,9 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         if (ev.type === 'error') fail(ev.message);
       });
       asrSessionRef.current = session;
-      const opening = startPcmCapture((chunk) => session.sendPcm(chunk));
+      const opening = startPcmCapture((chunk) => {
+        if (asrReady) session.sendPcm(chunk);
+      });
       captureOpeningRef.current = opening;
       let capture: PcmCapture;
       try { capture = await opening; }
@@ -450,6 +557,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         return;
       }
       pcmCaptureRef.current = capture;
+      micReady = true;
+      finishConnect();
       asrReconnectRef.current = 0;
       if (!barge) voiceNoSpeechTimerRef.current = window.setTimeout(() => {
         voiceNoSpeechTimerRef.current = null;
@@ -537,9 +646,10 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       setToast(secureErr);
       return;
     }
+    primeVoiceCues();
     if (activeRef.current) {
       // Already in session — ensure we are listening.
-      if (!listening && !speaking && !busy) void listenTurn();
+      if (!listening && !speaking && !busy && !connectingRef.current) void listenTurn();
       return;
     }
     activeRef.current = true;
@@ -583,7 +693,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
 
   // Heal stuck "active but not listening" (e.g. page forgot resumeListen after TTS).
   useEffect(() => {
-    if (!active || listening || speaking || busy) return;
+    if (!active || listening || speaking || busy || connecting) return;
     const t = window.setTimeout(() => {
       if (!activeRef.current || isFeedbackDrawerOpen()) return;
       if (armingRef.current) return;
@@ -593,7 +703,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       void listenTurnRef.current();
     }, 1600);
     return () => window.clearTimeout(t);
-  }, [active, listening, speaking, busy]);
+  }, [active, listening, speaking, busy, connecting]);
 
   // Provider itself must NOT end voice on unmount of children — only full app tear-down.
   useEffect(() => () => {
@@ -615,6 +725,9 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     speaking,
     busy,
     arming,
+    connecting,
+    linkFailed,
+    readyHint,
     partial,
     toast,
     start,
@@ -635,7 +748,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     setReportAuditRisk,
     clearToast: () => setToast(null),
   }), [
-    active, listening, speaking, busy, arming, partial, toast,
+    active, listening, speaking, busy, arming, connecting, linkFailed, readyHint, partial, toast,
     start, end, setUtteranceHandler, setAsrCorrectContext, setFloatFooterExtra,
     setPartial, setSuppressAutoListen, stopMic, resumeListen, armBargeIn, finalizeListen, cancelArmedSend,
   ]);
@@ -655,12 +768,17 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
           speaking={speaking}
           busy={busy}
           arming={arming}
+          connecting={connecting}
+          linkFailed={linkFailed}
+          readyHint={readyHint}
           partial={partial}
           hint={arming
             ? '即将发送，点取消可重说'
-            : active && !listening && !speaking && !busy
-              ? '尽管提问，停顿即发送'
-              : undefined}
+            : connecting
+              ? undefined
+              : active && !listening && !speaking && !busy
+                ? '尽管提问，停顿即发送'
+                : undefined}
           onEnd={() => end()}
           onCancelArm={arming ? () => cancelArmedSend() : undefined}
           footerExtra={floatFooterExtra}

@@ -17,11 +17,18 @@
 /* Shared rounded voice identity; never replaces the product logo. */
 .eva-voice-activity{display:inline-flex;align-items:center;gap:14px;flex:none;color:#2784f5}
 .eva-voice-blob{display:block;width:44px;height:44px;flex:none;overflow:visible}
+.eva-voice-connect{position:relative;height:4px;width:92px;flex:none;border-radius:999px;background:#e6eef8;overflow:hidden}
+.eva-voice-connect i{display:block;height:100%;width:38%;border-radius:inherit;background:#1d4ed8;animation:eva-voice-connect 1.1s ease-in-out infinite}
+.eva-voice-connect.is-failed{background:#fde8ea}
+.eva-voice-connect.is-failed i{width:100%;background:#dc2626;animation:none}
+@keyframes eva-voice-connect{0%{transform:translateX(-120%)}100%{transform:translateX(280%)}}
+.eva-voice-ready{animation:eva-voice-ready 2s ease forwards}
+@keyframes eva-voice-ready{0%,65%{opacity:1}100%{opacity:0}}
 .eva-voice-wave{height:32px;width:92px;display:flex;align-items:center;justify-content:center;gap:4px}
 .eva-voice-wave i{display:block;width:4px;flex:none;border-radius:999px;background:currentColor;transition:height 70ms linear,opacity 70ms linear}
 .eva-voice-activity.is-arming{color:#c58b32}
 @media(max-width:600px){.eva-voice-float{bottom:calc(12px + env(safe-area-inset-bottom,0px))}.eva-voice-float-head{gap:8px}.eva-voice-float-head .eva-voice-wave{width:70px;gap:3px}}
-@media(prefers-reduced-motion:reduce){.eva-voice-activity .eva-voice-wave i{transition:none!important}.rh-eva-control{transition:none!important}}
+@media(prefers-reduced-motion:reduce){.eva-voice-activity .eva-voice-wave i{transition:none!important}.eva-voice-connect i{animation:none;width:40%}.eva-voice-ready{animation:none}.rh-eva-control{transition:none!important}}
 
 /* Absolutely positioned, so a listening-only status reserves no label width/gap. */
 .eva-voice-status.eva-voice-status-sr-only{position:absolute;width:1px;height:1px;min-width:0;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}

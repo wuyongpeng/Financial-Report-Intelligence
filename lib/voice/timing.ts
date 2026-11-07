@@ -1,3 +1,6 @@
+/** Wait this long for ASR ready + microphone before showing a connect failure. */
+export const VOICE_CONNECT_TIMEOUT_MS = 8000;
+export const VOICE_CONNECT_FAIL = '连接失败，请重试';
 /** Voice conversation: partial text unchanged this long → arm send countdown. */
 export const VOICE_ENDPOINT_MS = 1600;
 /** After the utterance settles, wait this long so the user can cancel. */
