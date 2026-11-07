@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '@/app/voice-float.css';
+import { VoiceActivity, voiceActivityState } from '@/components/voice-activity';
 
 export type VoiceFloatProps = {
   listening: boolean;
@@ -198,6 +199,7 @@ export function VoiceFloat({
         onPointerDown={onPointerDownHead}
         title="拖动可移动位置"
       >
+        <VoiceActivity state={voiceActivityState({ listening, speaking, busy, arming })} />
         <b>{title}</b>
         {headExtra}
       </div>

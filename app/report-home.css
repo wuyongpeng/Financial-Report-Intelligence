@@ -28,17 +28,24 @@
 .rh-home-answer p{margin:0;font-size:14px;line-height:1.7;color:#334155;white-space:pre-wrap}
 .rh-home-answer-dismiss{position:absolute;top:10px;right:10px;border:0;background:transparent;color:#8494ab;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;padding:0}
 .rh-home-answer-dismiss:hover{background:#e2eaf8;color:#475569}
-.rh-eva-dock{position:fixed;top:64px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
-.rh-home button.rh-eva-orb{width:52px;height:52px;padding:0;border:0;background:transparent;flex:none;line-height:0}
-.rh-eva-logo{display:block;width:52px;height:52px;transform-origin:center;animation:rh-eva-breathe 4s ease-in-out infinite}
-@keyframes rh-eva-breathe{
-  0%,100%{transform:scale(1);opacity:.85}
-  45%{transform:scale(1.06);opacity:1}
+.rh-eva-dock{position:fixed;top:72px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:flex-end;gap:10px;max-width:calc(100vw - 24px)}
+.rh-eva-capsule{display:flex;align-items:center;gap:16px;padding:10px 12px;background:#fff;border:1px solid #e8edf3;border-radius:999px;box-shadow:0 6px 24px #24344c12,0 1px 3px #24344c08}
+.rh-home button.rh-eva-activity-toggle{display:flex;align-items:center;gap:12px;border:0;padding:0;background:transparent;text-align:left;color:#64748b;border-radius:999px}
+.rh-eva-status{font-size:12px;white-space:nowrap;min-width:5em}
+.rh-eva-controls{display:flex;gap:8px;align-items:center}
+.rh-home button.rh-eva-control{display:grid;place-items:center;width:44px;height:44px;flex:none;padding:0;border:0;border-radius:50%;background:#f1f3f6;color:#637084;transition:background .18s,color .18s}
+.rh-eva-control svg{width:22px;height:22px}
+.rh-home button.rh-eva-control:hover{background:#e6ebf2;color:#3064db}
+.rh-home button.rh-eva-control.is-end{background:#eb3047;color:#fff}
+.rh-home button.rh-eva-control.is-end:hover{background:#d9273d}
+@media(max-width:600px){
+  .rh-eva-dock{top:auto;bottom:calc(16px + env(safe-area-inset-bottom,0px));right:12px;flex-direction:column-reverse}
+  .rh-eva-capsule{gap:10px;padding:8px 10px}
+  .rh-eva-status{position:absolute;width:1px;height:1px;min-width:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .rh-eva-dock .eva-voice-wave{width:70px;gap:3px}
+  .rh-eva-dock .eva-voice-sphere{width:40px;height:40px}
 }
-@media (prefers-reduced-motion: reduce){
-  .rh-eva-logo{animation:none;opacity:1}
-}
-.rh-eva-panel{width:min(300px,calc(100vw - 110px));max-height:min(420px,70vh);display:flex;flex-direction:column;background:#fff;border:1px solid #d4e2ff;border-radius:16px;box-shadow:0 12px 32px #24344c1f;overflow:hidden}
+.rh-eva-panel{width:min(360px,calc(100vw - 24px));max-height:min(420px,55dvh);display:flex;flex-direction:column;background:#fff;border:1px solid #d4e2ff;border-radius:16px;box-shadow:0 12px 32px #24344c1f;overflow:hidden}
 .rh-eva-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #e6eefc}
 .rh-eva-panel-head b{font-size:13px;color:#3064db}
 .rh-eva-panel-head button{border:0;background:#f4f7fb;color:#5b6d85;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
