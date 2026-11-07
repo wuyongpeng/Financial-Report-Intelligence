@@ -26,6 +26,7 @@ const STATUS_LABEL: Record<string, string> = {
   open: '未处理',
   in_progress: '处理中',
   resolved: '已处理',
+  archived: '已归档',
 };
 
 function fmtTime(iso: string) {
@@ -39,6 +40,7 @@ export function FeedbackAdminClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = useCallback(async (opts?: { append?: boolean; beforeId?: number | null }) => {
     setLoading(true);
@@ -46,6 +48,7 @@ export function FeedbackAdminClient() {
     try {
       const params = new URLSearchParams();
       params.set('limit', '50');
+      if (showArchived) params.set('includeArchived', '1');
       if (opts?.beforeId) params.set('beforeId', String(opts.beforeId));
       const res = await fetch(`/api/admin/feedback?${params}`, {
         cache: 'no-store',
@@ -66,11 +69,11 @@ export function FeedbackAdminClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showArchived]);
 
   useEffect(() => {
     void load();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [load]);
 
   const filteredItems = useMemo(() => {
     const q = search.trim();
@@ -83,12 +86,13 @@ export function FeedbackAdminClient() {
       item.page,
       item.url,
       item.user_agent,
+      STATUS_LABEL[item.handling_status || 'open'] || '未处理',
     ]));
   }, [items, search]);
 
   const lastId = items.length ? items[items.length - 1].id : null;
 
-  async function setStatus(id: number, status: 'in_progress' | 'resolved' | 'open') {
+  async function setStatus(id: number, status: 'in_progress' | 'resolved' | 'archived' | 'open') {
     setError('');
     try {
       const res = await fetch('/api/admin/feedback', {
@@ -99,7 +103,10 @@ export function FeedbackAdminClient() {
       });
       const body = await res.json().catch(() => ({})) as { error?: string };
       if (!res.ok) throw new Error(body.error || '状态没有保存');
-      setItems((prev) => prev.map((item) => item.id === id ? { ...item, handling_status: status } : item));
+      setItems((prev) => {
+        if (status === 'archived' && !showArchived) return prev.filter((item) => item.id !== id);
+        return prev.map((item) => item.id === id ? { ...item, handling_status: status } : item);
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : '状态没有保存');
     }
@@ -123,6 +130,10 @@ export function FeedbackAdminClient() {
           placeholder="快速检索"
           onChange={(e) => setSearch(e.target.value)}
         />
+        <label style={{ ...s.muted, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          显示已归档
+        </label>
       </div>
       <div style={s.tableWrap}>
         <table style={s.table}>
@@ -134,14 +145,15 @@ export function FeedbackAdminClient() {
               <th style={s.th}>联系方式</th>
               <th style={s.th}>页面</th>
               <th style={s.th}>状态</th>
+              <th style={s.th}>操作</th>
             </tr>
           </thead>
           <tbody>
             {!loading && items.length === 0 ? (
-              <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
+              <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无反馈</td></tr>
             ) : null}
             {!loading && items.length > 0 && filteredItems.length === 0 ? (
-              <tr><td colSpan={6} style={{ ...s.td, color: '#8b97a9' }}>暂无匹配</td></tr>
+              <tr><td colSpan={7} style={{ ...s.td, color: '#8b97a9' }}>暂无匹配</td></tr>
             ) : null}
             {filteredItems.map((item) => (
               <tr key={item.id}>
@@ -158,8 +170,11 @@ export function FeedbackAdminClient() {
                   >
                     {STATUS_LABEL[item.handling_status || 'open'] || '未处理'}
                   </span>
+                </td>
+                <td style={{ ...s.td, whiteSpace: 'nowrap' }}>
                   <button type="button" style={textAct} disabled={item.handling_status === 'in_progress'} onClick={() => void setStatus(item.id, 'in_progress')}>处理中</button>
                   <button type="button" style={textAct} disabled={item.handling_status === 'resolved'} onClick={() => void setStatus(item.id, 'resolved')}>已处理</button>
+                  <button type="button" style={textAct} disabled={item.handling_status === 'archived'} onClick={() => void setStatus(item.id, 'archived')}>归档</button>
                 </td>
               </tr>
             ))}

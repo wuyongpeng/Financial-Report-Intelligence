@@ -26,9 +26,16 @@ function groupedNumberToSpeech(value: string): string {
   return sign + (spoken || '零').replace(/^一十/, '十') + (fraction === undefined ? '' : '点' + [...fraction].map(d => DIGITS[Number(d)]).join(''));
 }
 
+/**
+ * Spoken form of the standalone brand. Not the lexicon entry "Eva", which
+ * Seed TTS reads as the Chinese name 伊娃. The session pronunciation dictionary
+ * rewrites this token to English "ee vuh". evaluate, EvaX and EVA-01 stay untouched.
+ */
+export const EVA_BRAND_SPEECH = 'Eevah';
+
 /** Pronunciation only; do not write this result into chat, source data or the UI. */
 export function normalizeSpeechPronunciation(raw: string): string {
-  return raw.replace(/(?<![A-Za-z0-9_])eva(?![A-Za-z0-9_])/gi, 'Eva')
+  return raw.replace(/(?<![A-Za-z0-9_-])eva(?![A-Za-z0-9_-])/gi, EVA_BRAND_SPEECH)
     .replace(/[+−-]?\d[\d,.]*/g, (token, offset: number, source: string) => {
       // A final comma is punctuation, not part of the numeric grouping.
       const number = token.replace(/[,.]+$/, ''); const punctuation = token.slice(number.length);

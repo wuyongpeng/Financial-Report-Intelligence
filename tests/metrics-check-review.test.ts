@@ -171,10 +171,14 @@ test('progress input validates action/state/short note; append-only events prese
 
 test('feedback admin hides browser column only and keeps feedback data API/storage unchanged', () => {
   const client = readFileSync(new URL('../app/admin/feedback/feedback-client.tsx', import.meta.url), 'utf8');
+  const api = readFileSync(new URL('../app/api/admin/feedback/route.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(client, />浏览器<|title=\{item.user_agent/);
-  assert.match(client, /colSpan=\{6\}/);
+  assert.match(client, /colSpan=\{7\}/);
+  assert.match(client, /显示已归档/);
+  assert.match(client, />归档</);
+  assert.match(api, /includeArchived/);
+  assert.match(api, /IS DISTINCT FROM 'archived'/);
   assert.match(client, /\{item.message\}/);
   assert.match(client, /\{item.contact \|\| '—'\}/);
-  const api = readFileSync(new URL('../app/api/admin/feedback/route.ts', import.meta.url), 'utf8');
   assert.match(api, /user_agent/);
 });

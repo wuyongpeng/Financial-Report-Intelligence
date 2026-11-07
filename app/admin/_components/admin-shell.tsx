@@ -67,7 +67,7 @@ export function AdminHeader({
         {children}
       </div>
       <div style={{ display: 'flex', flexShrink: 0, gap: 8, alignItems: 'center' }}>
-        <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>回首页</Link>
+        <Link href="/" style={{ ...btnGhost, textDecoration: 'none', display: 'inline-block' }}>返回首页</Link>
       </div>
     </header>
   );
