@@ -1197,7 +1197,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
   }
   function metricCitation(m: MetricName, report = selected) { const item = report.metrics.find(x => x.metric === m); return item?.source_page ? { page: item.source_page, quote: item.source_label ?? labels[m] } : null; }
-  function footnote(m: MetricName) { const c = metricCitation(m); return c && <button className="cd-cite" onClick={(e) => { e.stopPropagation(); cite(c, false, m); }} onDoubleClick={(e) => { e.stopPropagation(); cite(c, true, m); }} title={`单击定位原文（来源栏加宽至约40%），${pageDescription(c.page)}`}>[{pageChip(c.page)}]</button>; }
+  function footnote(m: MetricName) { const c = metricCitation(m); return c && <button className="cd-cite" onClick={(e) => { e.stopPropagation(); cite(c, false, m); }} onDoubleClick={(e) => { e.stopPropagation(); cite(c, true, m); }} title={`单击定位原文，跳转PDF第 ${c.page} 页`}>[{pageChip(c.page)}]</button>; }
   const citedItem = citedMetric ? selected.metrics.find(m => m.metric === citedMetric) : undefined;
   // Low confidence or an unverified value must be visible before the reader trusts it.
   const citedCaveat = citedItem && (citedItem.confidence < 0.8 || !citedItem.verified)
@@ -3057,7 +3057,6 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             key={`${selected.id}:${previous?.id ?? "default"}`}
             result={metricRelationships}
             pageChip={pageChip}
-            pageDescription={pageDescription}
             onCite={(c) => cite({ page: c.page, quote: c.quote }, false, c.metric ?? null)}
             pickedClass={pickedCard}
           />

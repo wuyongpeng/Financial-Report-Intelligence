@@ -89,7 +89,6 @@ test('indicator linkage keeps short 数据 + 提示 lines with page chips, no as
   const html = renderToStaticMarkup(createElement(MetricLinkage, {
     result,
     pageChip: (page: number) => `P${page}`,
-    pageDescription: (page: number) => `PDF 第 ${page} 页`,
     onCite: () => {},
   }));
   assert.match(html, /class="cd-brief cd-rel-block"/);
@@ -101,6 +100,7 @@ test('indicator linkage keeps short 数据 + 提示 lines with page chips, no as
   assert.match(html, /cd-rel-prefix">提示</);
   assert.match(html, /cd-rel-line/);
   assert.match(html, /\[P10\]/);
+  assert.match(html, /title="单击定位原文，跳转PDF第 10 页"/);
   // Missing page on operating_cash_flow — no fake chip for that row
   assert.equal((html.match(/class="cd-cite"/g) || []).length, 1);
   assert.doesNotMatch(html, /追问原因|cd-rel-ask|cd-rel-chevron|原因待核验/);

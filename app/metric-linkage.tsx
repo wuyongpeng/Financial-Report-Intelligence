@@ -12,8 +12,6 @@ type Props = {
   result: MetricRelationshipsResult;
   /** Page chip label, same as overview footnotes (e.g. P12). */
   pageChip?: (page: number) => string;
-  /** Tooltip / aria description for a page. */
-  pageDescription?: (page: number) => string;
   /** Jump left pane to PDF quote — same path as four-core footnotes. */
   onCite?: (cite: MetricLinkageCite) => void;
   /** Overview pick highlight class for a card id (same as other focus cards). */
@@ -38,7 +36,6 @@ function focusQuote(card: MetricRelationshipsResult['cards'][number]): string {
 export default function MetricLinkage({
   result,
   pageChip,
-  pageDescription,
   onCite,
   pickedClass,
 }: Props) {
@@ -91,9 +88,7 @@ export default function MetricLinkage({
                                       e.stopPropagation();
                                       onCite({ page: cite.page, quote: cite.quote, metric: cite.metric ?? n.metric });
                                     }}
-                                    title={pageDescription
-                                      ? `单击定位原文（来源栏加宽至约40%），${pageDescription(cite.page)}`
-                                      : `单击定位原文 · PDF 第 ${cite.page} 页`}
+                                    title={`单击定位原文，跳转PDF第 ${cite.page} 页`}
                                   >
                                     [{chip}]
                                   </button>
