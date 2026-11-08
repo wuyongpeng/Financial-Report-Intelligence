@@ -42,12 +42,26 @@ const titleBar: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 8,
-  padding: '10px 12px',
-  cursor: 'pointer',
+  padding: '8px 12px',
   userSelect: 'none',
   fontSize: 13,
   color: '#3a4d66',
   background: '#f8fafc',
+};
+
+const titleToggle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  flex: 1,
+  minWidth: 0,
+  border: 0,
+  background: 'transparent',
+  padding: 0,
+  font: 'inherit',
+  color: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
 };
 
 const newDot: CSSProperties = {
@@ -72,6 +86,14 @@ const outlineBtn: CSSProperties = {
   ...s.btnGhost,
   padding: '5px 10px',
   fontSize: 12,
+};
+
+const rerunBtn: CSSProperties = {
+  ...s.btn,
+  padding: '5px 12px',
+  fontSize: 12,
+  whiteSpace: 'nowrap',
+  flex: 'none',
 };
 
 type Props = {
@@ -210,32 +232,44 @@ export function AiSummarizePanel({ scope, active = true, inline = false }: Props
 
   return (
     <div style={shellStyle}>
-      <div
-        role="button"
-        tabIndex={0}
-        style={titleBar}
-        onClick={() => setExpanded((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setExpanded((v) => !v);
-          }
-        }}
-        aria-expanded={expanded}
-      >
-        <span style={{ fontWeight: 600, color: '#203047' }}>
-          AI 归纳 · 基于 {summary.basedOnCount} 条 · {stamp}
-        </span>
-        {hasNewData ? (
-          <span style={newDot}>
-            <span aria-hidden style={{ color: '#d97706' }}>●</span>
-            有新数据
+      <div style={titleBar}>
+        <button
+          type="button"
+          style={titleToggle}
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+        >
+          <span style={{ fontWeight: 600, color: '#203047' }}>
+            AI 归纳 · 基于 {summary.basedOnCount} 条 · {stamp}
           </span>
+          {hasNewData ? (
+            <span style={newDot}>
+              <span aria-hidden style={{ color: '#d97706' }}>●</span>
+              有新数据
+            </span>
+          ) : null}
+          <span style={{ marginLeft: 'auto', color: '#8b97a9', fontSize: 12 }} aria-hidden>
+            {expanded ? '▴' : '▾'}
+          </span>
+        </button>
+        {!expanded ? (
+          <button
+            type="button"
+            style={{
+              ...rerunBtn,
+              opacity: running ? 0.65 : 1,
+              cursor: running ? 'not-allowed' : 'pointer',
+            }}
+            disabled={running}
+            onClick={() => { void runSummarize(); }}
+          >
+            {running ? '归纳中…' : 'AI 重新归纳'}
+          </button>
         ) : null}
-        <span style={{ marginLeft: 'auto', color: '#8b97a9', fontSize: 12 }} aria-hidden>
-          {expanded ? '▴' : '▾'}
-        </span>
       </div>
+      {!expanded && error ? (
+        <p style={{ ...s.err, margin: 0, padding: '0 12px 8px', fontSize: 12 }}>{error}</p>
+      ) : null}
 
       {expanded ? (
         <div style={{ padding: '0 0 10px', borderTop: '1px solid #eef1f5' }}>
