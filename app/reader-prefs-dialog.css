@@ -1,5 +1,8 @@
 .prefs-backdrop{position:fixed;inset:0;z-index:130;background:#12213f66;display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(2px)}
 .prefs-dialog{width:min(760px,100%);height:min(520px,100%);background:#fff;border-radius:16px;box-shadow:0 24px 60px #13213b33;display:flex;overflow:hidden;color:#203047}
+.prefs-toast{position:fixed;top:16px;right:16px;z-index:2;padding:8px 12px;border-radius:8px;background:#edf3ff;color:#415e8c;border:1px solid #dce6f8;box-shadow:0 8px 24px #1e293b12;font-size:12px;line-height:1.4;max-width:min(72vw,280px);animation:prefs-toast-in .18s ease-out}
+@keyframes prefs-toast-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.prefs-toast{animation:none}}
 .prefs-nav{width:168px;flex:none;background:#f6f8fb;border-right:1px solid #e6ebf2;padding:18px 10px;display:flex;flex-direction:column}
 .prefs-kicker{margin:0 8px 12px;font-size:15px;font-weight:700}
 .prefs-tabs{display:flex;flex-direction:column;gap:4px}

@@ -44,6 +44,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
   const [confirmClear, setConfirmClear] = useState(false);
   const [habit, setHabit] = useState<ReaderMemory>(() => readReaderMemory());
   const [confirmHabitClear, setConfirmHabitClear] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; at: number } | null>(null);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -97,9 +98,16 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
     return () => window.removeEventListener(READER_MEMORY_EVENT, sync);
   }, []);
 
-  function patch(next: Partial<ReaderPrefs>) {
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  function patch(next: Partial<ReaderPrefs>, text?: string) {
     setPrefs(updateReaderPrefs(next));
     if ('memory' in next) setConfirmClear(false);
+    if (text) setNotice({ text, at: Date.now() });
   }
 
   async function deleteOne(id: string) {
@@ -178,7 +186,10 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                     key={level}
                     level={level}
                     checked={prefs.readingLevel === level}
-                    onSelect={() => patch({ readingLevel: level })}
+                    onSelect={() => {
+                      if (prefs.readingLevel === level) return;
+                      patch({ readingLevel: level }, `解读风格已改为「${READING_LEVEL_COPY[level].label}」`);
+                    }}
                   />
                 ))}
               </div>
@@ -191,7 +202,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                 on={prefs.autoModel}
                 label="自动切换"
                 hint="按已配置顺序尝试，失败后再换下一个"
-                onChange={(autoModel) => patch({ autoModel })}
+                onChange={(autoModel) => patch({ autoModel }, autoModel ? '已开启自动切换' : '已关闭自动切换')}
               />
               {!prefs.autoModel ? (
                 <>
@@ -206,7 +217,10 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                         role="radio"
                         className="prefs-choice"
                         aria-checked={prefs.modelId === item.id}
-                        onClick={() => patch({ modelId: item.id })}
+                        onClick={() => {
+                          if (prefs.modelId === item.id) return;
+                          patch({ modelId: item.id }, `问答模型已改为「${item.model}」`);
+                        }}
                       >
                         <b>{item.model}</b>
                       </button>
@@ -226,7 +240,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                 on={prefs.welcome}
                 label="启用欢迎语"
                 hint="开麦后先说一句「我是 Eva，你的财报智能分析助手。」"
-                onChange={(welcome) => patch({ welcome })}
+                onChange={(welcome) => patch({ welcome }, welcome ? '已开启欢迎语' : '已关闭欢迎语')}
               />
               <p className="prefs-label">语速</p>
               <div className="prefs-segment" role="radiogroup" aria-label="语速">
@@ -237,7 +251,10 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                     role="radio"
                     aria-checked={prefs.speechRate === item.value}
                     className={prefs.speechRate === item.value ? 'on' : ''}
-                    onClick={() => patch({ speechRate: item.value })}
+                    onClick={() => {
+                      if (prefs.speechRate === item.value) return;
+                      patch({ speechRate: item.value }, `语速已改为「${item.label}」`);
+                    }}
                   >
                     {item.label}
                   </button>
@@ -266,7 +283,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                 on={prefs.memory}
                 label="会话缓存"
                 hint="开启后，追问会带上这次会话里已经问过的内容。"
-                onChange={(memory) => patch({ memory })}
+                onChange={(memory) => patch({ memory }, memory ? '已开启会话缓存' : '已关闭会话缓存')}
               />
               <div className="prefs-memory-head">
                 <p className="prefs-label">会话缓存管理</p>
@@ -306,6 +323,9 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
           ) : null}
         </section>
       </div>
+      {notice ? (
+        <div key={notice.at} className="prefs-toast" role="status" aria-live="polite" onClick={(event) => event.stopPropagation()}>{notice.text}</div>
+      ) : null}
     </div>
   );
 }
