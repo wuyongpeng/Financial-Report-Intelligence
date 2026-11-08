@@ -20,7 +20,7 @@ export async function GET(_request: Request) {
     }));
 
     return Response.json({
-      note: '异常=规则检出或人工标异。审核通过可记原因（可不选）：真数，或解析错在抽数、页码单位、报告期次。每次点击另留一条记录。',
+      note: '异常=规则检出或人工标异。审核通过可记原因（可不选）：真数，或解析错在抽数、页码单位、报告期次，或重新解析后数据一致。每次点击另留一条记录。',
       summary,
       periods,
       rows: withReason,

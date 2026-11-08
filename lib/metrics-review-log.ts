@@ -10,6 +10,7 @@ export const REVIEW_REASONS = [
   'parse_value',
   'parse_page_unit',
   'parse_period',
+  'reparsed_match',
 ] as const;
 
 export type ReviewReason = (typeof REVIEW_REASONS)[number];
@@ -20,6 +21,7 @@ export const REVIEW_REASON_LABEL: Record<ReviewReason, string> = {
   parse_value: '解析错了：抽错数',
   parse_page_unit: '解析错了：页码或单位错',
   parse_period: '解析错了：报告或期次抓错',
+  reparsed_match: '重新解析后数据一致',
 };
 
 const REASON_SET = new Set<string>(REVIEW_REASONS);
@@ -37,6 +39,7 @@ export type ReviewLogSummary = {
   parseValue: number;
   parsePageUnit: number;
   parsePeriod: number;
+  reparsedMatch: number;
   unstated: number;
   flagCount: number;
 };
@@ -86,6 +89,7 @@ export function emptyReviewLogSummary(): ReviewLogSummary {
     parseValue: 0,
     parsePageUnit: 0,
     parsePeriod: 0,
+    reparsedMatch: 0,
     unstated: 0,
     flagCount: 0,
   };
@@ -111,7 +115,8 @@ export function summarizeReviewLog(events: readonly ReviewLogEvent[]): ReviewLog
     } else if (event.reason === 'parse_period') {
       summary.parseError += 1;
       summary.parsePeriod += 1;
-    } else summary.unstated += 1;
+    } else if (event.reason === 'reparsed_match') summary.reparsedMatch += 1;
+    else summary.unstated += 1;
   }
   return summary;
 }

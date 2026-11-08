@@ -4,6 +4,7 @@ import { overviewIssuesForAnnouncement } from './metrics-overview-server';
 import {
   emptyReviewLogSummary,
   normalizeReviewIssues,
+  parseReviewReason,
   summarizeReviewLog,
   type ReviewAction,
   type ReviewLogEntry,
@@ -40,10 +41,8 @@ function asIso(value: Date | string): string {
 }
 
 function asReason(value: string | null): ReviewReason | null {
-  if (value === 'real_disclosure' || value === 'parse_value' || value === 'parse_page_unit' || value === 'parse_period') {
-    return value;
-  }
-  return null;
+  const parsed = parseReviewReason(value);
+  return parsed === 'invalid' ? null : parsed;
 }
 
 /**
@@ -64,7 +63,7 @@ export async function writeOverviewReview(
         SET code=EXCLUDED.code,
             period=EXCLUDED.period,
             status='acked',
-            note=COALESCE(EXCLUDED.note, metrics_overview_reviews.note),
+            note=EXCLUDED.note,
             updated_at=NOW()
       `;
       await tx`
@@ -73,7 +72,7 @@ export async function writeOverviewReview(
         ON CONFLICT (announcement_id) DO UPDATE
         SET code=EXCLUDED.code,
             period=EXCLUDED.period,
-            note=COALESCE(EXCLUDED.note, metrics_overview_acks.note),
+            note=EXCLUDED.note,
             acked_at=NOW()
       `;
     } else {

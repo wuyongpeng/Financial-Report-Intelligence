@@ -61,6 +61,7 @@ export function MetricsAdminClient() {
   const [flagError, setFlagError] = useState('');
   const [ackTargets, setAckTargets] = useState<OverviewRow[]>([]);
   const [ackReason, setAckReason] = useState<ReviewReason | null>(null);
+  const [ackNote, setAckNote] = useState('');
   const [ackError, setAckError] = useState('');
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState('');
@@ -176,6 +177,7 @@ export function MetricsAdminClient() {
   const closeAck = useCallback(() => {
     setAckTargets([]);
     setAckReason(null);
+    setAckNote('');
     setAckError('');
   }, []);
 
@@ -187,6 +189,7 @@ export function MetricsAdminClient() {
     if (row.acked) return;
     setActionMsg('');
     setAckReason(null);
+    setAckNote('');
     setAckError('');
     setAckTargets([row]);
   }, []);
@@ -397,6 +400,7 @@ export function MetricsAdminClient() {
     if (batchBusy || rowBusyId) return;
     setActionMsg('');
     setAckReason(null);
+    setAckNote('');
     setAckError('');
     setAckTargets(targets);
   }, [batchBusy, rowBusyId, selectedRows]);
@@ -423,6 +427,7 @@ export function MetricsAdminClient() {
               code: row.code,
               period: row.period,
               reason: ackReason ?? undefined,
+              note: ackNote.trim() || undefined,
             }),
           });
           const body = await res.json().catch(() => ({})) as { error?: string; note?: string };
@@ -457,7 +462,7 @@ export function MetricsAdminClient() {
       setRowBusyId(null);
       setBatchBusy(false);
     }
-  }, [ackReason, ackTargets, batchBusy, clearSelection, closeAck, load, rowBusyId]);
+  }, [ackNote, ackReason, ackTargets, batchBusy, clearSelection, closeAck, load, rowBusyId]);
 
   const batchFlag = useCallback(async () => {
     const targets = selectedRows.filter((row) => row.announcementId && !row.flagged);
@@ -740,9 +745,9 @@ export function MetricsAdminClient() {
                     {row.acked ? (
                       <span>
                         <span style={{ color: '#15803d', fontWeight: 650 }}>已审</span>
-                        {row.ackReason ? (
-                          <div style={{ marginTop: 2, fontSize: 11, color: '#3a4d66', fontWeight: 500 }} title={REVIEW_REASON_LABEL[row.ackReason]}>
-                            {REVIEW_REASON_LABEL[row.ackReason]}
+                        {row.ackReason || row.reviewNote ? (
+                          <div style={{ marginTop: 2, fontSize: 11, color: '#3a4d66', fontWeight: 500 }} title={[row.ackReason ? REVIEW_REASON_LABEL[row.ackReason] : '', row.reviewNote || ''].filter(Boolean).join(' · ')}>
+                            {[row.ackReason ? REVIEW_REASON_LABEL[row.ackReason] : '', row.reviewNote || ''].filter(Boolean).join(' · ')}
                           </div>
                         ) : null}
                       </span>
@@ -829,7 +834,7 @@ export function MetricsAdminClient() {
       </div>
 
       <p style={{ ...s.muted, marginTop: 14 }}>
-        数据不对点解析可本行重抽；错抓点删除。审核通过可记原因也可不选：真数，或解析错在抽数、页码单位、报告期次。用户反馈点标记异常（可写短备注）。每次通过或标异都另留一条记录。
+        数据不对点解析可本行重抽；错抓点删除。审核通过可记原因也可不选：真数、解析错在抽数、页码单位、报告期次，或重新解析后数据一致，也可以自己写一条。用户反馈点标记异常（可写短备注）。每次通过或标异都另留一条记录。
       </p>
 
       {discardTarget ? (
@@ -921,7 +926,7 @@ export function MetricsAdminClient() {
                 将通过 {ackTargets.length} 行。每一行记下当时系统标出的类型。
               </p>
             )}
-            <p style={{ ...s.muted, margin: '0 0 8px' }}>原因可选，不选也能通过。</p>
+            <p style={{ ...s.muted, margin: '0 0 8px' }}>原因可选，不选也能通过。解析修好后可选「重新解析后数据一致」。</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
               {REVIEW_REASONS.map((reason) => {
                 const selected = ackReason === reason;
@@ -949,6 +954,18 @@ export function MetricsAdminClient() {
                 );
               })}
             </div>
+            <label style={{ display: 'block', marginBottom: 12 }}>
+              <span style={{ ...s.muted, display: 'block', marginBottom: 6 }}>自定义（可选）</span>
+              <input
+                type="text"
+                value={ackNote}
+                onChange={(e) => setAckNote(e.target.value)}
+                placeholder="写一条自己的原因"
+                maxLength={200}
+                disabled={Boolean(rowBusyId) || batchBusy}
+                style={{ ...s.input, width: '100%', boxSizing: 'border-box' }}
+              />
+            </label>
             {ackError ? <p style={s.err}>{ackError}</p> : null}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button type="button" style={s.btnGhost} disabled={Boolean(rowBusyId) || batchBusy} onClick={closeAck}>
@@ -1033,9 +1050,14 @@ function ReviewLogPanel({
 }) {
   const summary = log.summary;
   return (
-    <section style={{ margin: '0 0 12px', padding: '10px 12px', border: '1px solid #e5eaf1', borderRadius: 8, background: '#f8fafc' }}>
-      <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 650, color: '#203047' }}>处理记录</p>
-      <p style={{ margin: 0, fontSize: 13, color: '#3a4d66', lineHeight: 1.6 }}>
+    <details style={{ margin: '0 0 12px', padding: '8px 12px', border: '1px solid #e5eaf1', borderRadius: 8, background: '#f8fafc' }}>
+      <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 650, color: '#203047' }}>
+        处理记录
+        <span style={{ marginLeft: 8, fontWeight: 500, color: '#64748b' }}>
+          通过 {summary.ackCount} 次 · 当前异常 {abnormal} 条
+        </span>
+      </summary>
+      <p style={{ margin: '8px 0 0', fontSize: 13, color: '#3a4d66', lineHeight: 1.6 }}>
         当前异常 {abnormal} 条
         <br />
         审核通过 {summary.ackCount} 次
@@ -1045,6 +1067,8 @@ function ReviewLogPanel({
         <br />
         解析错了 {summary.parseError} 次
         （抽错数 {summary.parseValue} · 页码或单位 {summary.parsePageUnit} · 报告或期次 {summary.parsePeriod}）
+        <br />
+        重新解析后数据一致 {summary.reparsedMatch} 次
         {summary.flagCount ? ` · 标异 ${summary.flagCount} 次` : ''}
       </p>
       {log.recent.length > 0 ? (
@@ -1065,9 +1089,7 @@ function ReviewLogPanel({
                   <td style={s.td}>{event.period}</td>
                   <td style={s.td}>{event.action === 'acked' ? '通过' : '标异'}</td>
                   <td style={s.td}>{event.issues.length ? event.issues.map(issueLabel).join(' · ') : '—'}</td>
-                  <td style={s.td}>
-                    {event.reason ? REVIEW_REASON_LABEL[event.reason] : event.note || (event.action === 'acked' ? '未选原因' : '—')}
-                  </td>
+                  <td style={s.td}>{formatReviewReason(event)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1076,8 +1098,17 @@ function ReviewLogPanel({
       ) : (
         <p style={{ ...s.muted, margin: '8px 0 0' }}>还没有审核或标异记录。点通过之后会出现在这里。</p>
       )}
-    </section>
+    </details>
   );
+}
+
+function formatReviewReason(event: Pick<ReviewLogEntry, 'action' | 'reason' | 'note'>): string {
+  const label = event.reason ? REVIEW_REASON_LABEL[event.reason] : '';
+  const note = event.note?.trim() ?? '';
+  if (label && note) return `${label} · ${note}`;
+  if (label) return label;
+  if (note) return note;
+  return event.action === 'acked' ? '未选原因' : '—';
 }
 
 function formatReviewTime(iso: string): string {

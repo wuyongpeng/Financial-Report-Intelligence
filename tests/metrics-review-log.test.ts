@@ -13,6 +13,7 @@ test('review reason is optional and rejects unknown values', () => {
   assert.equal(parseReviewReason(null), null);
   assert.equal(parseReviewReason(''), null);
   assert.equal(parseReviewReason('  real_disclosure  '), 'real_disclosure');
+  assert.equal(parseReviewReason('reparsed_match'), 'reparsed_match');
   assert.equal(parseReviewReason('同比离谱'), 'invalid');
   assert.equal(parseReviewReason(1), 'invalid');
 });
@@ -24,18 +25,21 @@ test('ack counts are clicks, split into real disclosure and three parse errors',
     { action: 'acked', reason: 'parse_value' },
     { action: 'acked', reason: 'parse_page_unit' },
     { action: 'acked', reason: 'parse_period' },
+    { action: 'acked', reason: 'reparsed_match' },
     { action: 'acked', reason: null },
     { action: 'flagged', reason: null },
   ]);
-  assert.equal(summary.ackCount, 6);
+  assert.equal(summary.ackCount, 7);
   assert.equal(summary.realDisclosure, 2);
   assert.equal(summary.parseError, 3);
   assert.equal(summary.parseValue, 1);
   assert.equal(summary.parsePageUnit, 1);
   assert.equal(summary.parsePeriod, 1);
+  assert.equal(summary.reparsedMatch, 1);
   assert.equal(summary.unstated, 1);
   assert.equal(summary.flagCount, 1);
   assert.equal(isParseErrorReason('parse_value'), true);
+  assert.equal(isParseErrorReason('reparsed_match'), false);
   assert.equal(isParseErrorReason('real_disclosure'), false);
   assert.equal(isParseErrorReason(null), false);
 });
@@ -59,4 +63,5 @@ test('metrics review routes append events and do not rewrite the log', () => {
   assert.match(record, /INSERT INTO metrics_overview_review_events/);
   assert.doesNotMatch(record, /UPDATE metrics_overview_review_events|DELETE FROM metrics_overview_review_events/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS metrics_overview_review_events/);
+  assert.match(schema, /reparsed_match/);
 });

@@ -65,6 +65,7 @@ export async function POST(request: Request) {
       note,
     });
     const reasonLabel = reason ? REVIEW_REASON_LABEL[reason] : '';
+    const recorded = [reasonLabel, note].filter(Boolean).join(' · ');
 
     return Response.json({
       ok: true,
@@ -74,8 +75,8 @@ export async function POST(request: Request) {
       status: 'acked',
       reason,
       issues: written.issues,
-      note: reasonLabel
-        ? `已审核通过 ${code} ${period}（${reasonLabel}）`
+      note: recorded
+        ? `已审核通过 ${code} ${period}（${recorded}）`
         : `已审核通过 ${code} ${period}`,
     }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
