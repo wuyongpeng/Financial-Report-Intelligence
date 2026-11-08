@@ -73,11 +73,16 @@ test('reader memory stores durable facts, not a log of each question', () => {
   assert.equal(replaced.notes.filter((note) => note.text.includes('变化原因')).length, 0);
   assert.ok(replaced.notes.some((note) => note.text === '回答时先说现金流'));
   assert.equal(explicitMemoryText('营收为什么下降'), null);
+  assert.equal(explicitMemoryText('我主要关注经营现金流'), '经营现金流');
+  assert.equal(explicitMemoryText('我主要关注这期扣非为什么下降'), null);
+  assert.equal(explicitMemoryText('回答简短一点'), '简短一点');
+  assert.equal(explicitMemoryText('以后默认用亿元'), '用亿元');
   assert.equal(parseMemoryPatch({ action: 'save', text: '营收为什么下降？' }), null);
   assert.deepEqual(parseMemoryPatch({ action: 'none' }), { action: 'none' });
   const visible = selectMemories(replaced, '贵州茅台的现金流怎么样');
   assert.ok(visible.some((note) => note.text === '长期看贵州茅台'));
-  assert.ok(visible.every((note) => note.source === 'saved' || note.text.includes('现金流')));
+  assert.ok(visible.every((note) => note.source === 'saved'));
+  assert.ok(visible.every((note) => !note.text.includes('现金流')));
   assert.match(memoryPrompt(replaced, '今天天气怎么样'), /简短/);
   assert.doesNotMatch(memoryPrompt(replaced, '今天天气怎么样'), /现金流/);
   assert.equal(memoryPrompt({ notes: [] }), '');

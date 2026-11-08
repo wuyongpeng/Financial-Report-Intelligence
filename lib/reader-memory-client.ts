@@ -19,11 +19,12 @@ function asNotes(value: unknown): MemoryNote[] {
     const id = typeof row.id === 'string' ? row.id.trim() : '';
     const text = typeof row.text === 'string' ? row.text.trim() : '';
     if (!id || !text) continue;
+    if (row.source !== 'saved') continue;
     if (id.startsWith('habit:') || id.startsWith('company:') || text.startsWith('提问常围绕')) continue;
     notes.push({
       id: id.slice(0, 120),
       text: text.slice(0, 80),
-      source: row.source === 'saved' ? 'saved' : 'inferred',
+      source: 'saved',
       updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : '',
     });
     if (notes.length >= 20) break;

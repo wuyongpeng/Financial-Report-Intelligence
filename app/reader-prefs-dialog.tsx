@@ -358,7 +358,7 @@ function HabitPanel({
   return (
     <>
       <h3>记忆</h3>
-      <p className="prefs-lead">只留下以后还会用到的事实，用来调整后续回答。一次提问不会记下来。</p>
+      <p className="prefs-lead">只保存在这台浏览器里。写在下面，或在对话里说「记住……」「我主要关注……」「回答简短一点」。普通提问不会记下来。</p>
       <form className="prefs-memory-add" onSubmit={add}>
         <input
           value={draft}
@@ -377,7 +377,7 @@ function HabitPanel({
             <li key={note.id}>
               <div>
                 <p>{note.text}</p>
-                <small>{note.source === 'saved' ? '你写下的' : '长期记下'}</small>
+                <small>保存在本机</small>
               </div>
               <button type="button" onClick={() => onDelete(note.id)}>删除</button>
             </li>

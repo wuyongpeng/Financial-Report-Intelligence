@@ -3,7 +3,7 @@
 export type MemoryNote = {
   id: string;
   text: string;
-  /** saved: the user wrote it. inferred: a later turn replaced or added a durable fact. */
+  /** saved: the user wrote it or said it. inferred: leftover model notes, ignored when answering. */
   source: 'saved' | 'inferred';
   updatedAt: string;
 };
@@ -18,9 +18,11 @@ const MAX_NOTES = 12;
 
 const EXPLICIT_PATTERNS = [
   /^(?:请)?(?:帮我)?记住[：:，,\s]*(.+)$/,
-  /^以后(?:都|请|回答)?[，,\s]*(.+)$/,
+  /^以后(?:都|请|回答|默认)?[，,\s]*(.+)$/,
   /^我希望(?:你)?(?:以后)?[，,\s]*(.+)$/,
   /^回答(?:的时候|时)(?:请|要)?[，,\s]*(.+)$/,
+  /^我主要关注(?!.*(?:为什么|多少|怎么样|如何|吗))[：:，,\s]*(.+)$/,
+  /^回答(?:请|要)?((?:简短|详细|口语).+)$/,
 ];
 
 export type MemoryPatch =
@@ -113,29 +115,12 @@ export function removeMemoryNote(memory: ReaderMemory, id: string): ReaderMemory
   return { notes: memory.notes.filter((item) => item.id !== id) };
 }
 
-function grams(text: string): string[] {
-  const compact = text.replace(/\s+/g, '');
-  const out = (compact.match(/[A-Za-z0-9]{2,}/g) ?? []).map((item) => item.toLowerCase());
-  for (let i = 0; i < compact.length - 1; i += 1) {
-    const pair = compact.slice(i, i + 2);
-    if (/^[\u4e00-\u9fff]{2}$/.test(pair)) out.push(pair);
-  }
-  return out;
-}
-
-/** Saved facts always travel. Inferred facts travel only when this question touches them. */
-export function selectMemories(memory: ReaderMemory, question = ''): MemoryNote[] {
-  const notes = memory.notes.filter((item) => item.text.trim());
-  const saved = notes.filter((item) => item.source === 'saved');
-  const inferred = notes.filter((item) => item.source !== 'saved');
-  const query = new Set(grams(question));
-  const related = query.size
-    ? inferred.filter((item) => grams(item.text).some((token) => query.has(token)))
-    : inferred.slice(0, 4);
+/** Only notes the user wrote or explicitly asked to remember. Model guesses never enter the prompt. */
+export function selectMemories(memory: ReaderMemory, _question = ''): MemoryNote[] {
   const seen = new Set<string>();
   const picked: MemoryNote[] = [];
-  for (const item of [...saved, ...related]) {
-    if (seen.has(item.id)) continue;
+  for (const item of memory.notes) {
+    if (item.source !== 'saved' || !item.text.trim() || seen.has(item.id)) continue;
     seen.add(item.id);
     picked.push(item);
     if (picked.length >= 8) break;
