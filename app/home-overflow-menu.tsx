@@ -273,7 +273,8 @@ export default function HomeOverflowMenu({
                   className="hom-admin-link"
                   href="dingtalk://dingtalkclient/page/profile?corp_id=dingd0e3f5f70ceb88d2ee0f45d8e4f7c288&staff_id=222444"
                 >
-                  直接反馈
+                  快捷反馈
+                  <span className="hom-admin-tip" role="tooltip">直接通过钉钉联系管理员</span>
                 </a>
               </div>
             </div>

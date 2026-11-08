@@ -11,7 +11,7 @@ import { beginTurn, finishTurn, type AnswerResult, type MemoryMessage } from '@/
 import { loadRagContext } from '@/lib/rag';
 import { generateAnswer } from '@/lib/answer';
 import { assembleFocusPrompt } from '@/lib/focus-prompt';
-import { recordClientAudit } from '@/lib/client-audit';
+import { patchAskAudit, recordClientAudit } from '@/lib/client-audit';
 import { resolveAuditReportMeta } from '@/lib/client-audit-report';
 
 export const dynamic = 'force-dynamic';
@@ -55,6 +55,7 @@ export async function POST(request: Request) {
             replay: Boolean(replay),
             period: reportMeta.period,
             reportType: reportMeta.reportType,
+            ...(assembled !== question ? { assembled } : {}),
           },
         }, request);
       })();
@@ -62,6 +63,22 @@ export async function POST(request: Request) {
     const context = replay ? null : await loadRagContext(reportId, question, history, input.summary, focus);
     const persist = async (result: AnswerResult) => {
       if (lease) await finishTurn(lease.owner, lease.conversationId, lease.requestId, result);
+    };
+    const rememberOutcome = (result: AnswerResult) => {
+      if (!conversationId) return;
+      void patchAskAudit(requestId, {
+        durationMs: result.durationMs,
+        answerStatus: result.status,
+        mode: result.mode,
+        ...(result.usage ? { usage: result.usage } : {}),
+        ...(result.errorStack ? { errorStack: result.errorStack } : {}),
+        ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+      });
+    };
+    const publicResult = (result: AnswerResult): AnswerResult => {
+      if (!result.errorStack) return result;
+      const { errorStack: _stack, ...rest } = result;
+      return rest;
     };
     const answerOpts = {
       rewrite: input.rewrite,
@@ -73,9 +90,10 @@ export async function POST(request: Request) {
     if (!input.stream) {
       const result = replay ?? await generateAnswer(context!, history, request.signal, undefined, answerOpts);
       await persist(result);
+      if (!replay) rememberOutcome(result);
       const headers = new Headers({ 'cache-control': 'no-store' });
       if (setCookie) headers.append('set-cookie', setCookie);
-      const body = { ...result, requestId, conversationId, metrics: context?.metrics, peers: context?.peers } satisfies ChatResponse;
+      const body = { ...publicResult(result), requestId, conversationId, metrics: context?.metrics, peers: context?.peers } satisfies ChatResponse;
       return Response.json(body, { headers });
     }
     const abort = new AbortController();
@@ -95,11 +113,15 @@ export async function POST(request: Request) {
             else if (event.status === 'reasoning') emit({ status: 'reasoning' });
           }, answerOpts);
           await persist(result);
+          if (!replay) rememberOutcome(result);
           if (!emitted) emit({ content: result.answer });
           // Final result replaces provisional deltas if validation required a fallback.
-          emit({ result, evidence: result.evidence, status: result.status });
+          const shown = publicResult(result);
+          emit({ result: shown, evidence: shown.evidence, status: shown.status });
           if (!cancelled) { output.enqueue(encoder.encode(CHAT_STREAM_DONE)); output.close(); }
-        } catch {
+        } catch (error) {
+          const errorStack = error instanceof Error ? (error.stack || error.message) : String(error);
+          if (conversationId) void patchAskAudit(requestId, { errorStack, answerStatus: 'failed' });
           await persist({ answer: '回答未能保存，请重试。', status: 'failed', mode: 'error', evidence: [], durationMs: 0 }).catch(() => undefined);
           emit({ error: '回答未能完成或保存，请重试。', status: 'failed' });
           if (!cancelled) { output.enqueue(encoder.encode(CHAT_STREAM_DONE)); output.close(); }

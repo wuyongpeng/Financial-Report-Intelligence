@@ -2,11 +2,22 @@ import { randomUUID } from 'node:crypto';
 import { getDb } from './db';
 import { ensureBackendSchema } from './backend-schema';
 import { ApiError } from './api';
+import type { ModelUsage } from './model-usage';
 
 export type Evidence = { id: string; reportId: string; companyName: string; period: string; page: number; quote: string; metric?: string; code?: string };
 export type StoredMessage = { id: string; request_id: string; role: 'user' | 'assistant'; content: string; status: string; evidence: Evidence[]; mode: string | null };
 export type MemoryMessage = { role: 'user' | 'assistant'; content: string };
-export type AnswerResult = { answer: string; mode: string; evidence: Evidence[]; status: 'complete' | 'interrupted' | 'failed'; durationMs: number; warnings?: string[] };
+export type AnswerResult = {
+  answer: string;
+  mode: string;
+  evidence: Evidence[];
+  status: 'complete' | 'interrupted' | 'failed';
+  durationMs: number;
+  warnings?: string[];
+  usage?: ModelUsage;
+  /** Server-only. Strip before sending the answer to the browser. */
+  errorStack?: string;
+};
 
 export function boundedMemory(messages: MemoryMessage[]) {
   // Whole turns, newest first. Assistant messages are continuity only, never

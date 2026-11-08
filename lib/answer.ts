@@ -1,6 +1,7 @@
 import type { RagContext } from './rag';
 import { industryFromStructuredContext, industrySkillSystemAppend } from './industry-skills';
 import type { AnswerResult, MemoryMessage } from './conversations';
+import { parseModelUsage, type ModelUsage } from './model-usage';
 import { fetchChatCompletions, withLlmSlot } from './llm-gate';
 import { llmConfigured } from './llm-providers';
 import { historyForModel } from '@/modules/retrieval/application/question-planner';
@@ -138,6 +139,7 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
   const spoken = Boolean(opts.spoken);
   const start = Date.now();
   const soft = Boolean(context.softScopeHint);
+  let usage: ModelUsage | undefined;
   const finish = (answer: string, mode: string, status: AnswerResult['status'] = 'complete', warnings: string[] = []): AnswerResult => {
     const text = humanizeYuanInText(soft ? ensureSoftScopeFooter(answer, spoken) : answer);
     return {
@@ -147,6 +149,7 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
       evidence: validateCitations(text, context).evidence,
       durationMs: Date.now() - start,
       warnings,
+      ...(usage ? { usage } : {}),
     };
   };
   if (signal.aborted) return finish('', 'cancelled', 'interrupted');
@@ -179,7 +182,8 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
       );
       if (!upstream.ok || !upstream.body) throw new Error(`Model HTTP ${upstream.status}`);
       if (!emit) {
-        const payload = await upstream.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
+        const payload = await upstream.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; usage?: unknown };
+        usage = parseModelUsage(payload.usage) ?? usage;
         answer = payload.choices?.[0]?.message?.content?.trim() ?? '';
         truncated = payload.choices?.[0]?.finish_reason === 'length';
       } else {
@@ -192,8 +196,9 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
             buffer = parsed.rest;
             for (const event of parsed.events) {
               if (event === '[DONE]') { finished = true; continue; }
-              let payload: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: string }> };
+              let payload: { choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: string }>; usage?: unknown };
               try { payload = JSON.parse(event); } catch { continue; }
+              usage = parseModelUsage(payload.usage) ?? usage;
               const choice = payload.choices?.[0];
               if (choice?.finish_reason) { finished = true; truncated = choice.finish_reason === 'length'; }
               if (choice?.delta?.reasoning_content && !answer) emit({ status: 'reasoning' });
@@ -214,9 +219,12 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
       }
       return finish(answer, soft ? 'soft-scope' : 'llm-rag');
     }, signal);
-  } catch {
+  } catch (error) {
     if (signal.aborted) return finish(answer, 'cancelled', 'interrupted');
-    if (answer) return finish(`${answer}\n\n回答中断，以上内容尚不完整，请重试。`, 'llm-interrupted', 'interrupted', ['model-interrupted']);
-    return finish(context.fallback, context.mode, 'complete', ['model-unavailable']);
+    const errorStack = error instanceof Error ? (error.stack || error.message) : String(error);
+    const failed = answer
+      ? finish(`${answer}\n\n回答中断，以上内容尚不完整，请重试。`, 'llm-interrupted', 'interrupted', ['model-interrupted'])
+      : finish(context.fallback, context.mode, 'complete', ['model-unavailable']);
+    return { ...failed, errorStack };
   }
 }

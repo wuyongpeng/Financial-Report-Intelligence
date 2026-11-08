@@ -1,7 +1,22 @@
 .eva-docs{max-width:1200px;margin:0 auto;padding:32px 28px 64px;color:#24364f}
 .eva-docs-header{margin-bottom:28px}
-.eva-docs-header-bar{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.eva-docs-header h1{margin:0;font-size:22px;font-weight:650;letter-spacing:-.02em;color:#203047}
+.eva-docs-crumb{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13px;color:#7d8b9f}
+.eva-docs-crumb a{color:#3064db;text-decoration:none}
+.eva-docs-crumb a:hover{text-decoration:underline}
+.eva-docs-crumb [aria-current=page]{color:#203047;font-weight:600}
+.eva-docs-header-bar{display:flex;align-items:center;gap:16px}
+.eva-docs-header h1{margin:0;font-size:22px;font-weight:650;letter-spacing:-.02em;color:#203047;flex-shrink:0}
+.eva-docs-search{position:relative;z-index:30;display:flex;align-items:center;gap:8px;flex:1;max-width:420px;margin-left:auto}
+.eva-docs-search select,.eva-docs-search input{border:1px solid #d5dde8;border-radius:8px;background:#fff;color:#203047;font:inherit}
+.eva-docs-search select{padding:7px 8px;font-size:13px}
+.eva-docs-search input{flex:1;min-width:0;padding:7px 10px;font-size:13px}
+.eva-docs-search-list{position:absolute;z-index:20;top:calc(100% + 6px);left:0;right:0;max-height:320px;overflow:auto;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 28px #13213b1a;padding:6px}
+.eva-docs-search-list p{margin:0;padding:8px 10px;color:#7d8b9f;font-size:13px}
+.eva-docs-search-list button{display:block;width:100%;text-align:left;border:0;background:transparent;border-radius:7px;padding:8px 10px;cursor:pointer}
+.eva-docs-search-list button:hover{background:#f5f8fc}
+.eva-docs-search-list b{display:block;color:#203047;font-size:13px}
+.eva-docs-search-list span{display:block;color:#64758d;font-size:12px;line-height:1.5}
+::highlight(docs-query){background:#fde68a;color:#203047}
 .eva-docs-home{flex-shrink:0;border:1px solid #d5dde8;border-radius:8px;background:#fff;color:#3d5270;padding:7px 12px;font-size:13px;text-decoration:none}
 .eva-docs-home:hover{border-color:#b7c3d4;color:#203047}
 .eva-docs-header p{margin:8px 0 0;color:#7d8b9f;font-size:14px}
@@ -31,7 +46,19 @@
 .eva-docs-table th,.eva-docs-table td{border:1px solid #e2e8f0;padding:9px 12px;text-align:left;min-width:90px}
 .eva-docs-table th{background:#f6f8fc;font-weight:600}
 .eva-docs-empty{padding:0 10px;font-size:13px;color:#91a0b4;line-height:1.7}
-@media(max-width:760px){.eva-docs{padding:22px 16px 40px}.eva-docs-layout{grid-template-columns:1fr;gap:18px}.eva-docs-layout.is-reading .eva-docs-nav{max-height:210px;overflow:auto}.eva-docs-content{padding:20px}.eva-docs-welcome{padding:28px}.eva-docs-header h1{font-size:20px}}
+.eva-docs-feedback{margin-top:32px;padding-top:18px;border-top:1px solid #e8edf4}
+.eva-docs-feedback-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.eva-docs-feedback-row p{margin:0;color:#3d5270;font-size:14px}
+.eva-docs-feedback-row button,.eva-docs-feedback-form button{border:1px solid #d5dde8;border-radius:8px;background:#fff;color:#3d5270;padding:6px 10px;font-size:13px;cursor:pointer}
+.eva-docs-feedback-row button[aria-pressed=true]{background:#edf3ff;border-color:#3064db;color:#1f4fad}
+.eva-docs-feedback-suggest{margin-left:auto;color:#3064db;font-weight:600}
+.eva-docs-feedback-form{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.eva-docs-feedback-form textarea{width:100%;border:1px solid #d5dde8;border-radius:10px;padding:10px 12px;font:inherit;font-size:14px;color:#203047;resize:vertical}
+.eva-docs-feedback-form div{display:flex;justify-content:flex-end;gap:8px}
+.eva-docs-feedback-form button:last-child{border:0;background:#3064db;color:#fff}
+.eva-docs-feedback-note{margin:8px 0 0;color:#15803d;font-size:13px}
+.eva-docs-feedback-error{margin:8px 0 0;color:#b91c1c;font-size:13px}
+@media(max-width:760px){.eva-docs{padding:22px 16px 40px}.eva-docs-layout{grid-template-columns:1fr;gap:18px}.eva-docs-layout.is-reading .eva-docs-nav{max-height:210px;overflow:auto}.eva-docs-content{padding:20px}.eva-docs-welcome{padding:28px}.eva-docs-header-bar{flex-wrap:wrap}.eva-docs-search{max-width:none;flex:1 1 100%;margin-left:0}.eva-docs-header h1{font-size:20px}.eva-docs-feedback-suggest{margin-left:0}}
 
 .eva-docs-mermaid{overflow-x:auto;margin:18px 0;padding:16px;border:1px solid #e2e8f0;border-radius:10px;background:#fbfcfe}
 .eva-docs-mermaid svg{display:block;max-width:100%;height:auto;margin:0 auto}

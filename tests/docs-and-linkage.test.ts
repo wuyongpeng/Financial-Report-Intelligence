@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import MetricLinkage from '../app/metric-linkage';
+import { searchProductDocuments } from '../lib/docs-search';
 import { documentHref, listProductDocuments, productDocumentLink, readProductDocument, PUBLIC_DOCUMENT_ORDER } from '../lib/product-documents';
 import {
   RELATION_DATA_LABEL,
@@ -40,6 +41,18 @@ test('documentation lists whitelisted Markdown in fixed order and refuses paths 
 test('repo docs root exposes exactly the four public documents in order', async () => {
   const documents = await listProductDocuments();
   assert.deepEqual(documents.map(item => item.name), [...PUBLIC_DOCUMENT_ORDER]);
+});
+
+test('document search finds keywords across articles and can stay inside one file', () => {
+  const docs = [
+    { name: '产品介绍.md', title: '产品介绍', content: '角标回原文。指标联动展开看数据。智能追问带页码。' },
+    { name: '技术架构.md', title: '技术架构', content: '展现包含角标回原文。' },
+  ];
+  const all = searchProductDocuments(docs, '角标');
+  assert.deepEqual(all.map((hit) => hit.title), ['产品介绍', '技术架构']);
+  assert.match(all[0]?.snippet ?? '', /角标/);
+  assert.deepEqual(searchProductDocuments(docs, '追问', { onlyName: '技术架构.md' }), []);
+  assert.equal(searchProductDocuments(docs, '  ').length, 0);
 });
 
 test('documentation links route Chinese names and reject unsafe protocols and unknown local files', () => {

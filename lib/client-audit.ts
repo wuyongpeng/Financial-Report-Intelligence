@@ -50,3 +50,24 @@ export async function recordClientAudit(input: AuditEventInput, request?: Reques
     console.error('[client-audit] write failed', error instanceof Error ? error.message : error);
   }
 }
+
+/** Attach outcome fields after the answer. The insert races the model, so retry once. */
+export async function patchAskAudit(requestId: string, patch: Record<string, unknown>): Promise<void> {
+  if (!requestId) return;
+  try {
+    await ensureBackendSchema();
+    const db = getDb();
+    const write = () => db`
+      UPDATE client_audit_events
+      SET detail = COALESCE(detail, '{}'::jsonb) || ${db.json(patch)}
+      WHERE event_type = 'ask' AND request_id = ${requestId}
+      RETURNING id
+    `;
+    const first = await write();
+    if (first.length) return;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await write();
+  } catch (error) {
+    console.error('[client-audit] patch failed', error instanceof Error ? error.message : error);
+  }
+}

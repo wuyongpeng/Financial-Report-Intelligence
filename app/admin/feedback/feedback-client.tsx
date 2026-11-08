@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import Link from 'next/link';
 import {
   AdminHeader,
   AdminHelpTip,
@@ -9,6 +10,7 @@ import {
 } from '../_components/admin-shell';
 import { AiSummarizePanel } from '../_components/ai-summarize-card';
 import { matchesQuickSearch } from '@/lib/admin-table-search';
+import { feedbackFilingLink } from '@/lib/feedback-page-link';
 
 type FeedbackItem = {
   id: number;
@@ -161,7 +163,7 @@ export function FeedbackAdminClient() {
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.category || '其它'}</td>
                 <td style={{ ...s.td, maxWidth: 420, whiteSpace: 'pre-wrap' }}>{item.message}</td>
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>{item.contact || '—'}</td>
-                <td style={s.td} title={item.url ?? undefined}>{item.page || item.url || '—'}</td>
+                <td style={s.td}><FeedbackPageCell page={item.page} url={item.url} /></td>
                 <td style={{ ...s.td, whiteSpace: 'nowrap' }}>
                   <span style={{
                     fontWeight: 650,
@@ -199,6 +201,27 @@ export function FeedbackAdminClient() {
     </AdminMain>
   );
 }
+
+function FeedbackPageCell({ page, url }: { page: string | null; url: string | null }) {
+  const text = (page ?? '').trim() || (url ?? '').trim() || '—';
+  const link = text === '—' ? null : feedbackFilingLink(page, url);
+  if (!link) return <span title={url ?? undefined}>{text}</span>;
+  return (
+    <span title={url ?? undefined}>
+      {text.slice(0, link.start)}
+      <Link href={link.href} target="_blank" rel="noopener noreferrer" style={periodLink}>
+        {text.slice(link.start, link.end)}
+      </Link>
+      {text.slice(link.end)}
+    </span>
+  );
+}
+
+const periodLink: CSSProperties = {
+  color: '#1f4fad',
+  fontWeight: 650,
+  textDecoration: 'none',
+};
 
 const textAct = {
   border: 0,
