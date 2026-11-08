@@ -161,6 +161,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const systemTtsAbortRef = useRef<AbortController | null>(null);
   /** Welcome TTS is in flight — do not open the mic over it. */
   const welcomeHoldRef = useRef(false);
+  /** Connect first, then speak the greeting, so 连接中 is not shown again afterwards. */
+  const welcomePendingRef = useRef(false);
   const handleUtteranceRef = useRef<(raw: string) => Promise<void>>(async () => undefined);
   /** One auto-reconnect after mid-session ASR drop; reset on successful listen / explicit end. */
   const asrReconnectRef = useRef(0);
@@ -237,6 +239,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     suppressAutoListenRef.current = false;
     finalizingRef.current = false;
     voiceEmptyTurnsRef.current = 0;
+    welcomePendingRef.current = false;
     asrReconnectRef.current = 0;
     voiceGenRef.current += 1;
     clearArmTimer();
@@ -392,7 +395,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     bargeArmedRef.current = barge;
     finalizingRef.current = false;
     if (!barge) setSpeakingState(false);
-    if (!barge) {
+    const firstConnect = !sessionReadyRef.current;
+    if (!barge && firstConnect) {
       connectingRef.current = true;
       setConnecting(true);
       setLinkFailed(false);
@@ -463,7 +467,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       if (gen !== voiceGenRef.current || !activeRef.current) return;
       let asrReady = false;
       let micReady = false;
-      const finishConnect = () => {
+      const finishConnect = (opts?: { skipListen?: boolean }) => {
         if (gen !== voiceGenRef.current || !asrReady || !micReady) return;
         if (connectTimerRef.current != null) {
           window.clearTimeout(connectTimerRef.current);
@@ -472,16 +476,18 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
         connectingRef.current = false;
         setConnecting(false);
         setLinkFailed(false);
-        if (!barge) setListening(true);
+        if (!barge && !opts?.skipListen) setListening(true);
         if (!sessionReadyRef.current) {
           sessionReadyRef.current = true;
-          playVoiceCue('ready');
-          setReadyHint(true);
-          if (readyHintTimerRef.current != null) window.clearTimeout(readyHintTimerRef.current);
-          readyHintTimerRef.current = window.setTimeout(() => {
-            readyHintTimerRef.current = null;
-            setReadyHint(false);
-          }, 2000);
+          if (!opts?.skipListen) {
+            playVoiceCue('ready');
+            setReadyHint(true);
+            if (readyHintTimerRef.current != null) window.clearTimeout(readyHintTimerRef.current);
+            readyHintTimerRef.current = window.setTimeout(() => {
+              readyHintTimerRef.current = null;
+              setReadyHint(false);
+            }, 2000);
+          }
         }
       };
       if (!barge) {
@@ -562,8 +568,28 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       }
       pcmCaptureRef.current = capture;
       micReady = true;
-      finishConnect();
+      const greetNow = !barge && welcomePendingRef.current;
+      finishConnect(greetNow ? { skipListen: true } : undefined);
       asrReconnectRef.current = 0;
+      if (greetNow) {
+        welcomePendingRef.current = false;
+        welcomeHoldRef.current = true;
+        releaseVoiceIo();
+        setListening(false);
+        setSpeakingState(true);
+        const abort = new AbortController();
+        systemTtsAbortRef.current = abort;
+        void (async () => {
+          try {
+            await speakAnswer(EVA_INTRO_LINE, abort.signal);
+          } catch { /* Still listen if the greeting cannot play. */ }
+          if (systemTtsAbortRef.current === abort) systemTtsAbortRef.current = null;
+          setSpeakingState(false);
+          welcomeHoldRef.current = false;
+          if (activeRef.current && gen === voiceGenRef.current) void listenTurnRef.current();
+        })();
+        return;
+      }
       if (!barge) voiceNoSpeechTimerRef.current = window.setTimeout(() => {
         voiceNoSpeechTimerRef.current = null;
         if (gen !== voiceGenRef.current) return;
@@ -659,21 +685,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     activeRef.current = true;
     voiceEmptyTurnsRef.current = 0;
     setActive(true);
-    if (readReaderPrefs().welcome) {
-      welcomeHoldRef.current = true;
-      const abort = new AbortController();
-      systemTtsAbortRef.current = abort;
-      setSpeakingState(true);
-      try {
-        await speakAnswer(EVA_INTRO_LINE, abort.signal);
-      } catch {
-        /* Still open the mic if the greeting cannot play. */
-      }
-      if (systemTtsAbortRef.current === abort) systemTtsAbortRef.current = null;
-      setSpeakingState(false);
-      welcomeHoldRef.current = false;
-      if (!activeRef.current) return;
-    }
+    welcomePendingRef.current = readReaderPrefs().welcome;
     await listenTurn();
   }, [busy, listenTurn, listening, speaking]);
 

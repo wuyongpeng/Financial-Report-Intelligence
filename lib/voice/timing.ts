@@ -7,10 +7,10 @@ export const VOICE_ENDPOINT_MS = 1600;
 export const VOICE_SEND_COUNTDOWN_MS = 1000;
 /** Spoken after the user cancels an armed send. Mic stays in the session. */
 export const VOICE_CANCEL_LINE = '已取消，可以继续说。';
-/** Voice conversation: nothing heard this long after listen start → empty turn. */
-export const VOICE_NO_SPEECH_MS = 8000;
-/** Consecutive empty listen turns before idle-exit toast. */
-export const VOICE_IDLE_EMPTY_TURNS = 2;
+/** Nothing heard this long after the mic is open → idle exit. Resets when the user speaks. */
+export const VOICE_NO_SPEECH_MS = 60_000;
+/** One quiet window is enough; the window itself is 60s. */
+export const VOICE_IDLE_EMPTY_TURNS = 1;
 export const VOICE_IDLE_EXIT_TOAST = '长时间未互动，语音交互已退出';
 /**
  * Barge-in while TTS / ask: first ASR partial at least this many chars
