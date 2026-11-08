@@ -9,7 +9,7 @@ import {
   normaliseFollowup,
   topicFromQuestion,
 } from './chat-followups';
-import { FALLBACK_PLACEHOLDER_SEEDS, shortCompanyName } from './home-placeholders';
+import { FALLBACK_PLACEHOLDER_SEEDS, hasPinnedReportPeriod, shortCompanyName } from './home-placeholders';
 
 export const MAX_PERSONALIZED_HOME_PROMPTS = 4;
 
@@ -23,7 +23,7 @@ function asHomeQuestion(line: string) {
     : (/吗|什么|为何|为什么|怎么|如何|多少|哪些|哪项|是否|几何|对比|分析/.test(text) ? `${text}？` : '');
   if (!withMark) return '';
   if (withMark.length < 6 || withMark.length > 48) return '';
-  if (isGenericFollowup(withMark)) return '';
+  if (isGenericFollowup(withMark) || hasPinnedReportPeriod(withMark)) return '';
   return withMark;
 }
 
@@ -94,7 +94,7 @@ export function mergeHomePromptLists(generated: string[], fallback: string[], ex
   const out: string[] = [];
   for (const item of [...generated, ...fallback]) {
     const q = asHomeQuestion(item) || (/[？?]$/.test(item.trim()) ? item.trim().replace(/[?]$/, '？') : '');
-    if (!q || isGenericFollowup(q)) continue;
+    if (!q || isGenericFollowup(q) || hasPinnedReportPeriod(q)) continue;
     const key = normaliseFollowup(q);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -110,7 +110,7 @@ export function prependPersonalizedPlaceholders(personalized: string[], base: st
   const out: string[] = [];
   for (const item of [...personalized, ...base]) {
     const text = item.trim();
-    if (!text) continue;
+    if (!text || hasPinnedReportPeriod(text)) continue;
     const key = normaliseFollowup(text);
     if (seen.has(key)) continue;
     seen.add(key);

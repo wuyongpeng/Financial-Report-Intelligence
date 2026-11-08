@@ -84,7 +84,7 @@ import {
   getHomeChatTurns,
   markHomeAskHandoff,
 } from '@/lib/chat-surface';
-import { isHomeCoverageQuestion, isHomeProductGuideQuestion, isHomeDiscoveryQuestion, isHomeRosterQuestion, homeRosterSourcePreference } from '@/lib/home-roster-intent';
+import { isHomeCoverageQuestion, isHomeProductGuideQuestion, isHomeDiscoveryQuestion, isHomeRosterQuestion, isNamedIssuerCompare, homeRosterSourcePreference } from '@/lib/home-roster-intent';
 import { answerHomeRosterLocally } from '@/lib/home-roster-answer';
 import { isReportReadingGuideQuestion, REPORT_READING_GUIDE } from '@/lib/report-reading-guide';
 import {
@@ -1344,7 +1344,7 @@ export default function ReportHome() {
       }
       return;
     }
-    if (isHomeCoverageQuestion(raw) || isHomeProductGuideQuestion(raw)) {
+    if (isHomeCoverageQuestion(raw) || isHomeProductGuideQuestion(raw) || isHomeRosterQuestion(raw)) {
       setSubmitting(true);
       if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);
       try {
@@ -1360,8 +1360,11 @@ export default function ReportHome() {
     setSubmitting(true);
     if (homeVoiceApiRef.current.active) homeVoiceApiRef.current.setBusy(true);
     armHomeInterrupt(turn);
-    try {
-      const semantic = isDirectCompanySelection(raw, [...coverage, ...resolveListedCompanies(raw)]) ? { kind: 'domain' as const } : await requestAssistantTurn({ question: raw, surface: 'home', history: getHomeChatTurns().slice(0, -1).slice(-8) }, turn?.signal ?? new AbortController().signal);
+    const listedForAsk = resolveListedCompanies(raw);
+    // Two issuers and a metric already decide the route. Waiting here left the
+    // search box on「提交中」for an intent call and then a roster call that has no ROE.
+    if (!isNamedIssuerCompare(raw, listedForAsk.length)) try {
+      const semantic = isDirectCompanySelection(raw, [...coverage, ...listedForAsk]) ? { kind: 'domain' as const } : await requestAssistantTurn({ question: raw, surface: 'home', history: getHomeChatTurns().slice(0, -1).slice(-8) }, turn?.signal ?? new AbortController().signal);
       assertHomeVoiceTurn(turn);
       if (semantic.kind !== 'domain') {
         if (!opts?.fromVoice && semantic.kind !== 'unavailable') setSearch('');

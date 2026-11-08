@@ -4,6 +4,7 @@ import {
   homeRosterSourcePreference,
   isHomeCoverageQuestion,
   isHomeDiscoveryQuestion,
+  isNamedIssuerCompare,
   isHomeIndustryRosterQuestion,
   isHomeProductGuideQuestion,
   isHomeRosterQuestion,
@@ -97,6 +98,11 @@ test('isHomeRosterQuestion catches list / presence / worth / open', () => {
   assert.equal(isHomeDiscoveryQuestion('比较家电和白酒'), true);
   assert.equal(isHomeRosterQuestion('贵州茅台营收有哪些原因'), false);
   assert.equal(isHomeDiscoveryQuestion('比较茅台和五粮液的营收'), false);
+  assert.equal(isHomeDiscoveryQuestion('立讯精密2024年ROE与工业富联相比如何？'), false);
+  assert.equal(isHomeRosterQuestion('立讯精密2024年ROE与工业富联相比如何？'), false);
+  assert.equal(isNamedIssuerCompare('立讯精密2024年ROE与工业富联相比如何？', 2), true);
+  assert.equal(isNamedIssuerCompare('比较家电和白酒', 2), false);
+  assert.equal(isNamedIssuerCompare('立讯精密2024年ROE与工业富联相比如何？', 1), false);
   assert.equal(homeRosterSourcePreference('做机器人的公司'), 'pool');
   assert.equal(isHomeCoverageQuestion('你都支持哪些公司'), true);
   assert.equal(isHomeCoverageQuestion('已经解析了哪些'), true);

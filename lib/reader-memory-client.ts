@@ -2,8 +2,6 @@ import {
   EMPTY_READER_MEMORY,
   READER_MEMORY_KEY,
   addManualMemory,
-  applyMemoryPatch,
-  parseMemoryPatch,
   rememberExplicit,
   removeMemoryNote,
   type MemoryNote,
@@ -68,35 +66,13 @@ export function addReaderMemory(text: string): ReaderMemory {
   return next;
 }
 
-/** Keep an explicit "记住……". Otherwise ask the model whether this turn changes long-term memory. */
+/** Write an explicit「记住……」into the local cache. Ordinary questions only read that cache. */
 export function reflectReaderMemory(input: { question: string; context?: string }) {
   const question = input.question.replace(/\s+/g, ' ').trim();
   if (question.length < 2) return;
   const prev = readReaderMemory();
   const saved = rememberExplicit(prev, question, new Date().toISOString());
-  if (JSON.stringify(saved) !== JSON.stringify(prev)) {
-    write(saved);
-    return;
-  }
-  const notes = prev.notes.map((item) => ({ id: item.id, text: item.text }));
-  void fetch('/api/reader/memory', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      question: question.slice(0, 400),
-      notes,
-      ...(input.context ? { context: input.context.slice(0, 80) } : {}),
-    }),
-  }).then(async (response) => {
-    if (!response.ok) return;
-    const body = await response.json() as { patch?: unknown };
-    const patch = parseMemoryPatch(body.patch);
-    if (!patch || patch.action === 'none') return;
-    const current = readReaderMemory();
-    const next = applyMemoryPatch(current, patch, new Date().toISOString());
-    if (JSON.stringify(next) !== JSON.stringify(current)) write(next);
-  }).catch(() => undefined);
+  if (JSON.stringify(saved) !== JSON.stringify(prev)) write(saved);
 }
 
 export function deleteReaderNote(id: string): ReaderMemory {

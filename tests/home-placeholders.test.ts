@@ -5,6 +5,7 @@ import {
   FALLBACK_PLACEHOLDER_SEEDS,
   PLACEHOLDER_SCENE_IDS,
   buildHomePlaceholders,
+  hasPinnedReportPeriod,
   periodAskLabel,
   shortCompanyName,
   type PlaceholderSeed,
@@ -36,6 +37,7 @@ test('default placeholders are 15 mixed scenes and do not start with 茅台', ()
   assert.equal(new Set(DEFAULT_HOME_PLACEHOLDERS).size, 15);
   assert.doesNotMatch(DEFAULT_HOME_PLACEHOLDERS[0] ?? '', /茅台/);
   assert.match(DEFAULT_HOME_PLACEHOLDERS.join('\n'), /对比.+ROE|ROE和同行/);
+  assert.ok(DEFAULT_HOME_PLACEHOLDERS.every((q) => !hasPinnedReportPeriod(q)));
 });
 
 test('buildHomePlaceholders uses live companies and stays at 15', () => {
@@ -52,6 +54,8 @@ test('buildHomePlaceholders uses live companies and stays at 15', () => {
   const blob = questions.join('\n');
   assert.match(blob, /寒武纪|澜起科技|贵州茅台|五粮液|招商银行/);
   assert.match(blob, /增长是否缓慢|净利润同比|毛利率|经营现金流|资产负债率|异常指标|盈利质量|值不值得关注/);
+  assert.ok(questions.every((q) => !hasPinnedReportPeriod(q)));
+  assert.equal(questions.some((q) => /2024年ROE与工业富联相比/.test(q)), false);
 });
 
 test('empty coverage falls back to seeded names', () => {

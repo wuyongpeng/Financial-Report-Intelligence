@@ -26,7 +26,19 @@ const DISCOVERY_LIST_RE =
 const DISCOVERY_SET_RE =
   /公司|企业|个股|股票|名单|行业|产业|产业链|赛道|板块|概念|a股|A股/;
 const ISSUER_FACT_RE =
-  /营收|净利润|同比|财报|年报|季报|业绩|增长原因|下降原因|毛利率|现金流/;
+  /营收|净利润|同比|财报|年报|季报|业绩|增长原因|下降原因|毛利率|现金流|净资产收益率|每股收益|ROE|EPS/i;
+
+/**
+ * Two named companies plus a report metric, e.g.「立讯精密2024年ROE与工业富联相比如何」.
+ * This is a company ask, not a homepage list question, and must not wait on intent classification.
+ */
+export function isNamedIssuerCompare(text: string, listedCount: number): boolean {
+  if (listedCount < 2) return false;
+  const q = normalizeVoiceText(text);
+  if (!q) return false;
+  if (!/比较|对比|相比/.test(q) || !/和|跟|与/.test(q)) return false;
+  return ISSUER_FACT_RE.test(q);
+}
 
 /**
  * Set / theme questions that should use the homepage list, not a single company.

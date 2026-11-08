@@ -61,6 +61,11 @@ export function shortCompanyName(name: string): string {
   return stripped || trimmed || name;
 }
 
+/** True when a recommendation pins a year or filing period. Those asks miss newer reports. */
+export function hasPinnedReportPeriod(text: string): boolean {
+  return /20\d{2}|年报|半年报|半年度|中报|一季报|二季报|三季报|季报|第[一二三]季度|(?:^|[^A-Za-z])(?:FY|H1|Q[1-3])(?:[^A-Za-z]|$)/i.test(text);
+}
+
 /** Compact period for ask copy: 2026H1 → 2026半年报 */
 export function periodAskLabel(token?: string | null): string {
   if (!token) return '';
@@ -82,22 +87,12 @@ export function shuffleInPlace<T>(items: T[], random: () => number = Math.random
   return items;
 }
 
-function pickPeriod(seed: PlaceholderSeed): string {
-  const token = seed.reportPeriod || seed.recentPeriods?.find(Boolean) || '';
-  return periodAskLabel(token);
-}
-
-function withPeriod(name: string, period: string, rest: string, fallback: string) {
-  return period ? `${name}${period}${rest}` : `${name}${fallback}`;
-}
-
 function buildScene(id: PlaceholderSceneId, company: PlaceholderSeed, peer?: PlaceholderSeed | null): string {
   const name = shortCompanyName(company.name);
-  const period = pickPeriod(company);
   const other = peer && peer.code !== company.code ? shortCompanyName(peer.name) : '';
   switch (id) {
     case 'growth-slow':
-      return withPeriod(name, period, '增长是否缓慢？', '最新一期增长是否缓慢？');
+      return `${name}最新一期增长是否缓慢？`;
     case 'profit-yoy':
       return `${name}净利润同比怎么样？`;
     case 'gross-margin':
@@ -109,7 +104,7 @@ function buildScene(id: PlaceholderSceneId, company: PlaceholderSeed, peer?: Pla
     case 'cashflow':
       return `${name}经营现金流是否健康？`;
     case 'eps':
-      return withPeriod(name, period, '每股收益怎么样？', '每股收益最近怎么样？');
+      return `${name}每股收益最近怎么样？`;
     case 'leverage':
       return `${name}资产负债率高不高？`;
     case 'profit-why':
@@ -117,7 +112,7 @@ function buildScene(id: PlaceholderSceneId, company: PlaceholderSeed, peer?: Pla
     case 'peer-level':
       return `${name}盈利能力和同行比如何？`;
     case 'rev-driver':
-      return withPeriod(name, period, '营收增长靠什么？', '营收增长主要靠什么？');
+      return `${name}营收增长主要靠什么？`;
     case 'expense':
       return `${name}费用有没有侵蚀利润？`;
     case 'anomaly':
@@ -193,7 +188,7 @@ export function buildHomePlaceholders(
     const peer = scene === 'compare-roe' ? pickPeer(company, roster, guard) : null;
     const text = buildScene(scene, company, peer);
     guard += 1;
-    if (seen.has(text)) continue;
+    if (seen.has(text) || hasPinnedReportPeriod(text)) continue;
     seen.add(text);
     questions.push(text);
   }

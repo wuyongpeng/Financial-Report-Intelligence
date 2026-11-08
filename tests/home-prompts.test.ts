@@ -21,6 +21,20 @@ test('parseHomePromptQuestions keeps 4 themed lines and drops canned 营业收�
   assert.equal(parsed[0], '宁德时代毛利率和上年同期比如何？');
 });
 
+test('dated report questions are dropped from recommendations', () => {
+  const parsed = parseHomePromptQuestions([
+    '立讯精密2024年ROE与工业富联相比如何？',
+    '工业富联2026半年报经营现金流是否健康？',
+    '对比立讯精密和工业富联的ROE',
+  ].join('\n'));
+  assert.deepEqual(parsed, ['对比立讯精密和工业富联的ROE？']);
+  const shown = prependPersonalizedPlaceholders(
+    ['立讯精密2024年ROE与工业富联相比如何？'],
+    ['招商银行经营现金流是否健康？'],
+  );
+  assert.deepEqual(shown, ['招商银行经营现金流是否健康？']);
+});
+
 test('contextualHomePrompts prefers same-industry peers', () => {
   const questions = contextualHomePrompts({
     question: '宁德时代毛利率最近怎么变？',
