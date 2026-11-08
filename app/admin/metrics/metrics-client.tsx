@@ -19,12 +19,25 @@ import {
 } from '@/lib/metrics-overview';
 import { splitTitleAttention, titleHasAttentionKeyword } from '@/lib/metrics-title-attention';
 import { buildBatchParseTriggerBodies, type HeadlineMetricName } from '@/lib/crawl-display';
+import {
+  REVIEW_REASON_LABEL,
+  REVIEW_REASONS,
+  type ReviewLogEntry,
+  type ReviewLogSummary,
+  type ReviewReason,
+} from '@/lib/metrics-review-log';
+
+type MetricsRow = OverviewRow & { ackReason: ReviewReason | null };
 
 type MetricsPayload = {
   note: string;
   summary: OverviewSummary;
   periods: string[];
-  rows: OverviewRow[];
+  rows: MetricsRow[];
+  reviewLog?: {
+    summary: ReviewLogSummary;
+    recent: ReviewLogEntry[];
+  };
 };
 
 /** Top summary cards that filter the table. */
@@ -46,6 +59,9 @@ export function MetricsAdminClient() {
   const [flagTarget, setFlagTarget] = useState<OverviewRow | null>(null);
   const [flagNote, setFlagNote] = useState('');
   const [flagError, setFlagError] = useState('');
+  const [ackTargets, setAckTargets] = useState<OverviewRow[]>([]);
+  const [ackReason, setAckReason] = useState<ReviewReason | null>(null);
+  const [ackError, setAckError] = useState('');
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState('');
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
@@ -157,44 +173,23 @@ export function MetricsAdminClient() {
     }
   }, [closeDiscard, discardPassword, discardTarget, load]);
 
-  const ackRow = useCallback(async (row: OverviewRow) => {
+  const closeAck = useCallback(() => {
+    setAckTargets([]);
+    setAckReason(null);
+    setAckError('');
+  }, []);
+
+  const askAck = useCallback((row: OverviewRow) => {
     if (!row.announcementId) {
       setActionMsg(`${row.code} ${row.period} 缺少公告 id，无法审核`);
       return;
     }
     if (row.acked) return;
-    const busyKey = `${row.code}:${row.period}`;
-    if (rowBusyId === busyKey) return;
-    setRowBusyId(busyKey);
     setActionMsg('');
-    try {
-      const res = await fetch('/api/admin/metrics/ack', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          announcementId: row.announcementId,
-          code: row.code,
-          period: row.period,
-        }),
-      });
-      const body = await res.json().catch(() => ({})) as { error?: string; note?: string };
-      if (res.status === 401) {
-        setActionMsg('请求未授权，请刷新后重试');
-        return;
-      }
-      if (!res.ok) {
-        setActionMsg(body.error || '审核失败');
-        return;
-      }
-      setActionMsg(body.note || `已审核通过 ${row.code} ${row.period}`);
-      await load();
-    } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : '审核失败');
-    } finally {
-      setRowBusyId(null);
-    }
-  }, [load, rowBusyId]);
+    setAckReason(null);
+    setAckError('');
+    setAckTargets([row]);
+  }, []);
 
   const confirmFlag = useCallback(async () => {
     if (!flagTarget?.announcementId) return;
@@ -393,17 +388,29 @@ export function MetricsAdminClient() {
     }
   }, [batchBusy, clearSelection, rowBusyId, selectedRows]);
 
-  const batchAck = useCallback(async () => {
+  const askBatchAck = useCallback(() => {
     const targets = selectedRows.filter((row) => row.announcementId && !row.acked);
     if (!targets.length) {
       setActionMsg('所选行无需审核通过（已审或无公告 id）');
       return;
     }
     if (batchBusy || rowBusyId) return;
-    setBatchBusy(true);
-    setActionMsg(`批量审核中 ${targets.length} 行…`);
+    setActionMsg('');
+    setAckReason(null);
+    setAckError('');
+    setAckTargets(targets);
+  }, [batchBusy, rowBusyId, selectedRows]);
+
+  const confirmAck = useCallback(async () => {
+    const targets = ackTargets.filter((row) => row.announcementId && !row.acked);
+    if (!targets.length || batchBusy || rowBusyId) return;
+    const batch = targets.length > 1;
+    if (batch) setBatchBusy(true);
+    else setRowBusyId(`${targets[0].code}:${targets[0].period}`);
+    setAckError('');
     let done = 0;
     let failed = 0;
+    let lastNote = '';
     try {
       for (const row of targets) {
         try {
@@ -415,27 +422,42 @@ export function MetricsAdminClient() {
               announcementId: row.announcementId,
               code: row.code,
               period: row.period,
+              reason: ackReason ?? undefined,
             }),
           });
+          const body = await res.json().catch(() => ({})) as { error?: string; note?: string };
           if (res.status === 401) {
-            setActionMsg('请求未授权，请刷新后重试');
+            setAckError('请求未授权，请刷新后重试');
             return;
           }
-          if (!res.ok) throw new Error('ack failed');
+          if (!res.ok) throw new Error(body.error || 'ack failed');
           done += 1;
+          if (body.note) lastNote = body.note;
         } catch {
           failed += 1;
         }
       }
-      setActionMsg(failed ? `批量审核：成功 ${done} · 失败 ${failed}` : `已审核通过 ${done} 行`);
-      clearSelection();
+      if (!done) {
+        setAckError('审核失败');
+        return;
+      }
+      closeAck();
+      setActionMsg(
+        failed
+          ? `批量审核：成功 ${done} · 失败 ${failed}`
+          : batch
+            ? `已审核通过 ${done} 行`
+            : (lastNote || `已审核通过 ${targets[0].code} ${targets[0].period}`),
+      );
+      if (batch) clearSelection();
       await load();
     } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : '批量审核失败');
+      setAckError(e instanceof Error ? e.message : '审核失败');
     } finally {
+      setRowBusyId(null);
       setBatchBusy(false);
     }
-  }, [batchBusy, clearSelection, load, rowBusyId, selectedRows]);
+  }, [ackReason, ackTargets, batchBusy, clearSelection, closeAck, load, rowBusyId]);
 
   const batchFlag = useCallback(async () => {
     const targets = selectedRows.filter((row) => row.announcementId && !row.flagged);
@@ -529,6 +551,8 @@ export function MetricsAdminClient() {
         </div>
       ) : null}
 
+      {payload?.reviewLog ? <ReviewLogPanel log={payload.reviewLog} abnormal={payload.summary.abnormal} /> : null}
+
       <form
         style={s.filters}
         onSubmit={(e) => { e.preventDefault(); void load(); }}
@@ -602,7 +626,7 @@ export function MetricsAdminClient() {
             type="button"
             style={{ ...s.btnAck, opacity: batchBusy || rowBusyId ? 0.45 : 1 }}
             disabled={batchBusy || Boolean(rowBusyId)}
-            onClick={() => { void batchAck(); }}
+            onClick={askBatchAck}
           >
             批量审核通过
           </button>
@@ -714,7 +738,14 @@ export function MetricsAdminClient() {
                   ))}
                   <td style={{ ...s.td, ...colStatus }}>
                     {row.acked ? (
-                      <span style={{ color: '#15803d', fontWeight: 650 }}>已审</span>
+                      <span>
+                        <span style={{ color: '#15803d', fontWeight: 650 }}>已审</span>
+                        {row.ackReason ? (
+                          <div style={{ marginTop: 2, fontSize: 11, color: '#3a4d66', fontWeight: 500 }} title={REVIEW_REASON_LABEL[row.ackReason]}>
+                            {REVIEW_REASON_LABEL[row.ackReason]}
+                          </div>
+                        ) : null}
+                      </span>
                     ) : statusBits.length > 0 ? (
                       <div>
                         <span style={{
@@ -757,7 +788,7 @@ export function MetricsAdminClient() {
                             cursor: row.announcementId && !busy && !batchBusy ? 'pointer' : 'not-allowed',
                           }}
                           disabled={!row.announcementId || busy || batchBusy}
-                          onClick={() => { void ackRow(row); }}
+                          onClick={() => askAck(row)}
                         >
                           {busy ? '…' : '审核通过'}
                         </button>
@@ -798,7 +829,7 @@ export function MetricsAdminClient() {
       </div>
 
       <p style={{ ...s.muted, marginTop: 14 }}>
-        数据不对点解析可本行重抽；错抓点删除；真暴增或修完后点审核通过；用户反馈/人工发现点标记异常（可写短备注）。标记异常与审核通过互斥，均可再切换。可勾选多行批量解析 / 审核 / 标异。
+        数据不对点解析可本行重抽；错抓点删除。审核通过可记原因也可不选：真数，或解析错在抽数、页码单位、报告期次。用户反馈点标记异常（可写短备注）。每次通过或标异都另留一条记录。
       </p>
 
       {discardTarget ? (
@@ -864,6 +895,77 @@ export function MetricsAdminClient() {
           </div>
         </div>
       ) : null}
+      {ackTargets.length > 0 ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="审核通过"
+          style={confirmBackdrop}
+          onClick={() => { if (!rowBusyId && !batchBusy) closeAck(); }}
+        >
+          <div style={{ ...confirmDialog, width: 'min(480px, 100%)' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 650 }}>审核通过</h3>
+            {ackTargets.length === 1 ? (
+              <>
+                <p style={{ ...s.muted, margin: '0 0 8px' }}>
+                  {ackTargets[0].code} {ackTargets[0].name || ''} · {ackTargets[0].period}
+                </p>
+                <p style={{ margin: '0 0 12px', fontSize: 13, color: '#3a4d66' }}>
+                  系统当时提示：{ackTargets[0].issues.length
+                    ? ackTargets[0].issues.map(issueLabel).join(' · ')
+                    : '没有缺数、无页码、同比离谱或期次不符'}
+                </p>
+              </>
+            ) : (
+              <p style={{ ...s.muted, margin: '0 0 12px' }}>
+                将通过 {ackTargets.length} 行。每一行记下当时系统标出的类型。
+              </p>
+            )}
+            <p style={{ ...s.muted, margin: '0 0 8px' }}>原因可选，不选也能通过。</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+              {REVIEW_REASONS.map((reason) => {
+                const selected = ackReason === reason;
+                return (
+                  <button
+                    key={reason}
+                    type="button"
+                    aria-pressed={selected}
+                    disabled={Boolean(rowBusyId) || batchBusy}
+                    onClick={() => setAckReason(selected ? null : reason)}
+                    style={{
+                      textAlign: 'left',
+                      font: 'inherit',
+                      fontSize: 13,
+                      padding: '7px 10px',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      border: selected ? '1.5px solid #15803d' : '1px solid #e5eaf1',
+                      background: selected ? '#f0fdf4' : '#fff',
+                      color: '#203047',
+                    }}
+                  >
+                    {REVIEW_REASON_LABEL[reason]}
+                  </button>
+                );
+              })}
+            </div>
+            {ackError ? <p style={s.err}>{ackError}</p> : null}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" style={s.btnGhost} disabled={Boolean(rowBusyId) || batchBusy} onClick={closeAck}>
+                取消
+              </button>
+              <button
+                type="button"
+                style={s.btnAck}
+                disabled={Boolean(rowBusyId) || batchBusy}
+                onClick={() => { void confirmAck(); }}
+              >
+                {rowBusyId || batchBusy ? '…' : '通过'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {flagTarget ? (
         <div
           role="dialog"
@@ -921,6 +1023,74 @@ export function MetricsAdminClient() {
 }
 
 
+
+function ReviewLogPanel({
+  log,
+  abnormal,
+}: {
+  log: { summary: ReviewLogSummary; recent: ReviewLogEntry[] };
+  abnormal: number;
+}) {
+  const summary = log.summary;
+  return (
+    <section style={{ margin: '0 0 12px', padding: '10px 12px', border: '1px solid #e5eaf1', borderRadius: 8, background: '#f8fafc' }}>
+      <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 650, color: '#203047' }}>处理记录</p>
+      <p style={{ margin: 0, fontSize: 13, color: '#3a4d66', lineHeight: 1.6 }}>
+        当前异常 {abnormal} 条
+        <br />
+        审核通过 {summary.ackCount} 次
+        {summary.unstated ? `，其中未选原因 ${summary.unstated} 次` : ''}
+        <br />
+        不是错误 {summary.realDisclosure} 次
+        <br />
+        解析错了 {summary.parseError} 次
+        （抽错数 {summary.parseValue} · 页码或单位 {summary.parsePageUnit} · 报告或期次 {summary.parsePeriod}）
+        {summary.flagCount ? ` · 标异 ${summary.flagCount} 次` : ''}
+      </p>
+      {log.recent.length > 0 ? (
+        <div style={{ overflowX: 'auto', marginTop: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr>
+                {['时间', '公司', '期次', '动作', '当时系统提示', '原因'].map((label) => (
+                  <th key={label} style={{ ...s.th, fontSize: 11 }}>{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {log.recent.map((event) => (
+                <tr key={event.id}>
+                  <td style={s.td}>{formatReviewTime(event.createdAt)}</td>
+                  <td style={s.td}>{event.code} {event.name}</td>
+                  <td style={s.td}>{event.period}</td>
+                  <td style={s.td}>{event.action === 'acked' ? '通过' : '标异'}</td>
+                  <td style={s.td}>{event.issues.length ? event.issues.map(issueLabel).join(' · ') : '—'}</td>
+                  <td style={s.td}>
+                    {event.reason ? REVIEW_REASON_LABEL[event.reason] : event.note || (event.action === 'acked' ? '未选原因' : '—')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p style={{ ...s.muted, margin: '8px 0 0' }}>还没有审核或标异记录。点通过之后会出现在这里。</p>
+      )}
+    </section>
+  );
+}
+
+function formatReviewTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 function AuditOpinionCell({ row }: { row: OverviewRow }) {
   const kind = row.auditOpinionKind;

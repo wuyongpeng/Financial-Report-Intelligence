@@ -1,16 +1,16 @@
 import { apiError } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
+import { writeOverviewReview } from '@/lib/metrics-review-record';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Mark a metrics overview row as human-flagged (用户反馈 / 人工发现不一致).
  * Clears acked state (mutual exclusive). Always appears in异常筛选 until审核通过.
- * Optional short note (reason / feedback source). Admin session only.
+ * Optional short note. Appends one event; does not erase earlier passes.
  */
 export async function POST(request: Request) {
-
   let body: {
     announcementId?: unknown;
     code?: unknown;
@@ -47,20 +47,14 @@ export async function POST(request: Request) {
     const note = typeof body.note === 'string' && body.note.trim()
       ? body.note.trim().slice(0, 200)
       : null;
-
-    await db`
-      INSERT INTO metrics_overview_reviews (announcement_id, code, period, status, note, updated_at)
-      VALUES (${announcementId}, ${code}, ${period}, 'flagged', ${note}, NOW())
-      ON CONFLICT (announcement_id) DO UPDATE
-      SET code=EXCLUDED.code,
-          period=EXCLUDED.period,
-          status='flagged',
-          note=COALESCE(EXCLUDED.note, metrics_overview_reviews.note),
-          updated_at=NOW()
-    `;
-
-    // Flagged supersedes ack — drop legacy ack row so old readers don't treat as acked.
-    await db`DELETE FROM metrics_overview_acks WHERE announcement_id=${announcementId}`;
+    await writeOverviewReview(db, {
+      announcementId,
+      code,
+      period,
+      action: 'flagged',
+      reason: null,
+      note,
+    });
 
     return Response.json({
       ok: true,

@@ -1,21 +1,23 @@
 import { apiError } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
+import { REVIEW_REASON_LABEL, parseReviewReason } from '@/lib/metrics-review-log';
+import { writeOverviewReview } from '@/lib/metrics-review-record';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Mark a metrics overview row as human-acked (true surge / fixed after flag).
  * Clears flagged state (mutual exclusive). Hides from异常筛选.
- * Open operations console; deletion remains password-protected in /api/crawl/discard.
+ * Also appends one event with the optional reason and the rule hits at this moment.
  */
 export async function POST(request: Request) {
-
   let body: {
     announcementId?: unknown;
     code?: unknown;
     period?: unknown;
     note?: unknown;
+    reason?: unknown;
   } = {};
   try {
     body = await request.json();
@@ -32,6 +34,10 @@ export async function POST(request: Request) {
   if (!code || !period) {
     return Response.json({ error: '需要 code 与 period' }, { status: 400 });
   }
+  const reason = parseReviewReason(body.reason);
+  if (reason === 'invalid') {
+    return Response.json({ error: '原因无效' }, { status: 400 });
+  }
 
   try {
     await ensureBackendSchema();
@@ -43,36 +49,22 @@ export async function POST(request: Request) {
       WHERE id=${announcementId}
       LIMIT 1
     `;
-    const ann = rows[0];
-    if (!ann) {
+    if (!rows[0]) {
       return Response.json({ error: '公告不存在' }, { status: 404 });
     }
 
     const note = typeof body.note === 'string' && body.note.trim()
       ? body.note.trim().slice(0, 200)
       : null;
-
-    await db`
-      INSERT INTO metrics_overview_reviews (announcement_id, code, period, status, note, updated_at)
-      VALUES (${announcementId}, ${code}, ${period}, 'acked', ${note}, NOW())
-      ON CONFLICT (announcement_id) DO UPDATE
-      SET code=EXCLUDED.code,
-          period=EXCLUDED.period,
-          status='acked',
-          note=COALESCE(EXCLUDED.note, metrics_overview_reviews.note),
-          updated_at=NOW()
-    `;
-
-    // Keep legacy acks table in sync for older readers.
-    await db`
-      INSERT INTO metrics_overview_acks (announcement_id, code, period, note, acked_at)
-      VALUES (${announcementId}, ${code}, ${period}, ${note}, NOW())
-      ON CONFLICT (announcement_id) DO UPDATE
-      SET code=EXCLUDED.code,
-          period=EXCLUDED.period,
-          note=COALESCE(EXCLUDED.note, metrics_overview_acks.note),
-          acked_at=NOW()
-    `;
+    const written = await writeOverviewReview(db, {
+      announcementId,
+      code,
+      period,
+      action: 'acked',
+      reason,
+      note,
+    });
+    const reasonLabel = reason ? REVIEW_REASON_LABEL[reason] : '';
 
     return Response.json({
       ok: true,
@@ -80,7 +72,11 @@ export async function POST(request: Request) {
       code,
       period,
       status: 'acked',
-      note: `已审核通过 ${code} ${period}`,
+      reason,
+      issues: written.issues,
+      note: reasonLabel
+        ? `已审核通过 ${code} ${period}（${reasonLabel}）`
+        : `已审核通过 ${code} ${period}`,
     }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     return apiError(error);

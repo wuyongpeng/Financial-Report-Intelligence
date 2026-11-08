@@ -162,6 +162,21 @@ async function migrate() {
       ON metrics_overview_reviews (code, period)`;
     await tx`CREATE INDEX IF NOT EXISTS metrics_overview_reviews_status_idx
       ON metrics_overview_reviews (status)`;
+    await tx`CREATE TABLE IF NOT EXISTS metrics_overview_review_events (
+      id BIGSERIAL PRIMARY KEY,
+      announcement_id TEXT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,
+      period TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('acked', 'flagged')),
+      reason TEXT CHECK (
+        reason IS NULL OR reason IN ('real_disclosure', 'parse_value', 'parse_page_unit', 'parse_period')
+      ),
+      issues JSONB NOT NULL DEFAULT '[]'::jsonb,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS metrics_overview_review_events_created_idx
+      ON metrics_overview_review_events (created_at DESC, id DESC)`;
     await tx`
       INSERT INTO metrics_overview_reviews (announcement_id, code, period, status, note, updated_at)
       SELECT announcement_id, code, period, 'acked', note, acked_at
