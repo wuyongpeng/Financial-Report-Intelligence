@@ -16,7 +16,6 @@
 .eva-docs-search-list button:hover{background:#f5f8fc}
 .eva-docs-search-list b{display:block;color:#203047;font-size:13px}
 .eva-docs-search-list span{display:block;color:#64758d;font-size:12px;line-height:1.5}
-::highlight(docs-query){background:#fde68a;color:#203047}
 .eva-docs-home{flex-shrink:0;border:1px solid #d5dde8;border-radius:8px;background:#fff;color:#3d5270;padding:7px 12px;font-size:13px;text-decoration:none}
 .eva-docs-home:hover{border-color:#b7c3d4;color:#203047}
 .eva-docs-header p{margin:8px 0 0;color:#7d8b9f;font-size:14px}

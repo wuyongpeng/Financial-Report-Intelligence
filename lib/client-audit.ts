@@ -59,7 +59,7 @@ export async function patchAskAudit(requestId: string, patch: Record<string, unk
     const db = getDb();
     const write = () => db`
       UPDATE client_audit_events
-      SET detail = COALESCE(detail, '{}'::jsonb) || ${db.json(patch)}
+      SET detail = COALESCE(detail, '{}'::jsonb) || ${db.json(JSON.parse(JSON.stringify(patch)))}
       WHERE event_type = 'ask' AND request_id = ${requestId}
       RETURNING id
     `;

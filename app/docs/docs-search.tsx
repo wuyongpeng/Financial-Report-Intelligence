@@ -62,6 +62,16 @@ export default function DocsSearch({
   }, [initialQuery]);
 
   useEffect(() => {
+    const id = 'eva-docs-query-highlight';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    // Custom Highlight API. Kept out of the CSS file because the production CSS parser rejects ::highlight().
+    style.textContent = '::highlight(docs-query){background:#fde68a;color:#203047}';
+    document.head.appendChild(style);
+  }, []);
+
+  useEffect(() => {
     markQuery(initialQuery);
     return () => {
       const css = CSS as unknown as { highlights?: { delete: (name: string) => void } };
