@@ -321,6 +321,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
   const [sourceMode, setSourceMode] = useState<'pdf' | 'text'>('pdf');
+  const [pageNoticeHidden, setPageNoticeHidden] = useState(false);
   const [metric, setMetric] = useState<HeadlineMetric>('revenue');
   const [overlay, setOverlay] = useState<HeadlineMetric | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
@@ -941,6 +942,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [reportListOpen]);
   const pageLabels = outline.pageLabels ?? [];
+  useEffect(() => { setPageNoticeHidden(false); }, [selected.id]);
   // Printed numbering is what users see in the document, so it is the only
   // vocabulary shown inline; the physical page stays in the tooltip.
   const printedKnown = pageLabels.some(p => p.printed !== null);
@@ -2950,7 +2952,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
             </span>
           </div>
         </div>
-        {!printedKnown && pageLabels.length>0 && <p className="cd-page-notice">这份 PDF 没能识别出正文页码，下面统一按 PDF 实际页数显示。</p>}
+        {!printedKnown && pageLabels.length>0 && !pageNoticeHidden && <p className="cd-page-notice"><span>这份 PDF 没能识别出正文页码，下面统一按 PDF 实际页数显示。</span><button type="button" className="cd-page-notice-close" aria-label="关闭页码提示" onClick={() => setPageNoticeHidden(true)}>×</button></p>}
         <div className="cd-source-scroll" ref={sourceRef} aria-live="polite">
           {pick && <div className="cd-pick-bar" style={{ top: pick.y, left: pick.x }}>
             <div className="cd-pick-actions">

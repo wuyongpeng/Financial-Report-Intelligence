@@ -197,7 +197,10 @@
 .cd-verify-actions .cd-verify-on{background:var(--green-soft,#f0fdf4);border-color:#bbf7d0;color:var(--cd-green,#16a34a)}
 .cd-verify-actions .cd-verify-off{background:var(--red-soft,#fef2f2);border-color:#fecaca;color:var(--cd-red,#dc2626)}
 .cd-verify-hint{margin-top:8px!important;color:#7d8b9f!important}
-.cd-page-notice{margin:0;padding:8px 16px;background:var(--blue-soft,#edf3ff);border-top:1px solid #d4e2ff;border-bottom:1px solid #d4e2ff;font-size:11px;color:#3d5f9a;line-height:1.6}
+.cd-page-notice{display:flex;align-items:flex-start;gap:8px;margin:0;padding:8px 8px 8px 16px;background:var(--blue-soft,#edf3ff);border-top:1px solid #d4e2ff;border-bottom:1px solid #d4e2ff;font-size:11px;color:#3d5f9a;line-height:1.6}
+.cd-page-notice span{flex:1;min-width:0}
+.cd-page-notice-close{flex:none;width:22px;height:22px;margin-top:-2px;border:0;border-radius:6px;background:transparent;color:#3d5f9a;font-size:16px;line-height:1;padding:0;cursor:pointer}
+.cd-page-notice-close:hover{background:#d7e4ff}
 
 /* The company's own words sit beside the arithmetic, quoted verbatim. */
 .cd-mda{margin-top:14px;border:1px solid #e7edf7;border-radius:9px;background:#fafcff;padding:12px 14px}
