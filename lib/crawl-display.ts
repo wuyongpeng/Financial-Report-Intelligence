@@ -47,6 +47,7 @@ export type CrawlFilingRow = {
   verdictStatus: 'ready' | 'pending' | 'failed' | null;
   verdictGeneratedAt?: string | null;
   sourceApi?: string | null;
+  rawStatus?: string | null;
   discoveredAt?: string | null;
   downloadedAt?: string | null;
   parsedAt?: string | null;
@@ -324,6 +325,7 @@ export function flattenCrawlFilings(companies: CrawlCompanyCoverage[]): CrawlFil
         verdictStatus: period.verdictStatus ?? null,
         verdictGeneratedAt: period.verdictStatus === 'ready' ? period.verdictGeneratedAt ?? null : null,
         sourceApi: period.sourceApi,
+        rawStatus: period.rawStatus ?? null,
         discoveredAt: period.discoveredAt,
         downloadedAt: period.downloadedAt,
         parsedAt: period.parsedAt,
@@ -343,6 +345,7 @@ export function filingToPeriodStatus(row: CrawlFilingRow): CrawlPeriodStatus {
     title: row.title,
     announcementId: row.announcementId,
     sourceApi: row.sourceApi,
+    rawStatus: row.rawStatus,
     discoveredAt: row.discoveredAt,
     downloadedAt: row.downloadedAt,
     parsedAt: row.parsedAt,
@@ -351,6 +354,65 @@ export function filingToPeriodStatus(row: CrawlFilingRow): CrawlPeriodStatus {
     verdictStatus: row.verdictStatus,
     verdictGeneratedAt: row.verdictGeneratedAt,
   };
+}
+
+export type PipelineStage = 'ok' | 'failed' | 'running' | 'idle';
+
+export const PIPELINE_STAGE_LABEL: Record<PipelineStage, string> = {
+  ok: '成功',
+  failed: '失败',
+  running: '进行中',
+  idle: '—',
+};
+
+type StageRow = {
+  state: PeriodCollectState;
+  rawStatus?: string | null;
+  discoveredAt?: string | null;
+  downloadedAt?: string | null;
+  parsedAt?: string | null;
+  verdictStatus?: 'ready' | 'pending' | 'failed' | null;
+  verdictGeneratedAt?: string | null;
+};
+
+/** 发现时间只在真正发现成功后展示，不用公告发布时间充数。 */
+export function filingDiscoverTime(row: StageRow): string | null {
+  if (!row.discoveredAt || row.state === 'expected') return null;
+  return row.discoveredAt;
+}
+
+/** 抓取时间只在 PDF 已落下后展示。下载中、下载失败不写时间。 */
+export function filingDownloadTime(row: StageRow): string | null {
+  if (!row.downloadedAt) return null;
+  if (row.rawStatus === 'download_failed' || row.rawStatus === 'downloading') return null;
+  if (row.state === 'discovered' || row.state === 'expected') return null;
+  return row.downloadedAt;
+}
+
+export function filingParseStage(
+  row: StageRow,
+  flags?: { active?: boolean; queued?: boolean },
+): PipelineStage {
+  if (flags?.active || flags?.queued || row.rawStatus === 'parsing') return 'running';
+  if (row.rawStatus === 'parse_failed' || row.rawStatus === 'parse_parked' || row.state === 'failed') return 'failed';
+  if (row.state === 'parsed' || row.state === 'parsed_partial') return 'ok';
+  return 'idle';
+}
+
+export function filingVerdictStage(
+  row: StageRow,
+  flags?: { active?: boolean; queued?: boolean },
+): PipelineStage {
+  if (flags?.active || flags?.queued || row.verdictStatus === 'pending') return 'running';
+  if (row.verdictStatus === 'failed') return 'failed';
+  if (row.verdictStatus === 'ready') return 'ok';
+  return 'idle';
+}
+
+/** 成功才带完成时间；失败和进行中只表达状态。 */
+export function filingStageTime(row: StageRow, kind: 'parse' | 'verdict', stage: PipelineStage): string | null {
+  if (stage !== 'ok') return null;
+  return kind === 'parse' ? row.parsedAt ?? null : row.verdictGeneratedAt ?? null;
 }
 
 export function uniquePeriodTokens(rows: Array<{ period: string }>) {

@@ -217,6 +217,12 @@
 .co-col-time{white-space:nowrap}
 .co-col-ops{width:1%;white-space:nowrap;padding-right:10px}
 .co-time{font-size:11px;color:#6b7a8d;font-variant-numeric:tabular-nums}
+.co-stage{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;padding:0;cursor:pointer;font:inherit;line-height:1.2}
+.co-stage b{font-size:12px;font-weight:650}
+.co-stage.ok b{color:#15803d}
+.co-stage.failed b{color:#b91c1c}
+.co-stage.running b{color:#b45309}
+.co-stage.on b{text-decoration:underline}
 .co-company-cell{display:inline-flex;align-items:baseline;gap:6px;min-width:0}
 .co-company-btn{border:0;background:none;padding:0;margin:0;text-align:left;cursor:pointer;color:#2a5cc7;font:inherit;font-weight:500;line-height:1.35}
 .co-company-btn:hover{text-decoration:underline}

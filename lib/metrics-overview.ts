@@ -10,7 +10,7 @@ import {
   type HeadlineMetricName,
   type ResolvedYoy,
 } from './crawl-display';
-import { rowSearchHaystack } from './admin-table-search';
+import { matchesQuickSearch } from './admin-table-search';
 import {
   auditOpinionKindLabel,
   type AuditOpinionKind,
@@ -391,7 +391,5 @@ export function overviewRowSearchParts(row: OverviewRow): Array<string | number 
 }
 
 export function overviewRowMatchesSearch(row: OverviewRow, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return rowSearchHaystack(overviewRowSearchParts(row)).includes(q);
+  return matchesQuickSearch(query, overviewRowSearchParts(row));
 }

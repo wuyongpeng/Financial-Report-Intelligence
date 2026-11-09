@@ -2270,7 +2270,7 @@ export default function ReportHome() {
                 >
                   {parseFailed ? (
                     <Link
-                      href={`/admin/sources?focus=${item.code}`}
+                      href={`/admin/sources?focus=${item.code}&parse=failed`}
                       className="rh-connected-badge rh-connected-badge-failed"
                       title="打开数据运营·采集处理解析失败"
                       onClick={(e) => e.stopPropagation()}

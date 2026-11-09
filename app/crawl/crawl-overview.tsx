@@ -9,8 +9,15 @@ import {
   canBatchParseFiling,
   canFillVerdict,
   flattenCrawlFilings,
+  filingDiscoverTime,
+  filingDownloadTime,
   filingMatchesSourceFilter,
+  filingParseStage,
   filingSourceLabel,
+  filingStageTime,
+  filingVerdictStage,
+  PIPELINE_STAGE_LABEL,
+  type PipelineStage,
   filingToPeriodStatus,
   formatQueueLastError,
   METRIC_LABELS,
@@ -267,10 +274,29 @@ function settingsDraftFromControl(payload: ControlSettingsPayload | null, live: 
 }
 
 function filingTimeValue(row: CrawlFilingRow, col: TimeCol) {
-  if (col === 'discovered') return row.discoveredAt ?? row.publishedAt ?? '';
-  if (col === 'downloaded') return row.downloadedAt ?? '';
-  if (col === 'verdict') return row.verdictStatus === 'ready' ? row.verdictGeneratedAt ?? '' : '';
-  return row.parsedAt ?? '';
+  if (col === 'discovered') return filingDiscoverTime(row) ?? '';
+  if (col === 'downloaded') return filingDownloadTime(row) ?? '';
+  if (col === 'verdict') return filingStageTime(row, 'verdict', filingVerdictStage(row)) ?? '';
+  return filingStageTime(row, 'parse', filingParseStage(row)) ?? '';
+}
+
+type StageFilter = '' | 'ok' | 'failed' | 'running';
+
+function collectActivityIds(items: Array<{ id?: string; code?: string; period?: string }> | undefined) {
+  const ids = new Set<string>();
+  for (const item of items ?? []) {
+    if (item.id) ids.add(item.id);
+    if (item.code && item.period) ids.add(`${item.code}:${item.period}`);
+  }
+  return ids;
+}
+
+function activityHit(ids: Set<string>, row: CrawlFilingRow) {
+  return Boolean(
+    (row.announcementId && ids.has(row.announcementId))
+    || ids.has(row.key)
+    || ids.has(`${row.code}:${row.period}`),
+  );
 }
 
 
@@ -523,6 +549,35 @@ function QueuePopover({
   );
 }
 
+function StageCell({
+  stage,
+  time,
+  title,
+  pressed,
+  onToggle,
+}: {
+  stage: PipelineStage;
+  time: string | null;
+  title: string;
+  pressed: boolean;
+  onToggle: () => void;
+}) {
+  if (stage === 'idle') return <span className="co-time" title={title}>—</span>;
+  const stamp = time ? formatCrawlTimeCompact(time) : '';
+  return (
+    <button
+      type="button"
+      className={`co-stage ${stage}${pressed ? ' on' : ''}`}
+      title={title}
+      aria-pressed={pressed}
+      onClick={onToggle}
+    >
+      <b>{PIPELINE_STAGE_LABEL[stage]}</b>
+      {stamp && stamp !== '—' ? <span className="co-time">{stamp}</span> : null}
+    </button>
+  );
+}
+
 function SortHeader({
   label,
   state,
@@ -571,10 +626,14 @@ function periodChipTitle(p: CrawlPeriodStatus) {
     `来源：${sourceApiShort(p.sourceApi, p.state)}`,
     periodPipelineLabel(p),
   ];
-  if (p.discoveredAt) lines.push(`发现：${formatCrawlTime(p.discoveredAt ?? null)}`);
-  if (p.downloadedAt) lines.push(`抓取：${formatCrawlTime(p.downloadedAt ?? null)}`);
-  if (p.parsedAt) lines.push(`解析：${formatCrawlTime(p.parsedAt ?? null)}`);
-  if (p.verdictStatus === 'ready' && p.verdictGeneratedAt) lines.push(`智析：${formatCrawlTime(p.verdictGeneratedAt)}`);
+  const discovered = filingDiscoverTime(p);
+  const downloaded = filingDownloadTime(p);
+  if (discovered) lines.push(`发现：${formatCrawlTime(discovered)}`);
+  if (downloaded) lines.push(`抓取：${formatCrawlTime(downloaded)}`);
+  const parseStage = filingParseStage(p);
+  lines.push(`解析：${parseStage === 'ok' ? '成功' : parseStage === 'failed' ? '失败' : parseStage === 'running' ? '进行中' : '未开始'}`);
+  const verdictStage = filingVerdictStage(p);
+  lines.push(`智析：${verdictStage === 'ok' ? '成功' : verdictStage === 'failed' ? '失败' : verdictStage === 'running' ? '进行中' : '未开始'}`);
   if (p.title) lines.push(p.title.replace(/\s+/g, ' ').slice(0, 48));
   return lines.join('\n');
 }
@@ -616,6 +675,11 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
   const [source, setSource] = useState<SourceFilter>('all');
   const [onlyFailed, setOnlyFailed] = useState(false);
   const [onlyUnparsed, setOnlyUnparsed] = useState(false);
+  const parseParam = (searchParams.get('parse') ?? '').trim();
+  const [parseFilter, setParseFilter] = useState<StageFilter>(
+    parseParam === 'ok' || parseParam === 'failed' || parseParam === 'running' ? parseParam : '',
+  );
+  const [verdictFilter, setVerdictFilter] = useState<StageFilter>('');
   const [timeCol, setTimeCol] = useState<TimeCol | null>(null);
   const [timeSort, setTimeSort] = useState<SortState>('default');
   const [queuePopover, setQueuePopover] = useState<null | 'download' | 'parse' | 'downloading' | 'parsing' | 'verdict' | 'verdicting' | 'verdictSkipped'>(null);
@@ -874,6 +938,34 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
 
   const periodOptions = useMemo(() => uniquePeriodTokens(allFilings), [allFilings]);
 
+  const parseActiveIds = useMemo(
+    () => collectActivityIds(live?.activeParseItems ?? live?.activeItems?.filter((item) => item.stage === 'parse')),
+    [live],
+  );
+  const parseQueuedIds = useMemo(() => collectActivityIds(
+    (live?.pendingParseItems ?? live?.queueItems?.filter((item) => item.stage === 'parse') ?? [])
+      .filter((item) => item.status !== 'parked' && item.rawStatus !== 'parse_parked'),
+  ), [live]);
+  const verdictActiveIds = useMemo(
+    () => collectActivityIds((live?.verdictQueueItems ?? []).filter((item) => item.status === 'running')),
+    [live],
+  );
+  const verdictQueuedIds = useMemo(
+    () => collectActivityIds((live?.verdictQueueItems ?? []).filter((item) => item.status !== 'running')),
+    [live],
+  );
+
+  const stagesOf = useCallback((item: CrawlFilingRow) => ({
+    parse: filingParseStage(item, {
+      active: activityHit(parseActiveIds, item) || Boolean(rowBusy[item.key]?.parse),
+      queued: activityHit(parseQueuedIds, item),
+    }),
+    verdict: filingVerdictStage(item, {
+      active: activityHit(verdictActiveIds, item) || Boolean(rowBusy[item.key]?.verdict),
+      queued: activityHit(verdictQueuedIds, item),
+    }),
+  }), [parseActiveIds, parseQueuedIds, verdictActiveIds, verdictQueuedIds, rowBusy]);
+
   const scopedFilings = useMemo(() => {
     const keyword = search.trim();
     const parsed = parseHomeQuery(keyword);
@@ -897,6 +989,9 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
       if (onlyFailed && item.state !== 'failed') return false;
       if (onlyUnparsed && (item.state === 'parsed' || item.state === 'parsed_partial')) return false;
       if (onlyMissingAi && item.verdictStatus === 'ready') return false;
+      const stages = stagesOf(item);
+      if (parseFilter && stages.parse !== parseFilter) return false;
+      if (verdictFilter && stages.verdict !== verdictFilter) return false;
       return true;
     });
     if (timeCol && timeSort !== 'default') {
@@ -908,7 +1003,7 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
       });
     }
     return list;
-  }, [scopedFilings, onlyFailed, onlyUnparsed, onlyMissingAi, timeCol, timeSort]);
+  }, [scopedFilings, onlyFailed, onlyUnparsed, onlyMissingAi, parseFilter, verdictFilter, stagesOf, timeCol, timeSort]);
 
   const selectedFilings = useMemo(
     () => filings.filter((row) => selectedIds.has(row.key)),
@@ -2329,7 +2424,8 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="公司 / 代码"
+              placeholder="公司 / 拼音 / 代码"
+              title="支持公司名拼音，如 zjxc、zhongji"
               aria-label="搜索公司或代码"
             />
             {search ? (
@@ -2369,6 +2465,18 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
               未智析<span className="co-badge">{filterCounts.missingAi}</span>
             </button>
           </div>
+          <select aria-label="解析状态" value={parseFilter} onChange={(e) => setParseFilter(e.target.value as StageFilter)}>
+            <option value="">解析·全部</option>
+            <option value="ok">解析·成功</option>
+            <option value="failed">解析·失败</option>
+            <option value="running">解析·进行中</option>
+          </select>
+          <select aria-label="智析状态" value={verdictFilter} onChange={(e) => setVerdictFilter(e.target.value as StageFilter)}>
+            <option value="">智析·全部</option>
+            <option value="ok">智析·成功</option>
+            <option value="failed">智析·失败</option>
+            <option value="running">智析·进行中</option>
+          </select>
           <div className="co-batch-acts" role="group" aria-label="批量操作">
             {selectedFilings.length ? <span className="co-batch-count">已选 {selectedFilings.length}</span> : null}
             <button type="button" className="co-batch-run" disabled={batchBusy || !selectedFilings.length} onClick={() => runBatchCrawl()}>批量抓取</button>
@@ -2431,6 +2539,7 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
                 const parseBusy = isRowBusy(item.key, 'parse');
                 const verdictBusy = isRowBusy(item.key, 'verdict');
                 const discardBusy = isRowBusy(item.key, 'discard') || isRowBusy(rowBusyId(item.code, item.period, item.announcementId), 'discard');
+                const stages = stagesOf(item);
                 return (
                   <tr key={item.key} className={item.state === 'failed' ? 'is-fail' : ''}>
                     <td className="co-check-col">
@@ -2466,13 +2575,33 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
                       </Link>
                     </td>
                     <td className="co-col-source">{filingSourceLabel(item)}</td>
-                    <td className="co-col-time"><span className="co-time" title={formatCrawlTime(item.discoveredAt ?? item.publishedAt ?? null)}>{formatCrawlTimeCompact(item.discoveredAt ?? item.publishedAt ?? null)}</span></td>
-                    <td className="co-col-time"><span className="co-time" title={formatCrawlTime(item.downloadedAt ?? null)}>{formatCrawlTimeCompact(item.downloadedAt ?? null)}</span></td>
+                    <td className="co-col-time"><span className="co-time" title={filingDiscoverTime(item) ? formatCrawlTime(filingDiscoverTime(item)) : '尚未发现'}>{formatCrawlTimeCompact(filingDiscoverTime(item))}</span></td>
+                    <td className="co-col-time"><span className="co-time" title={filingDownloadTime(item) ? formatCrawlTime(filingDownloadTime(item)) : '尚未抓取成功'}>{formatCrawlTimeCompact(filingDownloadTime(item))}</span></td>
                     <td className="co-col-time">
-                      <span className="co-time" title={formatCrawlTime(item.parsedAt ?? null)}>{formatCrawlTimeCompact(item.parsedAt ?? null)}</span>
+                      <StageCell
+                        stage={stages.parse}
+                        time={filingStageTime(item, 'parse', stages.parse)}
+                        title={stages.parse === 'failed' && item.parseError ? item.parseError : '点击按解析状态筛选'}
+                        pressed={stages.parse !== 'idle' && parseFilter === stages.parse}
+                        onToggle={() => {
+                          const next = stages.parse;
+                          if (next === 'idle') return;
+                          setParseFilter(parseFilter === next ? '' : next);
+                        }}
+                      />
                     </td>
                     <td className="co-col-time">
-                      <span className="co-time" title={formatCrawlTime(item.verdictStatus === 'ready' ? item.verdictGeneratedAt : null)}>{formatCrawlTimeCompact(item.verdictStatus === 'ready' ? item.verdictGeneratedAt : null)}</span>
+                      <StageCell
+                        stage={stages.verdict}
+                        time={filingStageTime(item, 'verdict', stages.verdict)}
+                        title="点击按智析状态筛选"
+                        pressed={stages.verdict !== 'idle' && verdictFilter === stages.verdict}
+                        onToggle={() => {
+                          const next = stages.verdict;
+                          if (next === 'idle') return;
+                          setVerdictFilter(verdictFilter === next ? '' : next);
+                        }}
+                      />
                     </td>
                     <td className="co-col-ops">
                       <div className="co-actions">

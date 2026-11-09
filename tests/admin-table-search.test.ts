@@ -15,6 +15,10 @@ test('matchesQuickSearch joins visible parts case-insensitively', () => {
   assert.equal(matchesQuickSearch('暂无同比', ['同比 暂无同比', 'P10']), true);
   assert.equal(matchesQuickSearch('ROE', ['加权平均roe']), true);
   assert.equal(matchesQuickSearch('MISS', ['OK']), false);
+  assert.equal(matchesQuickSearch('zjxc', ['中际旭创', '300308']), true);
+  assert.equal(matchesQuickSearch('zhongji', ['中际旭创']), true);
+  assert.equal(matchesQuickSearch('z', ['中际旭创']), false);
+  assert.equal(matchesQuickSearch('xyznot', ['中际旭创']), false);
   assert.equal(rowSearchHaystack([null, undefined, 12, true, 'x']), '  12 true x');
 });
 

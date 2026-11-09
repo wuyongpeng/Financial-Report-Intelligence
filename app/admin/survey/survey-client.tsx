@@ -399,6 +399,7 @@ export function SurveyAdminClient() {
               value={inviteSearch}
               maxLength={80}
               placeholder="快速检索"
+              title="支持公司名拼音，如 zjxc"
               onChange={(e) => setInviteSearch(e.target.value)}
             />
             <button
@@ -547,6 +548,7 @@ export function SurveyAdminClient() {
                 value={responseSearch}
                 maxLength={80}
                 placeholder="快速检索"
+                title="支持公司名拼音，如 zjxc"
                 onChange={(e) => setResponseSearch(e.target.value)}
               />
             </div>

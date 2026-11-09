@@ -130,6 +130,7 @@ export function FeedbackAdminClient() {
           value={search}
           maxLength={80}
           placeholder="快速检索"
+          title="支持公司名拼音，如 zjxc"
           onChange={(e) => setSearch(e.target.value)}
         />
         <label style={{ ...s.muted, display: 'inline-flex', alignItems: 'center', gap: 6 }}>

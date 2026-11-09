@@ -268,6 +268,7 @@ export function AuditAdminClient() {
           <input
             style={{ ...s.input, width: 180, flex: '0 1 220px', fontSize: 12, padding: '5px 8px' }}
             placeholder="快速检索"
+            title="支持公司名拼音，如 zjxc"
             value={q}
             maxLength={80}
             onChange={(e) => setQ(e.target.value)}

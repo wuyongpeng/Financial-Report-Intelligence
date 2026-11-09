@@ -3,7 +3,7 @@
  * Pure functions — used by /api/admin/check and unit tests.
  */
 
-import { rowSearchHaystack } from './admin-table-search';
+import { matchesQuickSearch } from './admin-table-search';
 
 export type CheckMetric = 'revenue' | 'net_profit' | 'eps' | 'roe';
 
@@ -385,7 +385,5 @@ export function checkCellSearchParts(cell: CheckCell): Array<string | number | n
 }
 
 export function checkCellMatchesSearch(cell: CheckCell, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return rowSearchHaystack(checkCellSearchParts(cell)).includes(q);
+  return matchesQuickSearch(query, checkCellSearchParts(cell));
 }

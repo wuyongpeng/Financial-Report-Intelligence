@@ -6,7 +6,12 @@ import {
   describeYoy,
   estimateDownloadQueueWait,
   flattenCrawlFilings,
+  filingDiscoverTime,
+  filingDownloadTime,
   filingMatchesSourceFilter,
+  filingParseStage,
+  filingStageTime,
+  filingVerdictStage,
   filingSourceLabel,
   formatQueueLastError,
   formatYoyBadge,
@@ -77,6 +82,42 @@ test('flattenCrawlFilings omits calendar-gap expected rows from the sources list
   assert.ok(!rows.some((row) => row.state === 'expected'));
 });
 
+
+test('discovery and download times appear only after that step succeeds', () => {
+  const discovered = {
+    state: 'discovered' as const,
+    discoveredAt: '2026-09-18T01:00:00Z',
+    publishedAt: '2026-09-01T01:00:00Z',
+    downloadedAt: null,
+  };
+  assert.equal(filingDiscoverTime(discovered), '2026-09-18T01:00:00Z');
+  assert.equal(filingDownloadTime(discovered), null);
+  assert.equal(filingDiscoverTime({ state: 'expected', publishedAt: '2026-09-01T01:00:00Z' }), null);
+  assert.equal(filingDownloadTime({
+    state: 'discovered',
+    rawStatus: 'downloading',
+    downloadedAt: '2026-09-18T02:00:00Z',
+  }), null);
+  assert.equal(filingDownloadTime({
+    state: 'failed',
+    rawStatus: 'parse_failed',
+    downloadedAt: '2026-09-18T02:00:00Z',
+  }), '2026-09-18T02:00:00Z');
+});
+
+test('parse and verdict stages distinguish success, failure, and in progress', () => {
+  const failed = { state: 'failed' as const, rawStatus: 'parse_failed', parsedAt: '2026-09-18T03:00:00Z', verdictStatus: 'failed' as const };
+  assert.equal(filingParseStage(failed), 'failed');
+  assert.equal(filingStageTime(failed, 'parse', 'failed'), null);
+  assert.equal(filingVerdictStage(failed), 'failed');
+  const parsed = { state: 'parsed' as const, rawStatus: 'online', parsedAt: '2026-09-18T03:00:00Z', verdictStatus: 'ready' as const, verdictGeneratedAt: '2026-09-18T04:00:00Z' };
+  assert.equal(filingParseStage(parsed), 'ok');
+  assert.equal(filingStageTime(parsed, 'parse', 'ok'), '2026-09-18T03:00:00Z');
+  assert.equal(filingVerdictStage(parsed), 'ok');
+  assert.equal(filingParseStage({ state: 'downloaded', rawStatus: 'downloaded' }, { queued: true }), 'running');
+  assert.equal(filingVerdictStage({ state: 'parsed', verdictStatus: null }, { active: true }), 'running');
+  assert.equal(filingVerdictStage({ state: 'parsed', verdictStatus: null }), 'idle');
+});
 
 test('filingSourceLabel marks expected gaps as 待抓取, not 尚未抓取', () => {
   assert.equal(filingSourceLabel({ state: 'expected', sourceApi: null }), '待抓取');
