@@ -1,6 +1,7 @@
 'use client';
 
 import { canStartHandoffAsk, canApplyHydratedThread, pendingDetailAskQuestion } from '@/lib/detail-ask-state';
+import { ASK_STOPPED_LINE, dropBlankInFlightTurn, isTransientAskError } from '@/lib/detail-ask-stop';
 import { requestAssistantTurn, FEEDBACK_REVIEW_LINE, assistantTurnFailureMessage } from '@/lib/assistant-turn';
 import { requestFeedbackDraft, subscribeFeedbackState, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
@@ -382,6 +383,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [memoryLoading, setMemoryLoading] = useState(true);
   const [baselineId, setBaselineId] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  /** Why the current ask was aborted. Voice takeover must not look like a failed answer. */
+  const askAbortReasonRef = useRef<'user-stop' | 'voice-takeover' | 'leave' | null>(null);
   const activeId = useRef(selected.id);
   const busyRef = useRef(false);
   /** Live PDF/text selection kept even without 「加入AI分析」 — used on next ask (esp. voice). */
@@ -436,7 +439,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         window.history.replaceState(null, '', next);
       } catch { /* ignore */ }
     }
-    requestRef.current?.abort(); busyRef.current = false;
+    abortInFlightAsk('leave'); busyRef.current = false;
     // Period switch → different reportId → different thread. Clear UI immediately so
     // company/period A messages cannot flash or stick on B while hydrate runs.
     memoryReady.current = false; setMemoryLoading(true);
@@ -493,7 +496,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         setPeriodBootstrapDone(true);
       }
     });
-    return () => { abort.abort(); requestRef.current?.abort(); };
+    return () => { abort.abort(); abortInFlightAsk('leave'); };
     // One company owns this workspace; changing a period must not reload or reset the list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialReport.code]);
@@ -1366,6 +1369,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     voiceApiRef.current = voice;
     if (wasActive && !voice.active) {
       voiceConvRef.current = false;
+      abortInFlightAsk('user-stop');
       voiceRequestRef.current?.abort();
       voiceTtsAbortRef.current?.abort();
       voiceTtsAbortRef.current = null;
@@ -1382,7 +1386,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
 
   function onFeedbackState(open: boolean) {
     if (open) {
-      requestRef.current?.abort();
+      abortInFlightAsk('user-stop');
       voiceTtsAbortRef.current?.abort();
       voiceTtsAbortRef.current = null;
       voiceSpeakRef.current = false;
@@ -1914,7 +1918,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         chatEcho(line);
         if (!canSpeak) { onBack(); return; }
         // Keep GLOBAL voice session; only leave the detail route.
-        requestRef.current?.abort();
+        abortInFlightAsk('leave');
         const priorTts = voiceTtsAbortRef.current;
         voiceTtsAbortRef.current = null;
         priorTts?.abort();
@@ -1946,7 +1950,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         // Typed farewell outside a voice session is just a polite local reply — never opens the float.
         if (!canSpeak || !voiceConvRef.current) return;
         // Abort any in-flight ask / prior TTS so farewell is the last thing spoken.
-        requestRef.current?.abort();
+        abortInFlightAsk('user-stop');
         const priorTts = voiceTtsAbortRef.current;
         voiceTtsAbortRef.current = null;
         priorTts?.abort();
@@ -2048,13 +2052,13 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
    */
   function bargeInFromVoice() {
     if (!voiceConvRef.current) {
-      requestRef.current?.abort();
+      abortInFlightAsk('user-stop');
       endVoiceMode();
       return;
     }
     sectionReadRef.current = null;
     voiceSpeakRef.current = false; // ask()'s post-TTS path must not also resume
-    requestRef.current?.abort();
+    abortInFlightAsk('user-stop');
     const tts = voiceTtsAbortRef.current;
     voiceTtsAbortRef.current = null;
     tts?.abort();
@@ -2089,7 +2093,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       barged = true;
       sectionReadRef.current = null;
       voiceSpeakRef.current = false;
-      requestRef.current?.abort();
+      abortInFlightAsk('voice-takeover');
       const tts = voiceTtsAbortRef.current;
       voiceTtsAbortRef.current = null;
       tts?.abort();
@@ -2346,8 +2350,22 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
   function onSourceTextPick(text: string, page: number) { placePick(text, page); }
 
+  function abortInFlightAsk(reason: 'user-stop' | 'voice-takeover' | 'leave') {
+    askAbortReasonRef.current = reason;
+    const controller = requestRef.current;
+    if (!controller || controller.signal.aborted) return;
+    if (reason === 'voice-takeover') {
+      busyRef.current = false;
+      setAsking(false);
+      setThinking(false);
+      setPreflightQuestion(null);
+      setMessages(current => dropBlankInFlightTurn(current));
+    }
+    controller.abort();
+  }
+
   function stopAsk() {
-    requestRef.current?.abort();
+    abortInFlightAsk('user-stop');
   }
 
   function setAnswerVote(index: number, value: 'up' | 'down') {
@@ -2420,7 +2438,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     void ask(user.ask?.question ?? user.text, { replaceAt: index, focus: user.ask?.focus, rewrite });
   }
 
-  async function ask(text: string, extra?: { replaceAt?: number; focus?: FocusItem[]; rewrite?: 'detailed' | 'brief' | 'retry'; spoken?: boolean }) {
+  async function ask(text: string, extra?: { replaceAt?: number; focus?: FocusItem[]; rewrite?: 'detailed' | 'brief' | 'retry'; spoken?: boolean; retried?: boolean }) {
     const replacing = extra?.replaceAt;
     const typed = text.trim();
     if (isFeedbackDrawerOpen()) return;
@@ -2441,7 +2459,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     if (replacing != null) {
       if (busyRef.current || !memoryReady.current) return;
     } else if ((!typed && !clips.length) || busyRef.current || !memoryReady.current) return;
-    const controller = new AbortController(); requestRef.current = controller; busyRef.current = true;
+    const controller = new AbortController(); requestRef.current = controller; askAbortReasonRef.current = null; busyRef.current = true;
     const id = selected.id;
     if (extra?.spoken || voiceConvRef.current) voiceRequestRef.current = controller;
     const releasePreflight = () => {
@@ -2483,8 +2501,17 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           } else if (extra?.spoken || voiceConvRef.current) speakVoiceConfirm(line);
           return;
         }
-      } catch {
+      } catch (error) {
         if (!ownsTurn()) { releasePreflight(); return; }
+        if (!extra?.retried && isTransientAskError(error)) {
+          busyRef.current = false;
+          setAsking(false);
+          setThinking(false);
+          setPreflightQuestion(null);
+          setQuietToast({ text: '网络不稳定，正在重试', at: Date.now() });
+          void ask(typed, { ...extra, retried: true, spoken: Boolean(extra?.spoken || voiceConvRef.current) });
+          return;
+        }
         setQuestion('');
         setMessages(current => [...current, { role: 'user', text: typed, local: true }, { role: 'assistant', text: assistantTurnFailureMessage('upstream'), local: true }]);
         releasePreflight();
@@ -2675,13 +2702,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       }
       if (!answer && !controller.signal.aborted) { answer='暂无法回答：未返回足够证据。可尝试询问本期营业收入或净利润。'; update(); }
     } catch (error) {
-      if (controller.signal.aborted) {
-        if (requestRef.current === controller && activeId.current === id) {
-          setMessages(m => m.map((item,i) => i === m.length-1 && item.role === 'assistant'
-            ? { ...item, text: answer || '已停止生成' }
-            : item));
-        }
-      } else {
+      const retryable = !controller.signal.aborted && !extra?.retried && isTransientAskError(error) && activeId.current === id && memoryReady.current && !isFeedbackDrawerOpen();
+      if (retryable) {
+        busyRef.current = false;
+        setQuietToast({ text: '网络不稳定，正在重试', at: Date.now() });
+        void ask(question, { ...extra, retried: true, replaceAt: slot, focus: focusPayload, spoken: Boolean(extra?.spoken || voiceConvRef.current) });
+        return;
+      }
+      if (!controller.signal.aborted) {
         answer = error instanceof Error ? error.message : '问答服务暂时不可用，请稍后重试。';
         update();
       }
@@ -2689,11 +2717,16 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     finally {
       // Finish revealing any buffered tokens before leaving the streaming state.
       clearTypewriter();
-      if (requestRef.current === controller && activeId.current === id && answer && revealed !== answer) {
+      const stillOurs = requestRef.current === controller && activeId.current === id;
+      if (stillOurs && controller.signal.aborted && askAbortReasonRef.current !== 'voice-takeover') {
+        const text = answer.trim() ? answer : ASK_STOPPED_LINE;
+        revealed = text;
+        setMessages(m => m.map((item, i) => i === m.length - 1 && item.role === 'assistant' ? { ...item, text } : item));
+      } else if (stillOurs && answer && revealed !== answer && !controller.signal.aborted) {
         revealed = answer;
         paint(lastEvidence, true);
       }
-      if (requestRef.current === controller && activeId.current === id) { busyRef.current = false; setAsking(false); setThinking(false); setPreflightQuestion(null); }
+      if (stillOurs) { busyRef.current = false; setAsking(false); setThinking(false); setPreflightQuestion(null); }
     }
     if (requestRef.current === controller && activeId.current === id && !controller.signal.aborted && answer) void loadFollowups(id, slot, assembled, answer, asked);
     /* Typed ask: jump/highlight first in-report cite so「营收是多少」paints 营业收入 without a click. */
