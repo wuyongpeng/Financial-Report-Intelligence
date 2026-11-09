@@ -1561,6 +1561,15 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     setVoiceListening(false);
   }
 
+  /** Record the first voice citation. Jump only when the reader left auto-jump on, and only inside this report. */
+  function offerVoiceJump(target: Citation) {
+    lastVoiceCiteRef.current = target;
+    setVoiceJumpHint(target);
+    if (!readReaderPrefs().voiceCiteJump) return;
+    if (target.reportId && target.reportId !== activeId.current) return;
+    revealVoiceCitation(target);
+  }
+
   /** Same path as clicking an in-answer [Pxx] / 参考来源 chip. */
   function revealVoiceCitation(c: Citation, allowCrossReport = false) {
     if (isFeedbackDrawerOpen()) return;
@@ -2668,8 +2677,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         const target = fromMarks[0] ?? withQuote ?? citations[0];
         if (target?.page) {
           voiceEarlyJumpRef.current = true;
-          lastVoiceCiteRef.current = target;
-          setVoiceJumpHint(target);
+          offerVoiceJump(target);
         }
       }
     }
@@ -2750,8 +2758,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         const withQuote = lastEvidence?.find(e => e.page && (e.quote ?? '').trim());
         const target = fromMarks[0] ?? withQuote ?? lastEvidence?.[0];
         if (target?.page) {
-          lastVoiceCiteRef.current = target;
-          if (!voiceEarlyJumpRef.current) setVoiceJumpHint(target);
+          if (voiceEarlyJumpRef.current) lastVoiceCiteRef.current = target;
+          else offerVoiceJump(target);
         }
         const abort = new AbortController();
         voiceTtsAbortRef.current = abort;
@@ -3408,7 +3416,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
           setVoiceJumpHint(null);
         }}
       >
-        答案在第 {voiceJumpHint.page} 页 · 去看
+        答案在第 {voiceJumpHint.page} 页
       </button>
     )}
     {periodMiss && (

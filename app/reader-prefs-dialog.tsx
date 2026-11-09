@@ -242,6 +242,12 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                 hint="开麦后先说一句「我是 Eva，你的财报智能分析助手。」"
                 onChange={(welcome) => patch({ welcome }, welcome ? '已开启欢迎语' : '已关闭欢迎语')}
               />
+              <PrefsSwitch
+                on={prefs.voiceCiteJump}
+                label="语音回答自动跳原文并高亮"
+                tip="有多条出处时，默认跳转到第一个证据页"
+                onChange={(voiceCiteJump) => patch({ voiceCiteJump }, voiceCiteJump ? '已开启语音回答自动跳原文' : '已关闭语音回答自动跳原文')}
+              />
               <p className="prefs-label">语速</p>
               <div className="prefs-segment" role="radiogroup" aria-label="语速">
                 {SPEECH_RATES.map((item) => (
@@ -422,18 +428,27 @@ function PrefsSwitch({
   on,
   label,
   hint,
+  tip,
   onChange,
 }: {
   on: boolean;
   label: string;
-  hint: string;
+  hint?: string;
+  tip?: string;
   onChange: (next: boolean) => void;
 }) {
   return (
     <div className="prefs-row">
       <div>
-        <div className="prefs-row-label">{label}</div>
-        <p className="prefs-hint">{hint}</p>
+        <div className="prefs-row-label">
+          {label}
+          {tip ? (
+            <span className="prefs-help" tabIndex={0} aria-label={tip}>?
+              <span role="tooltip">{tip}</span>
+            </span>
+          ) : null}
+        </div>
+        {hint ? <p className="prefs-hint">{hint}</p> : null}
       </div>
       <button type="button" role="switch" aria-checked={on} aria-label={label} className={on ? 'prefs-switch on' : 'prefs-switch'} onClick={() => onChange(!on)}>
         <span />

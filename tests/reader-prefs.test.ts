@@ -23,12 +23,15 @@ test('reader prefs default to beginner, auto, no welcome, and memory on', () => 
     autoModel: true,
     modelId: 'auto',
     welcome: false,
+    voiceCiteJump: true,
     speechRate: 1,
     memory: true,
   });
   assert.equal(normalizeReaderPrefs({ modelId: 'thudm/glm-5.2' }).autoModel, false);
   assert.equal(normalizeReaderPrefs({ welcome: true, memory: false, readingLevel: 'professional', modelId: 'thudm/glm-5.2' }).welcome, true);
   assert.equal(normalizeReaderPrefs({ memory: false }).memory, false);
+  assert.equal(normalizeReaderPrefs({}).voiceCiteJump, true);
+  assert.equal(normalizeReaderPrefs({ voiceCiteJump: false }).voiceCiteJump, false);
   assert.equal(normalizeReaderPrefs({ modelId: 'not a model' }).modelId, 'auto');
   assert.equal(snapSpeechRate(1.2), 1.15);
 });

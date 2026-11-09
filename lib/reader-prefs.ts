@@ -24,6 +24,8 @@ export type ReaderPrefs = {
   /** `auto` means no pin. Any other value is a provider id used only while autoModel is off. */
   modelId: string;
   welcome: boolean;
+  /** Voice answers jump to the first cited page. Missing means on. */
+  voiceCiteJump: boolean;
   speechRate: number;
   /** Session cache: send prior turns of the same report. */
   memory: boolean;
@@ -34,6 +36,7 @@ export const DEFAULT_READER_PREFS: ReaderPrefs = {
   autoModel: true,
   modelId: 'auto',
   welcome: false,
+  voiceCiteJump: true,
   speechRate: 1,
   memory: true,
 };
@@ -78,6 +81,7 @@ export function normalizeReaderPrefs(raw: unknown): ReaderPrefs {
     autoModel,
     modelId,
     welcome: row.welcome === true,
+    voiceCiteJump: row.voiceCiteJump !== false,
     speechRate: snapSpeechRate(row.speechRate ?? DEFAULT_READER_PREFS.speechRate),
     memory: row.memory !== false,
   };

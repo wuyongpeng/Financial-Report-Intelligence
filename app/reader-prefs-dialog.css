@@ -23,6 +23,9 @@
 .prefs-choice[aria-checked="true"] b{color:#1f4fad}
 .prefs-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid #eef2f6}
 .prefs-row-label{font-size:14px;font-weight:650}
+.prefs-help{position:relative;display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:6px;border:1px solid #c5d0de;border-radius:50%;color:#6b7a8d;font-size:11px;font-weight:650;line-height:1;vertical-align:1px;cursor:help}
+.prefs-help span{display:none;position:absolute;left:0;top:calc(100% + 8px);width:max-content;max-width:240px;padding:8px 10px;border-radius:8px;background:#203047;color:#fff;font-size:12px;font-weight:450;line-height:1.45;white-space:normal;z-index:3;box-shadow:0 8px 20px #13213b33}
+.prefs-help:hover span,.prefs-help:focus span{display:block}
 .prefs-hint{margin:4px 0 0;color:#6b7a8d;font-size:13px;line-height:1.5}
 .prefs-label{margin:18px 0 8px;font-size:13px;font-weight:650;color:#31465f}
 .prefs-memory-add{display:flex;align-items:center;gap:8px;margin:0 0 12px}
