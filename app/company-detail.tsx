@@ -14,6 +14,7 @@ import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, mergeLiveSelectionFocus, readSourceSelection, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
 import { citeFilingLabel, citeHoverText, embedAttributionPageCites, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources, uniqueCitationsByPage } from '@/lib/answer-cite';
+import { placeCiteTip } from '@/lib/cite-tip';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
 import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
@@ -1279,6 +1280,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         aria-label={hover}
         onClick={() => jumpCitation(c)}
         onDoubleClick={() => jumpCitation(c, true)}
+        onPointerEnter={(event) => placeCiteTip(event.currentTarget)}
+        onFocus={(event) => placeCiteTip(event.currentTarget)}
       >
         [{pageChip(c.page)}]
         <span className="cd-cite-tip" role="tooltip">{hover}</span>

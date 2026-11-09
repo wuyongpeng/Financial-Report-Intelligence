@@ -1,3 +1,4 @@
+import { formatStructuredFacts, wantsPeriodSeries } from '@/lib/answer-layout';
 import { unsupportedYears } from '@/lib/chat-evidence';
 import { EVA_INTRO_LINE } from '@/lib/product-identity';
 import { DATA_DOUBT_REPLY, REPORT_READING_GUIDE, UNNAMED_PEER_REPLY } from '@/lib/report-reading-guide';
@@ -66,11 +67,12 @@ export function decideDirectAnswer(input: {
     directAnswer = '暂无法回答：所选页没有可检索的原文，请打开原始 PDF 核验。';
     mode = 'insufficient-evidence';
   } else if (plan.wantsStructuredValue) {
-    const lines = plan.needsHistory || plan.needsPeers
+    const series = wantsPeriodSeries(plan.originalQuestion) || wantsPeriodSeries(plan.retrievalQuestion);
+    const lines = plan.needsPeers || series
       ? factLines
       : factLines.filter(fact => fact.metric.reportId === input.currentReportId);
     directAnswer = lines.length
-      ? [...lines.map(fact => fact.line), ...(plan.wantsChangeCalculation ? calculations : [])].join('\n')
+      ? formatStructuredFacts(lines, plan.wantsChangeCalculation ? calculations : [], input.currentReportId)
       : '暂无法回答：相关指标尚未解析。';
     mode = lines.length ? 'structured-query' : 'insufficient-evidence';
   }

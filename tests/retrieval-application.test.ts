@@ -351,3 +351,39 @@ test('selected quote wins over stale chat topic without expanding KPI/peer plann
     assert.match(messages.at(-1)!.content, /PDF第121页/);
   }
 });
+
+test('latest revenue and profit yoy answers the open period in a table', async () => {
+  const repository = new FakeRetrievalRepository();
+  repository.report = {
+    id: 'current', code: '002475', companyName: '立讯精密', industry: '制造', reportType: 'quarterly',
+    title: '立讯精密2026年第三季度报告', publishedAt: '2026-10-24T00:00:00.000Z',
+  };
+  repository.history = [{
+    id: 'prior', code: '002475', companyName: '立讯精密', industry: '制造', reportType: 'annual',
+    title: '立讯精密2025年年度报告', publishedAt: '2026-03-20T00:00:00.000Z',
+  }];
+  repository.metrics = [
+    { reportId: 'current', metric: 'net_profit', value: 5_214_000_000, unit: '元', period: '2026Q3', sourcePage: 1, sourceLabel: '归母净利润', yoyPct: 6.98 },
+    { reportId: 'current', metric: 'revenue', value: 110_507_000_000, unit: '元', period: '2026Q3', sourcePage: 1, sourceLabel: '营业收入', yoyPct: 14.62 },
+    { reportId: 'prior', metric: 'revenue', value: 332_344_000_000, unit: '元', period: '2025FY', sourcePage: 8, sourceLabel: '营业收入' },
+    { reportId: 'prior', metric: 'net_profit', value: 16_600_000_000, unit: '元', period: '2025FY', sourcePage: 8, sourceLabel: '归母净利润' },
+  ];
+  repository.chunks = [{ reportId: 'current', page: 1, content: '营业收入 1105.07亿元，归母净利润 52.14亿元，同比分别增长 14.62% 与 6.98%。' }];
+
+  const context = await retrieveContext({
+    reportId: 'current',
+    question: '立讯精密最新营收、净利润同比多少',
+    history: [],
+    repository,
+    passageRetriever: new KeywordPassageRetriever(),
+  });
+  const answer = context.directAnswer ?? '';
+  assert.equal(context.mode, 'structured-query');
+  assert.match(answer, /立讯精密 2026Q3：营业收入 .*，同比增长 14\.62%/);
+  assert.match(answer, /归母净利润 .*，同比增长 6\.98%/);
+  assert.match(answer, /\| 指标 \| 本期 \| 同比 \|/);
+  assert.match(answer, /1,105\.07亿元/);
+  assert.match(answer, /52\.14亿元/);
+  assert.doesNotMatch(answer, /3,323\.44亿元|166亿元|绝对变化|来自本份财报同比增减列/);
+  assert.ok(answer.indexOf('| 营业收入 |') < answer.indexOf('| 归母净利润 |'));
+});

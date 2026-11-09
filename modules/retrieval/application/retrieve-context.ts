@@ -1,3 +1,4 @@
+import { formatReadableAnswer } from '@/lib/answer-layout';
 import { assembleFocusPrompt, focusContextBlock, type FocusItem } from '@/lib/focus-prompt';
 import { ApiError } from '@/lib/api';
 import { buildPageLabels, resolvePageQuestion } from '@/lib/pdf-pages';
@@ -210,17 +211,17 @@ export async function retrieveContext(input: {
       metric: fact.metric.metric,
     });
     if (yoy) {
-      const formula = yoy.source === 'disclosed'
-        ? (yoy.naPercent ? '财报披露；跨零或基期为零，百分比记为 N/A' : '来自本份财报同比增减列')
-        : yoy.naPercent
-          ? '跨零或基期为零，百分比记为 N/A'
-          : (fact.metric.value < 0 && (prior?.metric.value ?? 0) < 0)
-            ? '公式：(本期-上期)/|上期|'
-            : '公式：(本期-上期)/上期';
-      const priorBit = prior
-        ? `基期 ${priorPeriod}${prior.citation ? `【${prior.citation.id}】` : ''}`
-        : (fact.metric.priorValue != null ? '基期来自本份财报上年同期列' : '无跨报告基期');
-      calculations.push(`${metricLabel(fact.metric.metric)}同比：${yoy.label}${fact.citation ? `【${fact.citation.id}】` : ''}（${priorBit}，绝对变化 ${formatFinanceAmount(yoy.absoluteDelta, fact.metric.unit)}，${formula}）`);
+      const bits: string[] = [];
+      if (prior) bits.push(`对比 ${priorPeriod}${prior.citation ? `【${prior.citation.id}】` : ''}`);
+      else if (fact.metric.priorValue != null) bits.push('对比本份财报上年同期');
+      if (Number.isFinite(yoy.absoluteDelta) && yoy.absoluteDelta !== 0) {
+        const direction = yoy.absoluteDelta > 0 ? '增加' : '减少';
+        bits.push(`较基期${direction} ${formatFinanceAmount(Math.abs(yoy.absoluteDelta), fact.metric.unit)}`);
+      }
+      if (yoy.naPercent) bits.push('百分比记为 N/A');
+      const cite = fact.citation ? `【${fact.citation.id}】` : '';
+      const note = bits.length ? `（${bits.join('，')}）` : '';
+      calculations.push(`${metricLabel(fact.metric.metric)}同比：${yoy.label}${cite}${note}`);
     }
   }
 
@@ -333,7 +334,7 @@ export async function retrieveContext(input: {
         ...(plan.wantsChangeCalculation ? calculations.slice(0, 4) : []),
         ...currentPassages.slice(0, passageCap).map(passage => `${passage.quote}【${passage.id}】`),
       ].filter(Boolean);
-      return lines.join('\n');
+      return formatReadableAnswer(lines.join('\n'));
     })());
 
   return {

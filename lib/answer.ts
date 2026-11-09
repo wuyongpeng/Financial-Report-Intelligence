@@ -6,6 +6,7 @@ import { fetchChatCompletions, withLlmSlot } from './llm-gate';
 import { llmConfigured } from './llm-providers';
 import { historyForModel } from '@/modules/retrieval/application/question-planner';
 import { ensureSoftScopeFooter, SOFT_SCOPE_FOOTER, SOFT_SCOPE_FOOTER_SPOKEN } from '@/modules/retrieval/application/answer-policy';
+import { formatReadableAnswer } from '@/lib/answer-layout';
 import { humanizeYuanInText } from '@/lib/format-finance-amount';
 import { readingLevelInstruction, type ReadingLevel } from '@/lib/reader-prefs';
 
@@ -83,7 +84,7 @@ export function modelMessages(context: RagContext, history: MemoryMessage[], rew
   );
   const style = spoken
     ? '用口语化短句中文回答，优先短、快、直接。禁止表格与多列布局，数字写入句子。不要输出 HTML。'
-    : '用简洁中文回答。比较或多列数字时用 Markdown 表格，表内金额用亿元/万元等可读单位，禁止单元格写库内原始元整数；分层说明可用标题与列表。不要输出 HTML。';
+    : '用简洁中文回答。一两句就能说完的短回答可以写成一段。其余回答必须分段，或用 Markdown 列表/表格把数字分开，禁止把多条数字挤成一段。比较或多列数字时优先用表格，表内金额用亿元/万元等可读单位，禁止单元格写库内原始元整数。不要输出 HTML。';
   const softHint = context.softScopeHint
     ? (
       '本轮问题与财报关联度可能偏低（闲聊/天气/常识也可能与天气敏感型业绩相关，边界不要过硬）。'
@@ -141,7 +142,8 @@ export async function generateAnswer(context: RagContext, history: MemoryMessage
   const soft = Boolean(context.softScopeHint);
   let usage: ModelUsage | undefined;
   const finish = (answer: string, mode: string, status: AnswerResult['status'] = 'complete', warnings: string[] = []): AnswerResult => {
-    const text = humanizeYuanInText(soft ? ensureSoftScopeFooter(answer, spoken) : answer);
+    const plain = humanizeYuanInText(soft ? ensureSoftScopeFooter(answer, spoken) : answer);
+    const text = spoken ? plain : formatReadableAnswer(plain);
     return {
       answer: text,
       mode,
