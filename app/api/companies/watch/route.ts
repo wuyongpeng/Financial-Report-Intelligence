@@ -1,9 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import ashareUniverse from '@/data/ashare-universe.json';
+import { after } from 'next/server';
 import { authorizeProductWrite } from '@/lib/auth';
 import { classifyCompany } from '@/lib/company-classify';
 import { getDb } from '@/lib/db';
+import { prioritizeCompanyCrawl } from '@/lib/ingest';
+import { watchJoinCrawlOptions } from '@/lib/watch-collect';
 
 export const dynamic = 'force-dynamic';
 
@@ -189,8 +192,18 @@ export async function POST(request: Request) {
 
   const enabled = await db<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM companies WHERE enabled=true`;
 
+  // User-facing join must start collect immediately; do not wait for the ops poll.
+  after(async () => {
+    try {
+      await prioritizeCompanyCrawl([code], watchJoinCrawlOptions());
+    } catch (error) {
+      console.error('[watch] auto crawl failed', code, error);
+    }
+  });
+
   return Response.json({
     ok: true,
+    crawlStarted: true,
     company: {
       code,
       name: finalName,

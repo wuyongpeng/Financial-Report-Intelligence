@@ -63,6 +63,7 @@ import {
   shouldIgnoreHomeCompanyFilter,
 } from '@/lib/home-chitchat';
 import { metricYoyHoverDetail, type Report } from '@/lib/detail-model';
+import { watchJoinTriggerBody } from '@/lib/watch-collect';
 import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
@@ -989,18 +990,12 @@ export default function ReportHome() {
       await navigateWithAsk(company, q, parseHomeQuery(q).period, { fromVoice: opts.fromVoice });
       return;
     }
-    if (opts.fromVoice || q) {
-      if (opts.fromVoice && voice.active) {
-        voiceNavigatingRef.current = true;
-        voice.stopMic();
-      }
-      clearHomeChatTurns();
-      router.push(`/${company.code}`);
-      return;
+    if (opts.fromVoice && voice.active) {
+      voiceNavigatingRef.current = true;
+      voice.stopMic();
     }
-    if (voice.active) {
-      scheduleHomeResume(() => voice.resumeListen(), 200);
-    }
+    clearHomeChatTurns();
+    router.push(`/${company.code}`);
   }
 
     async function navigateWithAsk(company: CrawlCompanyCoverage, question: string, period: ParsedPeriod, opts?: { fromVoice?: boolean }) {
@@ -1753,31 +1748,18 @@ export default function ReportHome() {
   async function triggerHomeCrawl(item: CrawlCompanyCoverage, e?: MouseEvent) {
     e?.preventDefault();
     e?.stopPropagation();
-    if (crawlingCodes.includes(item.code)) {
-      router.push(`/admin/sources?focus=${encodeURIComponent(item.code)}`);
-      return;
-    }
     setCrawlingCodes((prev) => (prev.includes(item.code) ? prev : [...prev, item.code]));
     setWaitToast(`${item.name}（${item.code}）：正在发现并下载财报…`);
     try {
-      const response = await fetch('/api/crawl/trigger', {
+      void fetch('/api/crawl/trigger', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mode: 'backlog', codes: [item.code] }),
+        body: JSON.stringify(watchJoinTriggerBody(item.code)),
       });
-      const payload = await response.json() as { ok?: boolean; error?: string; note?: string; paused?: boolean };
-      if (!response.ok) {
-        setCrawlingCodes((prev) => prev.filter((c) => c !== item.code));
-        setWaitToast(payload.error ?? '立即抓取失败，请在数据源页确认自动抓取已开启');
-        return;
-      }
-      setWaitToast(payload.note ?? `${item.name}：已进入抓取队列`);
-    } catch (err) {
-      setCrawlingCodes((prev) => prev.filter((c) => c !== item.code));
-      setWaitToast(`网络异常：${String(err)}`);
-      return;
+    } catch {
+      /* detail page retriggers and polls until reports appear */
     }
-    router.push(`/admin/sources?focus=${encodeURIComponent(item.code)}`);
+    router.push(`/${item.code}`);
   }
 
   /** Empty-state light entry: report current search for admin roster backfill (no blocking dialog). */

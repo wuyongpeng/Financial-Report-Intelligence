@@ -10,6 +10,12 @@ import companiesJson from '@/data/companies.json';
 import { openingCompanyLabel } from '@/lib/crawl-display';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { period } from '@/lib/detail-model';
+import {
+  isPendingReportId,
+  watchJoinTriggerBody,
+  WATCH_COLLECT_POLL_MS,
+  WATCH_COLLECT_TIMEOUT_MS,
+} from '@/lib/watch-collect';
 
 type CompanyMeta = {
   code: string;
@@ -54,6 +60,8 @@ export default function CompanyCodeClient({ code }: { code: string }) {
   const meta = (companiesJson as CompanyMeta[]).find((item) => item.code === code) ?? null;
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
+  const [collecting, setCollecting] = useState(false);
+  const [collectError, setCollectError] = useState('');
   const [error, setError] = useState('');
   const [adminDialogOpen, setAdminDialogOpen] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
@@ -64,42 +72,94 @@ export default function CompanyCodeClient({ code }: { code: string }) {
 
   useEffect(() => {
     let active = true;
-    async function load() {
-      setLoading(true);
+    let timer = 0;
+    let triggered = false;
+    const startedAt = Date.now();
+
+    function pickPreferred(reports: Report[]) {
+      const real = reports.filter((item) => item.id && !isPendingReportId(item.id));
+      const periodParam = preferredPeriod;
+      let preferred = real[0];
+      if (periodParam) {
+        const hint = parsePeriodHints(periodParam);
+        if (!hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(periodParam)) {
+          hint.token = periodParam.toUpperCase();
+        }
+        preferred = real.find((item) =>
+          reportMatchesPeriod(item, hint)
+          || item.metrics.some((m) => m.period === periodParam)
+          || item.title.includes(periodParam)
+        ) ?? preferred;
+      }
+      if (!preferred || (preferred && !periodParam)) {
+        preferred = real.find((item) => item.metrics?.length) ?? real[0] ?? preferred;
+      }
+      return preferred ?? null;
+    }
+
+    async function startCollect() {
+      if (triggered) return;
+      triggered = true;
+      try {
+        await fetch('/api/crawl/trigger', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(watchJoinTriggerBody(code)),
+        });
+      } catch {
+        /* polling still runs; watch API may already have started the crawl */
+      }
+    }
+
+    async function load(isPoll = false) {
+      if (!isPoll) {
+        setLoading(true);
+        setCollectError('');
+      }
       try {
         const response = await fetch(`/api/reports?code=${encodeURIComponent(code)}&limit=100`, { cache: 'no-store' });
         const payload = await readContractJson(response, parseReportListResponse);
         if (!active) return;
-        const reports = payload.reports;
-        const periodParam = preferredPeriod;
-        let preferred = reports[0];
-        if (periodParam) {
-          const hint = parsePeriodHints(periodParam);
-          if (!hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(periodParam)) {
-            hint.token = periodParam.toUpperCase();
-          }
-          preferred = reports.find((item) =>
-            reportMatchesPeriod(item, hint)
-            || item.metrics.some((m) => m.period === periodParam)
-            || item.title.includes(periodParam)
-          ) ?? preferred;
+        const preferred = pickPreferred(payload.reports);
+        if (preferred) {
+          setReport(preferred);
+          setCollecting(false);
+          setCollectError('');
+          setError('');
+          setLoading(false);
+          return;
         }
-        if (!preferred || (preferred && !periodParam)) {
-          preferred = reports.find((item) => item.metrics?.length) ?? reports[0] ?? preferred;
-        }
-        preferred = preferred ?? placeholderReport(code, meta);
-        setReport(preferred);
+        setReport(placeholderReport(code, meta));
+        setCollecting(true);
         setError('');
+        setLoading(false);
+        void startCollect();
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < WATCH_COLLECT_TIMEOUT_MS) {
+          timer = window.setTimeout(() => { void load(true); }, WATCH_COLLECT_POLL_MS);
+        } else {
+          setCollectError('财报还在采集中，请稍后刷新，或再试一次。');
+        }
       } catch (err) {
         if (!active) return;
+        if (isPoll) {
+          timer = window.setTimeout(() => { void load(true); }, WATCH_COLLECT_POLL_MS);
+          return;
+        }
         setReport(placeholderReport(code, meta));
+        setCollecting(true);
         setError(`真实财报暂时无法读取：${String(err)}`);
-      } finally {
-        if (active) setLoading(false);
+        setLoading(false);
+        void startCollect();
+        timer = window.setTimeout(() => { void load(true); }, WATCH_COLLECT_POLL_MS);
       }
     }
     void load();
-    return () => { active = false; };
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
   }, [code, meta, preferredPeriod]);
 
   function approveReport(reportId: string) {
@@ -146,6 +206,36 @@ export default function CompanyCodeClient({ code }: { code: string }) {
             <span className="page-opening-spin" aria-hidden="true" />
             <b>正在打开 {openingCompanyLabel(code, meta?.name)}</b>
             <p>读取该公司财报与指标…</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  if (collecting && (!report || isPendingReportId(report.id))) {
+    return (
+      <main className="app-shell">
+        <section className="lane-page">
+          <div className="honest-empty page-opening" role="status" aria-live="polite">
+            <span className="page-opening-spin" aria-hidden="true" />
+            <b>正在抓取并解析 {openingCompanyLabel(code, meta?.name ?? report?.company_name)}</b>
+            <p>{collectError || '加入监控池后会自动采集财报，完成后将自动打开。无需到数据运营页操作。'}</p>
+            {collectError ? (
+              <button
+                className="primary"
+                style={{ marginTop: 16 }}
+                onClick={() => {
+                  setCollectError('');
+                  setCollecting(true);
+                  window.location.reload();
+                }}
+              >
+                再试一次
+              </button>
+            ) : null}
+            <button className="secondary" style={{ marginTop: collectError ? 8 : 16 }} onClick={() => router.push('/')}>
+              返回首页
+            </button>
           </div>
         </section>
       </main>
