@@ -5,11 +5,72 @@ import {
   currencyYiCandidates,
   h1PeriodForQ3,
   pickBestConverted,
+  pickCanonicalCheckRows,
   pickQ3Comparable,
   withinTolerance,
+  type CheckFilingMetric,
   type DbMetricRow,
   type ThirdPartyRow,
 } from '../lib/metrics-check';
+
+function filing(partial: Partial<CheckFilingMetric> & Pick<CheckFilingMetric, 'announcement_id' | 'title' | 'metric' | 'value' | 'unit'>): CheckFilingMetric {
+  return {
+    code: '002230',
+    name: '科大讯飞',
+    period: '2026H1',
+    status: 'online',
+    published_at: '2026-08-20T00:00:00.000Z',
+    parsed_at: '2026-08-21T00:00:00.000Z',
+    ...partial,
+  };
+}
+
+test('check uses the full report the reader opens, not a higher-confidence percent stub', () => {
+  const rows = pickCanonicalCheckRows([
+    filing({
+      announcement_id: 'stub',
+      title: '科大讯飞2026年半年度报告摘要',
+      metric: 'revenue',
+      value: 5,
+      unit: '%',
+      published_at: '2026-08-22T00:00:00.000Z',
+    }),
+    filing({
+      announcement_id: 'full',
+      title: '科大讯飞股份有限公司2026年半年度报告',
+      metric: 'revenue',
+      value: 11_623_000_000,
+      unit: '元',
+    }),
+    filing({
+      announcement_id: 'full',
+      title: '科大讯飞股份有限公司2026年半年度报告',
+      metric: 'net_profit',
+      value: -204_000_000,
+      unit: '元',
+    }),
+  ]);
+  const thirdParty: ThirdPartyRow[] = [
+    { code: '002230', name: '科大讯飞', period: '2026H1', revenueYi: 116.23, netProfitYi: -2.04, eps: -0.09, roe: -0.99 },
+  ];
+  const { cells } = buildCheckCells(thirdParty, rows);
+  const revenue = cells.find((cell) => cell.metric === 'revenue');
+  assert.equal(revenue?.status, 'OK');
+  assert.equal(revenue?.dbRaw, '11,623,000,000 元');
+  assert.ok(revenue?.dbConverted != null && Math.abs(revenue.dbConverted - 116.23) < 0.01);
+  assert.equal(currencyYiCandidates(5, '%').length, 0);
+  const onlyStub = buildCheckCells(thirdParty, [filing({
+    announcement_id: 'stub',
+    title: '科大讯飞2026年半年度报告摘要',
+    metric: 'revenue',
+    value: 5,
+    unit: '%',
+  })]);
+  const bad = onlyStub.cells.find((cell) => cell.metric === 'revenue');
+  assert.equal(bad?.status, 'BAD');
+  assert.equal(bad?.dbConverted, null);
+  assert.match(bad?.dbRaw ?? '', /5 %/);
+});
 
 test('currencyYiCandidates covers 元/千元/万元 mislabels', () => {
   const c = currencyYiCandidates(78025359, '元');

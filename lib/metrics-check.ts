@@ -4,6 +4,7 @@
  */
 
 import { matchesQuickSearch } from './admin-table-search';
+import { betterKeepCandidate, type DedupeCandidate } from './period-dedupe';
 
 export type CheckMetric = 'revenue' | 'net_profit' | 'eps' | 'roe';
 
@@ -24,6 +25,15 @@ export type DbMetricRow = {
   metric: CheckMetric;
   value: number;
   unit: string | null;
+};
+
+/** One stored metric plus the filing it came from, so check can follow the report the reader opens. */
+export type CheckFilingMetric = DbMetricRow & {
+  announcement_id: string;
+  title: string;
+  status?: string | null;
+  published_at: unknown;
+  parsed_at?: string | Date | null;
 };
 
 export type CheckStatus = 'OK' | 'BAD' | 'MISS';
@@ -88,10 +98,46 @@ export function thirdPartyValue(row: ThirdPartyRow, metric: CheckMetric): number
   return row.roe;
 }
 
+function isExplicitNonMoneyUnit(unit: string) {
+  return unit === '%' || unit === '％' || unit.includes('股');
+}
+
+/**
+ * One filing per code+period: the same full report the detail page keeps.
+ * A higher-confidence stub (for example 5%) must not replace that report.
+ */
+export function pickCanonicalCheckRows(rows: CheckFilingMetric[]): CheckFilingMetric[] {
+  const byFiling = new Map<string, CheckFilingMetric[]>();
+  for (const row of rows) {
+    if (!row.announcement_id) continue;
+    const list = byFiling.get(row.announcement_id) ?? [];
+    list.push(row);
+    byFiling.set(row.announcement_id, list);
+  }
+  const winnerByPeriod = new Map<string, DedupeCandidate>();
+  for (const [id, metrics] of byFiling) {
+    const head = metrics[0];
+    const candidate: DedupeCandidate = {
+      id,
+      code: head.code,
+      title: head.title,
+      status: head.status,
+      published_at: head.published_at,
+      parsed_at: head.parsed_at,
+      coreCount: new Set(metrics.map((item) => item.metric)).size,
+    };
+    const key = `${head.code}:${head.period}`;
+    winnerByPeriod.set(key, betterKeepCandidate(winnerByPeriod.get(key), candidate));
+  }
+  const keep = new Set([...winnerByPeriod.values()].map((row) => row.id));
+  return rows.filter((row) => keep.has(row.announcement_id));
+}
+
 /** Convert stored amount to 亿元 candidates, tolerating mislabeled 元/千元/万元. */
 export function currencyYiCandidates(value: number, unit: string | null | undefined): number[] {
   if (!Number.isFinite(value)) return [];
   const labeled = (unit ?? '').replace(/\s+/g, '');
+  if (isExplicitNonMoneyUnit(labeled)) return [];
   const set = new Set<number>();
   const labeledScale = MONEY_SCALE[labeled];
   if (labeledScale != null) set.add((value * labeledScale) / 1e8);
@@ -127,7 +173,8 @@ export function pickBestConverted(
     return { converted, ok: withinTolerance(converted, thirdParty, metric), relDiff };
   }
   const candidates = currencyYiCandidates(value, unit);
-  let best = candidates[0] ?? value / 1e8;
+  if (!candidates.length) return { converted: Number.NaN, ok: false, relDiff: 1 };
+  let best = candidates[0];
   let bestDiff = Math.abs(best - thirdParty);
   for (const c of candidates) {
     const d = Math.abs(c - thirdParty);
@@ -184,6 +231,7 @@ export function pickQ3Comparable(
   metric: CheckMetric,
 ): { converted: number; ok: boolean; relDiff: number; folded: boolean } {
   const alone = pickBestConverted(thirdParty, q3.value, q3.unit, metric);
+  if (!Number.isFinite(alone.converted)) return { converted: Number.NaN, ok: false, relDiff: 1, folded: false };
   if (alone.ok || !ADDITIVE_CHECK_METRICS.has(metric) || !h1 || !Number.isFinite(h1.value)) {
     return { ...alone, folded: false };
   }
@@ -353,7 +401,7 @@ export function buildCheckCells(
         metric,
         metricLabel: METRIC_LABEL[metric],
         thirdParty: third,
-        dbConverted: picked.converted,
+        dbConverted: Number.isFinite(picked.converted) ? picked.converted : null,
         dbRaw: formatRaw(db.value, db.unit),
         status,
         relDiff: picked.relDiff,

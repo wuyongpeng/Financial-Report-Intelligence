@@ -3,11 +3,11 @@ import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { TransactionSql } from 'postgres';
 import { getDb } from './db';
-import { buildCheckCells, CHECK_METRICS, ADDITIVE_CHECK_METRICS, h1PeriodForQ3,
-  type CheckMetric, type DbMetricRow, type ThirdPartyRow, type CheckCell } from './metrics-check';
+import { buildCheckCells, CHECK_METRICS, ADDITIVE_CHECK_METRICS, h1PeriodForQ3, pickCanonicalCheckRows,
+  type CheckMetric, type CheckFilingMetric, type ThirdPartyRow, type CheckCell } from './metrics-check';
 import type { CheckSnapshotCell } from './metrics-check-review';
 
-export type CheckDbRow = DbMetricRow & { announcement_id: string | null };
+export type CheckDbRow = CheckFilingMetric;
 
 function isFiniteOrNull(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value));
@@ -79,16 +79,18 @@ export async function loadCheckSnapshot(db: ReturnType<typeof getDb> | Transacti
   }
   const periods = [...periodSet];
   const dbRows = codes.length === 0 ? [] : await db<CheckDbRow[]>`
-    SELECT DISTINCT ON (m.code, m.period, m.metric) m.code, c.name, m.period, m.metric, m.value, m.unit, m.announcement_id
+    SELECT m.code, c.name, m.period, m.metric, m.value, m.unit, m.announcement_id,
+           a.title, a.status, a.published_at, a.parsed_at
     FROM financial_metrics m
+    JOIN announcements a ON a.id = m.announcement_id
     LEFT JOIN companies c ON c.code = m.code
     WHERE m.code IN ${db(codes)}
       AND m.period IN ${db(periods)}
       AND m.metric IN ${db(CHECK_METRICS)}
-    ORDER BY m.code, m.period, m.metric, m.confidence DESC NULLS LAST, m.created_at DESC NULLS LAST, m.announcement_id
+      AND a.status <> 'auto_skipped'
   `;
-  const normalized: CheckDbRow[] = dbRows
-    .filter((row): row is CheckDbRow => CHECK_METRICS.includes(row.metric as CheckMetric))
+  const normalized: CheckDbRow[] = pickCanonicalCheckRows(dbRows
+    .filter((row): row is CheckDbRow => CHECK_METRICS.includes(row.metric as CheckMetric) && Boolean(row.announcement_id))
     .map((row) => ({
       ...row,
       code: row.code,
@@ -97,7 +99,9 @@ export async function loadCheckSnapshot(db: ReturnType<typeof getDb> | Transacti
       metric: row.metric as CheckMetric,
       value: Number(row.value),
       unit: row.unit,
-    }));
+      title: row.title ?? '',
+      announcement_id: row.announcement_id,
+    })));
   const { cells, summary, periodNote } = buildCheckCells(thirdParty, normalized);
 
   return { cells: cells.map(cell => checkCellSnapshot(cell, normalized)), summary, periodNote, thirdPartyCount: thirdParty.length };
