@@ -2085,7 +2085,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
    * and becomes the next utterance. Restores barge-in lost in the app-global session refactor.
    */
   async function armBargeInAsr(_mode: 'speaking' | 'asking') {
-    if (!voiceConvRef.current || isFeedbackDrawerOpen()) return;
+    if (!voiceConvRef.current || isFeedbackDrawerOpen() || voiceApiRef.current.micMuted) return;
     clearVoiceFinalTimer();
     clearVoiceTurnTimers();
     pcmCaptureRef.current?.stop();
@@ -2180,6 +2180,19 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       voice.setSuppressAutoListen(false);
     }
   }
+
+  const micMuteEdgeRef = useRef(false);
+  useEffect(() => {
+    const wasMuted = micMuteEdgeRef.current;
+    micMuteEdgeRef.current = voice.micMuted;
+    if (wasMuted === voice.micMuted) return;
+    if (voice.micMuted) {
+      stopVoiceSession();
+      return;
+    }
+    if (!voice.active || !voiceConvRef.current) return;
+    if (voice.speaking || voice.busy) void armBargeInAsr(voice.speaking ? 'speaking' : 'asking');
+  });
 
   function draftAsk(text: string) {
     setQuestion(text);

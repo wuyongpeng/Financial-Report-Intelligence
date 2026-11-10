@@ -72,6 +72,7 @@ import { reflectReaderMemory } from '@/lib/reader-memory-client';
 import { MEMORY_CLEARED_EVENT, readerChatFields, readerHistory } from '@/lib/reader-prefs-client';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
 import { VoiceActivity, VoiceActivityStatus, voiceActivityState } from '@/components/voice-activity';
+import { VoiceMicButton } from '@/components/voice-mic-button';
 import '@/app/voice-float.css';
 import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { isVoiceFarewell, pickVoiceFarewellLine } from '@/lib/voice/farewell-intent';
@@ -2585,12 +2586,22 @@ export default function ReportHome() {
               onClick={() => setVoicePanelOpen((open) => !open)}
             >
               <VoiceActivity state={voiceActivityState(voice)} />
-              <VoiceActivityStatus state={voiceActivityState(voice)} readyHint={voice.readyHint} className="rh-eva-status" />
+              <VoiceActivityStatus
+                state={voiceActivityState(voice)}
+                readyHint={voice.readyHint && !voice.micMuted}
+                label={voice.micMuted ? '麦克风已关' : undefined}
+                className="rh-eva-status"
+              />
             </button>
             <div className="rh-eva-controls">
               <button type="button" className="rh-eva-control" aria-label={voicePanelOpen ? '收起语音对话' : '展开语音对话'} aria-expanded={voicePanelOpen} aria-controls="rh-eva-conversation" title="语音对话" onClick={() => setVoicePanelOpen((open) => !open)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8H4v-8a8 8 0 1 1 16 0Z" /><circle cx="8" cy="11.5" r=".8" fill="currentColor" stroke="none" /><circle cx="12" cy="11.5" r=".8" fill="currentColor" stroke="none" /><circle cx="16" cy="11.5" r=".8" fill="currentColor" stroke="none" /></svg>
               </button>
+              <VoiceMicButton
+                muted={voice.micMuted}
+                onClick={() => voice.toggleMic()}
+                className={`rh-eva-control${voice.micMuted ? ' is-muted' : ''}`}
+              />
               <button type="button" className="rh-eva-control is-end" aria-label="结束语音" title="结束语音" onClick={() => endHomeVoice()}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>

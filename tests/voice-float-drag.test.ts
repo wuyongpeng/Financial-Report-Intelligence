@@ -126,6 +126,9 @@ test('both voice floats share dragging; detail has one red X, quiet opt-in foote
   assert.ok(float.includes('useVoiceFloatDrag()') && float.includes('data-voice-drag-surface'));
   assert.equal((float.match(/aria-label="结束语音"/g) || []).length, 1);
   assert.ok(float.includes('className="eva-voice-end"'));
+  assert.ok(float.indexOf('eva-voice-mic') < float.indexOf('eva-voice-end'));
+  assert.ok(float.includes('麦克风已关，会话还在'));
+  assert.ok(!float.includes('M20 11.5a8'));
   assert.ok(!float.includes('说完了') && !float.includes('onFinalize'));
   assert.ok(float.includes('尽管提问，停顿即发送') && provider.includes('尽管提问，停顿即发送'));
   assert.ok(!float.includes('说出公司名称') && !provider.includes('说出公司名称'));

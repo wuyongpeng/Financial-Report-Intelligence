@@ -42,6 +42,7 @@
 .rh-home button.rh-eva-control:hover{background:#e6ebf2;color:#3064db}
 .rh-home button.rh-eva-control.is-end{background:#eb3047;color:#fff}
 .rh-home button.rh-eva-control.is-end:hover{background:#d9273d}
+.rh-home button.rh-eva-control.is-muted{color:#3064db}
 @media(max-width:600px){
   .rh-eva-dock{top:auto;bottom:calc(16px + env(safe-area-inset-bottom,0px));right:12px;flex-direction:column-reverse}
   .rh-eva-capsule{gap:10px;padding:8px 10px}

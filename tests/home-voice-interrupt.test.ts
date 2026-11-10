@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { HomeVoiceTurns, assertHomeVoiceTurn, acceptsHomeBargeSpeech } from '../lib/voice/home-turn';
 import { parseVoicePickChoice, parseVoiceJoinReply } from '../lib/home-voice-flow';
+import { VOICE_NO_SPEECH_MS } from '../lib/voice/timing';
 
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
@@ -92,6 +93,10 @@ test('provider barge mode is opt-in, owns a single serialized capture and fences
   assert.ok(provider.includes('if (handlerGen !== voiceGenRef.current || !activeRef.current) return'));
   assert.ok(provider.includes('callback.onInterrupt()'));
   assert.ok(provider.includes('if (!barge) voiceNoSpeechTimerRef.current'));
+  assert.ok(provider.includes('if (!activeRef.current || isFeedbackDrawerOpen() || micMutedRef.current) return'));
+  assert.ok(provider.includes('if (micMutedRef.current) return'));
+  assert.equal(VOICE_NO_SPEECH_MS, 180_000);
+  assert.ok(detail.includes('voiceApiRef.current.micMuted'));
   assert.ok(!detail.includes('voice.armBargeIn'));
   assert.ok(detail.includes("void armBargeInAsr('speaking')"));
 });
@@ -106,6 +111,8 @@ test('homepage uses cancellable AI/TTS and only latest turn may recover; compact
   assert.ok(!home.includes('rh-eva-panel-head'));
   assert.ok(home.includes('但说无妨...'));
   assert.ok(home.includes('className="rh-eva-control is-end"'));
+  assert.ok(home.indexOf('<VoiceMicButton') < home.indexOf('className="rh-eva-control is-end"'));
+  assert.ok(home.includes("voice.micMuted ? '麦克风已关'"));
   assert.ok(home.includes('voiceTurns.map'));
   assert.ok(!home.includes('setSearch(voice.partial)'));
 });

@@ -94,6 +94,10 @@ type VoiceSessionApi = {
   cancelArmedSend: () => void;
   /** Home hides the bottom float and uses its own voice dock. */
   setHideFloat: (hidden: boolean) => void;
+  /** Mic capture is paused; the voice session itself stays up. */
+  micMuted: boolean;
+  /** Close or reopen the microphone without ending the session. */
+  toggleMic: () => void;
   setReportAuditRisk: (risk: boolean) => void;
   clearToast: () => void;
 };
@@ -126,6 +130,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<string | null>(null);
   const [hideFloat, setHideFloat] = useState(false);
   const [reportAuditRisk, setReportAuditRisk] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
 
   const activeRef = useRef(false);
   const asrSessionRef = useRef<AsrSession | null>(null);
@@ -166,6 +171,12 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   const handleUtteranceRef = useRef<(raw: string) => Promise<void>>(async () => undefined);
   /** One auto-reconnect after mid-session ASR drop; reset on successful listen / explicit end. */
   const asrReconnectRef = useRef(0);
+  /** User paused capture to talk to someone else. Idle exit does not run while this is set. */
+  const micMutedRef = useRef(false);
+  const speakingRef = useRef(false);
+  const busyRef = useRef(false);
+  speakingRef.current = speaking;
+  busyRef.current = busy;
 
   const clearVoiceFinalTimer = useCallback(() => {
     if (voiceFinalTimerRef.current != null) {
@@ -241,6 +252,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     voiceEmptyTurnsRef.current = 0;
     welcomePendingRef.current = false;
     asrReconnectRef.current = 0;
+    micMutedRef.current = false;
+    setMicMuted(false);
     voiceGenRef.current += 1;
     clearArmTimer();
     releaseVoiceIo();
@@ -384,7 +397,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
   }, [clearArmTimer, clearVoiceFinalTimer, clearVoiceTurnTimers, end]);
 
   const listenTurn = useCallback(async (barge = false) => {
-    if (!activeRef.current || isFeedbackDrawerOpen()) return;
+    if (!activeRef.current || isFeedbackDrawerOpen() || micMutedRef.current) return;
     systemTtsAbortRef.current?.abort();
     systemTtsAbortRef.current = null;
     clearArmTimer();
@@ -656,15 +669,39 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     })();
   }, [releaseVoiceIo]);
 
+  const toggleMic = useCallback(() => {
+    if (!activeRef.current) return;
+    if (micMutedRef.current) {
+      micMutedRef.current = false;
+      setMicMuted(false);
+      if (speakingRef.current || busyRef.current || connectingRef.current || welcomeHoldRef.current) return;
+      void listenTurnRef.current();
+      return;
+    }
+    micMutedRef.current = true;
+    setMicMuted(true);
+    voiceGenRef.current += 1;
+    bargeRef.current = null;
+    bargeArmedRef.current = false;
+    clearArmTimer();
+    releaseVoiceIo();
+    connectingRef.current = false;
+    setConnecting(false);
+    setLinkFailed(false);
+    setListening(false);
+    voicePartialRef.current = '';
+    setPartialState('');
+  }, [clearArmTimer, releaseVoiceIo]);
+
   const resumeListen = useCallback(() => {
-    if (!activeRef.current || isFeedbackDrawerOpen()) return;
+    if (!activeRef.current || isFeedbackDrawerOpen() || micMutedRef.current) return;
     bargeRef.current = null;
     bargeArmedRef.current = false;
     void listenTurn();
   }, [listenTurn]);
 
   const armBargeIn = useCallback((onInterrupt: () => void, accept?: (text: string) => boolean) => {
-    if (!activeRef.current || isFeedbackDrawerOpen()) return;
+    if (!activeRef.current || isFeedbackDrawerOpen() || micMutedRef.current) return;
     bargeRef.current = { onInterrupt, accept };
     if (bargeArmedRef.current && (asrSessionRef.current || captureOpeningRef.current)) return;
     void listenTurn(true);
@@ -678,11 +715,19 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     }
     primeVoiceCues();
     if (activeRef.current) {
-      // Already in session — ensure we are listening.
+      // The homepage waveform stays available while muted; that click reopens the mic.
+      if (micMutedRef.current) {
+        micMutedRef.current = false;
+        setMicMuted(false);
+        if (!speaking && !busy && !connectingRef.current && !welcomeHoldRef.current) void listenTurn();
+        return;
+      }
       if (!listening && !speaking && !busy && !connectingRef.current) void listenTurn();
       return;
     }
     activeRef.current = true;
+    micMutedRef.current = false;
+    setMicMuted(false);
     voiceEmptyTurnsRef.current = 0;
     setActive(true);
     welcomePendingRef.current = readReaderPrefs().welcome;
@@ -731,6 +776,7 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
       if (suppressAutoListenRef.current) return;
       if (finalizingRef.current) return;
       if (welcomeHoldRef.current) return;
+      if (micMutedRef.current) return;
       if (asrSessionRef.current || pcmCaptureRef.current) return;
       void listenTurnRef.current();
     }, 1600);
@@ -778,11 +824,13 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
     cancelArmedSend,
     setHideFloat,
     setReportAuditRisk,
+    micMuted,
+    toggleMic,
     clearToast: () => setToast(null),
   }), [
-    active, listening, speaking, busy, arming, connecting, linkFailed, readyHint, partial, toast,
+    active, listening, speaking, busy, arming, connecting, linkFailed, readyHint, partial, toast, micMuted,
     start, end, setUtteranceHandler, setAsrCorrectContext, setFloatFooterExtra,
-    setPartial, setSuppressAutoListen, stopMic, resumeListen, armBargeIn, finalizeListen, cancelArmedSend,
+    setPartial, setSuppressAutoListen, stopMic, resumeListen, armBargeIn, finalizeListen, cancelArmedSend, toggleMic,
   ]);
 
   // Typed ask sets busy via detail page — must NOT open the float.
@@ -812,6 +860,8 @@ export function VoiceSessionProvider({ children }: { children: ReactNode }) {
                 ? '尽管提问，停顿即发送'
                 : undefined}
           onEnd={() => end()}
+          micMuted={micMuted}
+          onToggleMic={toggleMic}
           onCancelArm={arming ? () => cancelArmedSend() : undefined}
           footerExtra={floatFooterExtra}
         />

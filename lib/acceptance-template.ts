@@ -238,8 +238,8 @@ export const ACCEPTANCE_TEMPLATE: AcceptanceTemplateGroup[] = [
       {
         id: 'B18',
         title: '长时间不说话',
-        steps: '开着语音，大约 60 秒什么都不说。',
-        expected: '提示长时间未互动，并结束会话。',
+        steps: '开着语音，大约 3 分钟什么都不说。再开一次，点关闭按钮左边的麦克风，和旁边的人说几句，然后把麦克风打开。',
+        expected: '麦克风开着时，大约 3 分钟没说话会提示长时间未互动并结束会话。关掉麦克风后会话还在，旁边的话不会被当成提问；再打开后可以继续说。',
       },
       {
         id: 'B19',
@@ -402,7 +402,18 @@ export async function ensureAcceptanceTemplate() {
   await db.begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(62409011)`;
     const existing = await tx`SELECT id FROM acceptance_seed WHERE id = 1`;
-    if (existing.length) return;
+    if (existing.length) {
+      const idle = ACCEPTANCE_TEMPLATE.flatMap((group) => group.cases).find((item) => item.id === 'B18');
+      if (idle) {
+        await tx`
+          UPDATE acceptance_cases
+          SET steps = ${idle.steps}, expected = ${idle.expected}
+          WHERE title = ${`${idle.id} ${idle.title}`}
+            AND steps = ${'开着语音，大约 60 秒什么都不说。'}
+        `;
+      }
+      return;
+    }
     for (let groupIndex = 0; groupIndex < ACCEPTANCE_TEMPLATE.length; groupIndex += 1) {
       const group = ACCEPTANCE_TEMPLATE[groupIndex];
       const [created] = await tx<{ id: number | string }[]>`
