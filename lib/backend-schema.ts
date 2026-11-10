@@ -187,5 +187,45 @@ async function migrate() {
       FROM metrics_overview_acks
       ON CONFLICT (announcement_id) DO NOTHING
     `;
+    await tx`CREATE TABLE IF NOT EXISTS acceptance_groups (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE TABLE IF NOT EXISTS acceptance_cases (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT NOT NULL REFERENCES acceptance_groups(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      steps TEXT NOT NULL DEFAULT '',
+      expected TEXT NOT NULL DEFAULT '',
+      sort INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS acceptance_cases_group_idx ON acceptance_cases (group_id, sort, id)`;
+    await tx`CREATE TABLE IF NOT EXISTS acceptance_runs (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE TABLE IF NOT EXISTS acceptance_run_items (
+      id BIGSERIAL PRIMARY KEY,
+      run_id BIGINT NOT NULL REFERENCES acceptance_runs(id) ON DELETE CASCADE,
+      group_name TEXT NOT NULL,
+      title TEXT NOT NULL,
+      steps TEXT NOT NULL DEFAULT '',
+      expected TEXT NOT NULL DEFAULT '',
+      sort INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','pass','fail','blocked')),
+      note TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS acceptance_run_items_run_idx ON acceptance_run_items (run_id, sort, id)`;
+    await tx`ALTER TABLE acceptance_runs ADD COLUMN IF NOT EXISTS conclusion TEXT NOT NULL DEFAULT ''`;
+    await tx`CREATE TABLE IF NOT EXISTS acceptance_seed (
+      id INTEGER PRIMARY KEY,
+      seeded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
   });
 }
