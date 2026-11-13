@@ -1,24 +1,46 @@
 /* Shared one-shot hover pulse for home and detail voice icons.
-   Shorter bars travel more; the already-tall center bar barely scales so it stays inside the 24 viewBox.
+   Staggered delays create a left-to-right ripple. Shorter bars travel more;
+   the already-tall center bar barely scales so it stays inside the 24 viewBox.
    If animation is off or fails, bars stay at their static SVG sizes. */
-.rh-search-voice .rh-search-glyph rect,
-.cd-composer-voice .cd-composer-glyph rect{transform-box:fill-box;transform-origin:center;transform:scaleY(1)}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(1),
-.cd-composer-voice:hover:not(:disabled) .cd-composer-glyph rect:nth-child(1){animation:rh-voice-bar-1 .3s ease-out 1}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(2),
-.cd-composer-voice:hover:not(:disabled) .cd-composer-glyph rect:nth-child(2){animation:rh-voice-bar-2 .3s ease-out 1}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(3),
-.cd-composer-voice:hover:not(:disabled) .cd-composer-glyph rect:nth-child(3){animation:rh-voice-bar-3 .3s ease-out 1}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(4),
-.cd-composer-voice:hover:not(:disabled) .cd-composer-glyph rect:nth-child(4){animation:rh-voice-bar-4 .3s ease-out 1}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(5),
-.cd-composer-voice:hover:not(:disabled) .cd-composer-glyph rect:nth-child(5){animation:rh-voice-bar-5 .3s ease-out 1}
-@keyframes rh-voice-bar-1{0%,100%{transform:scaleY(1)}32%{transform:scaleY(1.48)}}
-@keyframes rh-voice-bar-2{0%,100%{transform:scaleY(1)}36%{transform:scaleY(1.2)}}
-@keyframes rh-voice-bar-3{0%,100%{transform:scaleY(1)}40%{transform:scaleY(1.08)}}
-@keyframes rh-voice-bar-4{0%,100%{transform:scaleY(1)}36%{transform:scaleY(1.32)}}
-@keyframes rh-voice-bar-5{0%,100%{transform:scaleY(1)}32%{transform:scaleY(1.14)}}
-@media(prefers-reduced-motion:reduce){
-  .rh-search-voice:hover:not(:disabled) .rh-search-glyph rect,
-  .cd-composer-voice:hover:not(:disabled) .cd-composer-glyph rect{animation:none}
+.rh-search-voice rect,
+.cd-composer-voice rect {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scaleY(1);
+}
+
+.rh-search-voice:hover:not(:disabled) rect,
+.cd-composer-voice:hover:not(:disabled) rect {
+  animation-duration: 0.4s;
+  animation-timing-function: ease-out;
+  animation-iteration-count: 1;
+  animation-fill-mode: forwards;
+}
+
+.rh-search-voice:hover:not(:disabled) rect:nth-child(1),
+.cd-composer-voice:hover:not(:disabled) rect:nth-child(1) { animation-name: rh-voice-bar-1; animation-delay: 0s; }
+
+.rh-search-voice:hover:not(:disabled) rect:nth-child(2),
+.cd-composer-voice:hover:not(:disabled) rect:nth-child(2) { animation-name: rh-voice-bar-2; animation-delay: 0.05s; }
+
+.rh-search-voice:hover:not(:disabled) rect:nth-child(3),
+.cd-composer-voice:hover:not(:disabled) rect:nth-child(3) { animation-name: rh-voice-bar-3; animation-delay: 0.10s; }
+
+.rh-search-voice:hover:not(:disabled) rect:nth-child(4),
+.cd-composer-voice:hover:not(:disabled) rect:nth-child(4) { animation-name: rh-voice-bar-4; animation-delay: 0.15s; }
+
+.rh-search-voice:hover:not(:disabled) rect:nth-child(5),
+.cd-composer-voice:hover:not(:disabled) rect:nth-child(5) { animation-name: rh-voice-bar-5; animation-delay: 0.20s; }
+
+@keyframes rh-voice-bar-1 { 0%, 100% { transform: scaleY(1); } 35% { transform: scaleY(1.48); } }
+@keyframes rh-voice-bar-2 { 0%, 100% { transform: scaleY(1); } 35% { transform: scaleY(1.2); } }
+@keyframes rh-voice-bar-3 { 0%, 100% { transform: scaleY(1); } 35% { transform: scaleY(1.08); } }
+@keyframes rh-voice-bar-4 { 0%, 100% { transform: scaleY(1); } 35% { transform: scaleY(1.32); } }
+@keyframes rh-voice-bar-5 { 0%, 100% { transform: scaleY(1); } 35% { transform: scaleY(1.14); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-search-voice:hover:not(:disabled) rect,
+  .cd-composer-voice:hover:not(:disabled) rect {
+    animation: none;
+  }
 }
