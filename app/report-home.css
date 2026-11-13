@@ -64,21 +64,6 @@
 .rh-home button.rh-search-cancel{background:#fff;color:#b45309;border:1px solid #f3d7a1;font-size:12px;font-weight:650}
 .rh-search-voice:hover:not(:disabled){background:#1e40af;color:#fff}
 .rh-search-voice .rh-search-glyph{width:20px;height:20px}
-/* Hover plays a one-shot, center-weighted pulse. If animation is off or fails, bars stay at their static SVG sizes. */
-.rh-search-voice .rh-search-glyph rect{transform-box:fill-box;transform-origin:center;transform:scaleY(1)}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(1){animation:rh-voice-bar-1 .55s ease-out 1}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(2){animation:rh-voice-bar-2 .55s ease-out 1}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(3){animation:rh-voice-bar-3 .55s ease-out 1}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(4){animation:rh-voice-bar-4 .55s ease-out 1}
-.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(5){animation:rh-voice-bar-5 .55s ease-out 1}
-@keyframes rh-voice-bar-1{0%,100%{transform:scaleY(1)}35%{transform:scaleY(1.18)}}
-@keyframes rh-voice-bar-2{0%,100%{transform:scaleY(1)}40%{transform:scaleY(1.32)}}
-@keyframes rh-voice-bar-3{0%,100%{transform:scaleY(1)}45%{transform:scaleY(1.5)}}
-@keyframes rh-voice-bar-4{0%,100%{transform:scaleY(1)}40%{transform:scaleY(1.32)}}
-@keyframes rh-voice-bar-5{0%,100%{transform:scaleY(1)}35%{transform:scaleY(1.18)}}
-@media(prefers-reduced-motion:reduce){
-  .rh-search-voice:hover:not(:disabled) .rh-search-glyph rect{animation:none}
-}
 .rh-search-send{background:#3064db;color:#fff;box-shadow:0 1px 2px #2754c033}
 .rh-search-send:hover:not(:disabled){background:#2754c0;transform:translateY(-1px);box-shadow:0 4px 10px #2754c033}
 .rh-search-send:active:not(:disabled){transform:translateY(0)}

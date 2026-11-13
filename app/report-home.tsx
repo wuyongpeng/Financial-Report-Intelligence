@@ -95,6 +95,7 @@ import {
 } from '@/lib/home-roster-snapshot';
 import { Icon, type IconName } from './ui-icons';
 import './report-home.css';
+import './voice-glyph.css';
 
 type SortMode = 'default' | 'popular' | 'added';
 type ViewMode = 'grid' | 'list';

@@ -81,14 +81,25 @@ test('home voice capsule has no six-dot drag handle and status width is reserved
 
 test('search voice icon keeps static bars and only pulses once on hover, with a reduced-motion fallback', () => {
   const home = source('../app/report-home.tsx');
-  const css = source('../app/report-home.css');
-  assert.ok(home.includes('x="2.2" y="9" width="2.8" height="6"'));
-  assert.ok(home.includes('x="10.6" y="2" width="2.8" height="20"'));
-  assert.ok(home.includes('x="19" y="4.2" width="2.8" height="15.6"'));
-  assert.ok(css.includes('.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(3){animation:rh-voice-bar-3 .55s ease-out 1}'));
-  assert.ok(css.includes('@keyframes rh-voice-bar-3{0%,100%{transform:scaleY(1)}45%{transform:scaleY(1.5)}}'));
+  const detail = source('../app/company-detail.tsx');
+  const css = source('../app/voice-glyph.css');
+  const homeCss = source('../app/report-home.css');
+  assert.ok(home.includes("import './voice-glyph.css'"));
+  assert.ok(detail.includes("import './voice-glyph.css'"));
+  for (const src of [home, detail]) {
+    assert.ok(src.includes('x="2.2" y="9" width="2.8" height="6"'));
+    assert.ok(src.includes('x="10.6" y="2" width="2.8" height="20"'));
+    assert.ok(src.includes('x="19" y="4.2" width="2.8" height="15.6"'));
+  }
+  assert.ok(css.includes('.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(3)'));
+  assert.ok(css.includes('.cd-composer-voice:hover:not(:disabled) .cd-composer-glyph rect:nth-child(3)'));
+  assert.ok(css.includes('animation:rh-voice-bar-3 .3s ease-out 1}'));
+  assert.ok(css.includes('@keyframes rh-voice-bar-3{0%,100%{transform:scaleY(1)}40%{transform:scaleY(1.08)}}'));
+  assert.ok(css.includes('@keyframes rh-voice-bar-1{0%,100%{transform:scaleY(1)}32%{transform:scaleY(1.48)}}'));
   assert.ok(css.includes('@media(prefers-reduced-motion:reduce)'));
-  assert.ok(css.includes('.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect{animation:none}'));
+  assert.ok(css.includes('.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect'));
+  assert.ok(css.includes('.cd-composer-voice:hover:not(:disabled) .cd-composer-glyph rect{animation:none}'));
   assert.ok(!css.includes('animation-iteration-count:infinite'));
   assert.ok(!css.includes('infinite)'));
+  assert.ok(!homeCss.includes('rh-voice-bar'));
 });

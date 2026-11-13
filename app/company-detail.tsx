@@ -61,6 +61,7 @@ import { speakAnswer, pauseVoiceTts, resumeVoiceTts, isVoiceTtsPaused, hasVoiceT
 import { isReportReadingGuideQuestion, REPORT_READING_GUIDE, isUnnamedPeerCompare, isDataDoubtQuestion, UNNAMED_PEER_REPLY, DATA_DOUBT_REPLY } from '@/lib/report-reading-guide';
 import { isHomeProductGuideQuestion } from '@/lib/home-roster-intent';
 import './company-detail.css';
+import './voice-glyph.css';
 
 type Outline = { pageLabels?: PdfPageLabel[]; indexedPages: number; pages: { page: number; content: string }[]; outline: { id: string; title: string; page: number; highlight: string }[] };
 type Peer = { code: string; company_name: string; metric: string; value: number; unit: string };
