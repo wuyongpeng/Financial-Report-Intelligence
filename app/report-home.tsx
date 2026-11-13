@@ -1968,8 +1968,8 @@ export default function ReportHome() {
             <button
               className="rh-search-submit rh-search-voice"
               type="button"
-              aria-label="语音提问"
-              title="语音提问"
+              aria-label="发起语音聊天"
+              title="发起语音聊天"
               onClick={() => {
                 setVoicePanelOpen(false); // A fresh session never unfolds old history.
                 searchEditedDuringVoiceRef.current = false;

@@ -3394,8 +3394,8 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 <button
                   type="button"
                   className="cd-composer-btn cd-composer-voice"
-                  aria-label="进入语音模式"
-                  title="进入语音模式"
+                  aria-label="发起语音聊天"
+                  title="发起语音聊天"
                   disabled={memoryLoading}
                   onClick={() => { void startVoiceMode(); }}
                 >
