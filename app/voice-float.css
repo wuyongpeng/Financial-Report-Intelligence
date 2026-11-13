@@ -17,7 +17,6 @@
 .eva-voice-float-jump{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:400;color:#6b7789;cursor:pointer}
 .eva-voice-float-jump input{width:12px;height:12px;margin:0;accent-color:#3064db;cursor:pointer}
 .eva-voice-cancel{margin-left:auto;border:1px solid #d5dde8;background:#f7faff;color:#3d5f9a;border-radius:999px;min-height:32px;padding:4px 12px;font-size:12px;cursor:pointer}
-.eva-voice-drag-handle{font-size:17px;line-height:1;color:#a4afbd;flex:none;cursor:grab;user-select:none}
 
 /* Shared rounded voice identity; never replaces the product logo. */
 .eva-voice-activity{display:inline-flex;align-items:center;gap:14px;flex:none;color:#2784f5}

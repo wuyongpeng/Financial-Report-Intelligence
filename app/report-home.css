@@ -28,7 +28,7 @@
 .rh-home-answer p{margin:0;font-size:14px;line-height:1.7;color:#334155;white-space:pre-wrap}
 .rh-home-answer-dismiss{position:absolute;top:10px;right:10px;border:0;background:transparent;color:#8494ab;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;padding:0}
 .rh-home-answer-dismiss:hover{background:#e2eaf8;color:#475569}
-.rh-eva-dock{box-sizing:border-box;width:min(400px,calc(100vw - 24px));min-width:0;max-height:calc(100dvh - 16px);position:fixed;top:72px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:stretch;gap:0;max-width:calc(100vw - 24px)}
+.rh-eva-dock{box-sizing:border-box;width:min(440px,calc(100vw - 24px));min-width:0;max-height:calc(100dvh - 16px);position:fixed;top:72px;right:22px;z-index:40;display:flex;flex-direction:column;align-items:stretch;gap:0;max-width:calc(100vw - 24px)}
 .rh-eva-dock.is-active{overflow:hidden;background:#fff;border:1px solid #e8edf3;border-radius:999px;box-shadow:0 6px 24px #24344c12,0 1px 3px #24344c08}
 .rh-eva-dock.is-active:has(.rh-eva-notice){border-radius:28px}
 .rh-eva-dock.is-active .rh-eva-notice{contain:inline-size;box-sizing:border-box;min-width:0;width:100%;overflow-wrap:anywhere;max-width:none;max-height:25dvh;overflow:auto;flex-shrink:0;border:0;border-top:1px solid #edf0f4;border-radius:0;box-shadow:none}
@@ -64,6 +64,21 @@
 .rh-home button.rh-search-cancel{background:#fff;color:#b45309;border:1px solid #f3d7a1;font-size:12px;font-weight:650}
 .rh-search-voice:hover:not(:disabled){background:#1e40af;color:#fff}
 .rh-search-voice .rh-search-glyph{width:20px;height:20px}
+/* Hover plays a one-shot, center-weighted pulse. If animation is off or fails, bars stay at their static SVG sizes. */
+.rh-search-voice .rh-search-glyph rect{transform-box:fill-box;transform-origin:center;transform:scaleY(1)}
+.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(1){animation:rh-voice-bar-1 .55s ease-out 1}
+.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(2){animation:rh-voice-bar-2 .55s ease-out 1}
+.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(3){animation:rh-voice-bar-3 .55s ease-out 1}
+.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(4){animation:rh-voice-bar-4 .55s ease-out 1}
+.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(5){animation:rh-voice-bar-5 .55s ease-out 1}
+@keyframes rh-voice-bar-1{0%,100%{transform:scaleY(1)}35%{transform:scaleY(1.18)}}
+@keyframes rh-voice-bar-2{0%,100%{transform:scaleY(1)}40%{transform:scaleY(1.32)}}
+@keyframes rh-voice-bar-3{0%,100%{transform:scaleY(1)}45%{transform:scaleY(1.5)}}
+@keyframes rh-voice-bar-4{0%,100%{transform:scaleY(1)}40%{transform:scaleY(1.32)}}
+@keyframes rh-voice-bar-5{0%,100%{transform:scaleY(1)}35%{transform:scaleY(1.18)}}
+@media(prefers-reduced-motion:reduce){
+  .rh-search-voice:hover:not(:disabled) .rh-search-glyph rect{animation:none}
+}
 .rh-search-send{background:#3064db;color:#fff;box-shadow:0 1px 2px #2754c033}
 .rh-search-send:hover:not(:disabled){background:#2754c0;transform:translateY(-1px);box-shadow:0 4px 10px #2754c033}
 .rh-search-send:active:not(:disabled){transform:translateY(0)}

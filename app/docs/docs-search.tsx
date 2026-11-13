@@ -53,7 +53,6 @@ export default function DocsSearch({
 }) {
   const router = useRouter();
   const listId = useId();
-  const [scope, setScope] = useState<'all' | 'current'>('all');
   const [query, setQuery] = useState(initialQuery);
   const [open, setOpen] = useState(false);
 
@@ -80,8 +79,8 @@ export default function DocsSearch({
   }, [initialQuery, activeName]);
 
   const hits = useMemo(
-    () => searchProductDocuments(documents, query, { onlyName: scope === 'current' ? activeName : null }),
-    [documents, query, scope, activeName],
+    () => searchProductDocuments(documents, query),
+    [documents, query],
   );
 
   function go(name: string, text: string) {
@@ -104,14 +103,6 @@ export default function DocsSearch({
         if (first) go(first.name, query);
       }}
     >
-      <select
-        aria-label="搜索范围"
-        value={scope}
-        onChange={(event) => setScope(event.target.value === 'current' ? 'current' : 'all')}
-      >
-        <option value="all">全部</option>
-        <option value="current">本文</option>
-      </select>
       <input
         type="search"
         value={query}

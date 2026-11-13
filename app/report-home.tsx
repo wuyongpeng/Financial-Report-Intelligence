@@ -2558,7 +2558,6 @@ export default function ReportHome() {
       {(voice.active || voice.toast) && (
         <div ref={voiceDockRef} className={`rh-eva-dock${voice.active ? ' is-active' : ''}${voicePanelOpen ? ' is-open' : ''}`}>
           {voice.active && <div className="rh-eva-capsule" data-voice-drag-surface="" title="拖动可移动位置">
-            <span className="eva-voice-drag-handle" aria-hidden="true">⠿</span>
             <button
               type="button"
               className="rh-eva-activity-toggle"

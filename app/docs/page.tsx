@@ -45,17 +45,18 @@ export default async function DocumentsPage({ searchParams }: {
   return (
     <main className="eva-docs">
       <header className="eva-docs-header">
-        <nav className="eva-docs-crumb" aria-label="面包屑">
-          <Link href={documentHref(DEFAULT_DOC)}>文档中心</Link>
-          <span aria-hidden="true">&gt;</span>
-          <span aria-current="page">{document.title}</span>
-        </nav>
         <div className="eva-docs-header-bar">
-          <h1>文档中心</h1>
+          <div className="eva-docs-heading">
+            <h1>文档中心</h1>
+            <nav className="eva-docs-crumb" aria-label="面包屑">
+              <Link href={documentHref(DEFAULT_DOC)}>文档中心</Link>
+              <span aria-hidden="true">&gt;</span>
+              <span aria-current="page">{document.title}</span>
+            </nav>
+          </div>
           <DocsSearch documents={corpus} activeName={document.name} initialQuery={query ?? ''} />
           <Link href="/" className="eva-docs-home">返回首页</Link>
         </div>
-        <p>产品介绍 · 设计理念 · 财报分析说明 · 技术架构</p>
       </header>
       <div className="eva-docs-layout is-reading">
         <nav className="eva-docs-nav" aria-label="文档列表">

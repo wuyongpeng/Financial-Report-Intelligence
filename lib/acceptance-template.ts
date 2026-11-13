@@ -25,7 +25,7 @@ export const ACCEPTANCE_TEMPLATE: AcceptanceTemplateGroup[] = [
         id: '0.0',
         title: '本轮样例',
         steps: '主样例用贵州茅台 600519。池外备选东鹏饮料 605499；若已在池，改用百润 002568。',
-        expected: '删除密码是 EVA，区分大小写。结果记为未测、通过、未通过、阻塞。语音入口不通时，B 组整组标阻塞。',
+        expected: '删除时需输入正确密码，区分大小写。结果记为未测、通过、未通过、阻塞。语音入口不通时，B 组整组标阻塞。',
       },
       {
         id: '0.1',
@@ -290,8 +290,8 @@ export const ACCEPTANCE_TEMPLATE: AcceptanceTemplateGroup[] = [
       {
         id: 'D1',
         title: '入口与删除密码',
-        steps: '直接打开 /admin/metrics。再找一处删除，先输错密码，再输入 EVA。',
-        expected: '运营页不用登录。导航有数据采集、解析总览、指标核对、访问审计、用户调研、反馈收集。错密码删不掉，EVA 才能删。',
+        steps: '直接打开 /admin/metrics。再找一处删除，先输错密码，再输入正确密码。',
+        expected: '运营页不用登录。导航有数据采集、解析总览、指标核对、访问审计、用户调研、反馈收集。错密码删不掉，输入正确密码才能删。',
       },
       {
         id: 'D2',
@@ -320,7 +320,7 @@ export const ACCEPTANCE_TEMPLATE: AcceptanceTemplateGroup[] = [
       {
         id: 'D6',
         title: '删除错抓',
-        steps: '对一条错抓报告点删除，输入 EVA 确认。',
+        steps: '对一条错抓报告点删除，输入正确密码确认。',
         expected: '这一行从列表消失。',
       },
       {

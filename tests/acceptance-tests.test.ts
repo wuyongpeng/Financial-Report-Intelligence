@@ -28,7 +28,8 @@ test('initial template keeps the workbook cases and can be trimmed', () => {
   assert.ok(ACCEPTANCE_TEMPLATE.reduce((sum, group) => sum + group.cases.length, 0) >= 40);
   const joined = ACCEPTANCE_TEMPLATE.flatMap((group) => group.cases.flatMap((item) => [item.steps, item.expected])).join('\n');
   assert.match(joined, /600519/);
-  assert.match(joined, /EVA/);
+  assert.match(joined, /正确密码/);
+  assert.doesNotMatch(joined, /EVA/);
   assert.match(joined, /大约 3 分钟没说话/);
   assert.doesNotMatch(joined, /大约 60 秒什么都不说/);
   assert.doesNotMatch(joined, /五页/);

@@ -134,3 +134,17 @@ test('indicator linkage retains honest empty and missing-data states', () => {
   const none = renderToStaticMarkup(createElement(MetricLinkage, { result: { status: 'checked_none', cards: [] } }));
   assert.match(none, /已检查的关系未发现明显背离/);
 });
+
+test('docs header title sits above the breadcrumb, drops the duplicate nav line, and searches the full library', async () => {
+  const page = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../app/docs/page.tsx', import.meta.url), 'utf8'));
+  const search = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../app/docs/docs-search.tsx', import.meta.url), 'utf8'));
+  const css = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../app/docs/docs.css', import.meta.url), 'utf8'));
+  assert.doesNotMatch(page, /产品介绍 · 设计理念 · 财报分析说明 · 技术架构/);
+  const titleAt = page.indexOf('<h1>文档中心</h1>');
+  const crumbAt = page.indexOf('aria-label="面包屑"');
+  assert.ok(titleAt >= 0 && crumbAt > titleAt);
+  assert.doesNotMatch(search, /搜索范围|全部|本文|setScope|onlyName/);
+  assert.match(search, /searchProductDocuments\(documents, query\)/);
+  assert.match(css, /\.eva-docs-heading\{display:flex;flex-direction:column/);
+  assert.doesNotMatch(css, /eva-docs-search select/);
+});

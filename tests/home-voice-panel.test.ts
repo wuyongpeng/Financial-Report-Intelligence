@@ -57,7 +57,7 @@ test('header and questions live inside one draggable styled shell, not separate 
 test('all voice phases use one fixed viewport-bounded width, never intrinsic text or open-state width', () => {
   const css = source('../app/report-home.css');
   const rule = (selector: string) => css.split('\n').find(line => line.startsWith(selector + '{')) || '';
-  assert.ok(rule('.rh-eva-dock').includes('width:min(400px,calc(100vw - 24px))'));
+  assert.ok(rule('.rh-eva-dock').includes('width:min(440px,calc(100vw - 24px))'));
   assert.ok(!rule('.rh-eva-dock').includes('max-content'));
   assert.ok(!rule('.rh-eva-dock.is-open').includes('width:'));
   assert.ok(rule('.rh-eva-capsule').includes('width:100%'));
@@ -68,4 +68,27 @@ test('all voice phases use one fixed viewport-bounded width, never intrinsic tex
   const drag = source('../lib/voice/float-drag.ts');
   assert.ok(!drag.includes("width: `${"), 'drag only moves the shell; it cannot size it from content');
 
+});
+
+test('home voice capsule has no six-dot drag handle and status width is reserved by a slightly wider shell', () => {
+  const home = source('../app/report-home.tsx');
+  const css = source('../app/report-home.css');
+  assert.ok(!home.includes('eva-voice-drag-handle'));
+  assert.ok(!home.includes('⠿'));
+  assert.ok(!css.includes('eva-voice-drag-handle'));
+  assert.ok(css.includes('width:min(440px,calc(100vw - 24px))'));
+});
+
+test('search voice icon keeps static bars and only pulses once on hover, with a reduced-motion fallback', () => {
+  const home = source('../app/report-home.tsx');
+  const css = source('../app/report-home.css');
+  assert.ok(home.includes('x="2.2" y="9" width="2.8" height="6"'));
+  assert.ok(home.includes('x="10.6" y="2" width="2.8" height="20"'));
+  assert.ok(home.includes('x="19" y="4.2" width="2.8" height="15.6"'));
+  assert.ok(css.includes('.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect:nth-child(3){animation:rh-voice-bar-3 .55s ease-out 1}'));
+  assert.ok(css.includes('@keyframes rh-voice-bar-3{0%,100%{transform:scaleY(1)}45%{transform:scaleY(1.5)}}'));
+  assert.ok(css.includes('@media(prefers-reduced-motion:reduce)'));
+  assert.ok(css.includes('.rh-search-voice:hover:not(:disabled) .rh-search-glyph rect{animation:none}'));
+  assert.ok(!css.includes('animation-iteration-count:infinite'));
+  assert.ok(!css.includes('infinite)'));
 });
