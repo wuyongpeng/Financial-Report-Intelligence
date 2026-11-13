@@ -1,3 +1,4 @@
+import type { TransactionSql } from 'postgres';
 import { DISCARD_CONFIRM_PASSWORD, redactDiscardPasswordCopy } from './discard-password';
 import { getDb } from './db';
 
@@ -397,9 +398,7 @@ export function acceptanceTemplateIds() {
   return ACCEPTANCE_TEMPLATE.flatMap((group) => group.cases.map((item) => item.id));
 }
 
-async function scrubDiscardPasswordInAcceptanceCopy(tx: {
-  <T = unknown>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T>;
-}) {
+async function scrubDiscardPasswordInAcceptanceCopy(tx: TransactionSql) {
   const like = `%${DISCARD_CONFIRM_PASSWORD}%`;
   const cases = await tx<{ id: number; title: string; steps: string; expected: string }[]>`
     SELECT id, title, steps, expected FROM acceptance_cases
