@@ -16,6 +16,8 @@ test('hidden acceptance page is not linked from the ops nav', async () => {
   assert.match(await source('lib/backend-schema.ts'), /CREATE TABLE IF NOT EXISTS acceptance_seed/);
   assert.match(await source('lib/backend-schema.ts'), /ADD COLUMN IF NOT EXISTS conclusion/);
   assert.match(await source('app/api/admin/tests/route.ts'), /ensureAcceptanceTemplate\(\)/);
+  assert.match(await source('lib/acceptance-template.ts'), /scrubDiscardPasswordInAcceptanceCopy/);
+  assert.match(await source('app/api/admin/tests/route.ts'), /redactDiscardPasswordCopy/);
 });
 
 test('initial template keeps the workbook cases and can be trimmed', () => {

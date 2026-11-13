@@ -4,7 +4,7 @@ import { ensureAcceptanceTemplate } from '@/lib/acceptance-template';
 import { ApiError, apiError, readObject } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
-import { matchesDiscardPassword } from '@/lib/discard-password';
+import { matchesDiscardPassword, redactDiscardPasswordCopy } from '@/lib/discard-password';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,15 +100,15 @@ async function snapshot() {
       name: group.name,
       cases: (byGroup.get(num(group.id)) ?? []).map((item) => ({
         id: num(item.id),
-        title: item.title,
-        steps: item.steps,
-        expected: item.expected,
+        title: redactDiscardPasswordCopy(item.title),
+        steps: redactDiscardPasswordCopy(item.steps),
+        expected: redactDiscardPasswordCopy(item.expected),
       })),
     })),
     runs: runs.map((run) => ({
       id: num(run.id),
-      title: run.title,
-      note: run.note,
+      title: redactDiscardPasswordCopy(run.title),
+      note: redactDiscardPasswordCopy(run.note),
       createdAt: iso(run.created_at),
       total: Number(run.total),
       pass: Number(run.pass),
@@ -144,18 +144,18 @@ export async function GET(request: Request) {
       ...data,
       run: {
         id: num(run.id),
-        title: run.title,
-        note: run.note,
-        conclusion: run.conclusion ?? '',
+        title: redactDiscardPasswordCopy(run.title),
+        note: redactDiscardPasswordCopy(run.note),
+        conclusion: redactDiscardPasswordCopy(run.conclusion ?? ''),
         createdAt: iso(run.created_at),
         items: items.map((item) => ({
           id: num(item.id),
           groupName: item.group_name,
-          title: item.title,
-          steps: item.steps,
-          expected: item.expected,
+          title: redactDiscardPasswordCopy(item.title),
+          steps: redactDiscardPasswordCopy(item.steps),
+          expected: redactDiscardPasswordCopy(item.expected),
           status: acceptanceStatus(item.status) ?? 'pending',
-          note: item.note,
+          note: redactDiscardPasswordCopy(item.note),
           updatedAt: iso(item.updated_at),
         })),
       },
@@ -202,9 +202,9 @@ export async function POST(request: Request) {
       await db`DELETE FROM acceptance_groups WHERE id = ${id}`;
     } else if (body.op === 'case.create') {
       const groupId = positiveId(body.groupId, '分组');
-      const title = text(body.title, '用例名称', 200, true);
-      const steps = text(body.steps, '步骤', 4000, false);
-      const expected = text(body.expected, '期望', 4000, false);
+      const title = redactDiscardPasswordCopy(text(body.title, '用例名称', 200, true));
+      const steps = redactDiscardPasswordCopy(text(body.steps, '步骤', 4000, false));
+      const expected = redactDiscardPasswordCopy(text(body.expected, '期望', 4000, false));
       const groups = await db`SELECT id FROM acceptance_groups WHERE id = ${groupId}`;
       if (!groups.length) throw new ApiError(404, '分组不存在');
       await db`
@@ -216,9 +216,9 @@ export async function POST(request: Request) {
       `;
     } else if (body.op === 'case.update') {
       const id = positiveId(body.id, '用例');
-      const title = text(body.title, '用例名称', 200, true);
-      const steps = text(body.steps, '步骤', 4000, false);
-      const expected = text(body.expected, '期望', 4000, false);
+      const title = redactDiscardPasswordCopy(text(body.title, '用例名称', 200, true));
+      const steps = redactDiscardPasswordCopy(text(body.steps, '步骤', 4000, false));
+      const expected = redactDiscardPasswordCopy(text(body.expected, '期望', 4000, false));
       const updated = await db`
         UPDATE acceptance_cases SET title = ${title}, steps = ${steps}, expected = ${expected}
         WHERE id = ${id} RETURNING id
@@ -244,9 +244,9 @@ export async function POST(request: Request) {
       });
     } else if (body.op === 'run.update') {
       const id = positiveId(body.id, '测试记录');
-      const title = text(body.title, '测试名称', 120, true);
-      const note = text(body.note, '整轮说明', 4000, false);
-      const conclusionText = text(body.conclusion, '测试结论', 4000, false);
+      const title = redactDiscardPasswordCopy(text(body.title, '测试名称', 120, true));
+      const note = redactDiscardPasswordCopy(text(body.note, '整轮说明', 4000, false));
+      const conclusionText = redactDiscardPasswordCopy(text(body.conclusion, '测试结论', 4000, false));
       const updated = await db`
         UPDATE acceptance_runs SET title = ${title}, note = ${note}, conclusion = ${conclusionText}
         WHERE id = ${id} RETURNING id
@@ -264,7 +264,7 @@ export async function POST(request: Request) {
       const id = positiveId(body.id, '用例');
       const status = acceptanceStatus(body.status);
       if (!status) throw new ApiError(400, '结果状态无效');
-      const note = text(body.note, '记录', 4000, false);
+      const note = redactDiscardPasswordCopy(text(body.note, '记录', 4000, false));
       const updated = await db<{ run_id: number }[]>`
         UPDATE acceptance_run_items
         SET status = ${status}, note = ${note}, updated_at = NOW()

@@ -1,3 +1,4 @@
+import { DISCARD_CONFIRM_PASSWORD, redactDiscardPasswordCopy } from './discard-password';
 import { getDb } from './db';
 
 export type AcceptanceTemplateCase = {
@@ -396,13 +397,83 @@ export function acceptanceTemplateIds() {
   return ACCEPTANCE_TEMPLATE.flatMap((group) => group.cases.map((item) => item.id));
 }
 
+async function scrubDiscardPasswordInAcceptanceCopy(tx: {
+  <T = unknown>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T>;
+}) {
+  const like = `%${DISCARD_CONFIRM_PASSWORD}%`;
+  const cases = await tx<{ id: number; title: string; steps: string; expected: string }[]>`
+    SELECT id, title, steps, expected FROM acceptance_cases
+    WHERE title LIKE ${like} OR steps LIKE ${like} OR expected LIKE ${like}
+  `;
+  for (const row of cases) {
+    const title = redactDiscardPasswordCopy(row.title);
+    const steps = redactDiscardPasswordCopy(row.steps);
+    const expected = redactDiscardPasswordCopy(row.expected);
+    if (title !== row.title || steps !== row.steps || expected !== row.expected) {
+      await tx`
+        UPDATE acceptance_cases
+        SET title = ${title}, steps = ${steps}, expected = ${expected}
+        WHERE id = ${row.id}
+      `;
+    }
+  }
+  const items = await tx<{ id: number; title: string; steps: string; expected: string; note: string }[]>`
+    SELECT id, title, steps, expected, note FROM acceptance_run_items
+    WHERE title LIKE ${like} OR steps LIKE ${like} OR expected LIKE ${like} OR note LIKE ${like}
+  `;
+  for (const row of items) {
+    const title = redactDiscardPasswordCopy(row.title);
+    const steps = redactDiscardPasswordCopy(row.steps);
+    const expected = redactDiscardPasswordCopy(row.expected);
+    const note = redactDiscardPasswordCopy(row.note);
+    if (title !== row.title || steps !== row.steps || expected !== row.expected || note !== row.note) {
+      await tx`
+        UPDATE acceptance_run_items
+        SET title = ${title}, steps = ${steps}, expected = ${expected}, note = ${note}
+        WHERE id = ${row.id}
+      `;
+    }
+  }
+  const runs = await tx<{ id: number; title: string; note: string; conclusion: string }[]>`
+    SELECT id, title, note, conclusion FROM acceptance_runs
+    WHERE title LIKE ${like} OR note LIKE ${like} OR conclusion LIKE ${like}
+  `;
+  for (const row of runs) {
+    const title = redactDiscardPasswordCopy(row.title);
+    const note = redactDiscardPasswordCopy(row.note);
+    const conclusion = redactDiscardPasswordCopy(row.conclusion ?? '');
+    if (title !== row.title || note !== row.note || conclusion !== (row.conclusion ?? '')) {
+      await tx`
+        UPDATE acceptance_runs
+        SET title = ${title}, note = ${note}, conclusion = ${conclusion}
+        WHERE id = ${row.id}
+      `;
+    }
+  }
+}
+
 /** Insert the template the first time. A later wipe of groups does not bring it back. */
 export async function ensureAcceptanceTemplate() {
   const db = getDb();
   await db.begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(62409011)`;
     const existing = await tx`SELECT id FROM acceptance_seed WHERE id = 1`;
-    if (existing.length) {
+    if (!existing.length) {
+      for (let groupIndex = 0; groupIndex < ACCEPTANCE_TEMPLATE.length; groupIndex += 1) {
+        const group = ACCEPTANCE_TEMPLATE[groupIndex];
+        const [created] = await tx<{ id: number | string }[]>`
+          INSERT INTO acceptance_groups (name, sort) VALUES (${group.name}, ${groupIndex + 1}) RETURNING id
+        `;
+        for (let caseIndex = 0; caseIndex < group.cases.length; caseIndex += 1) {
+          const item = group.cases[caseIndex];
+          await tx`
+            INSERT INTO acceptance_cases (group_id, title, steps, expected, sort)
+            VALUES (${created.id}, ${`${item.id} ${item.title}`}, ${item.steps}, ${item.expected}, ${caseIndex + 1})
+          `;
+        }
+      }
+      await tx`INSERT INTO acceptance_seed (id) VALUES (1)`;
+    } else {
       const idle = ACCEPTANCE_TEMPLATE.flatMap((group) => group.cases).find((item) => item.id === 'B18');
       if (idle) {
         await tx`
@@ -412,21 +483,7 @@ export async function ensureAcceptanceTemplate() {
             AND steps = ${'开着语音，大约 60 秒什么都不说。'}
         `;
       }
-      return;
     }
-    for (let groupIndex = 0; groupIndex < ACCEPTANCE_TEMPLATE.length; groupIndex += 1) {
-      const group = ACCEPTANCE_TEMPLATE[groupIndex];
-      const [created] = await tx<{ id: number | string }[]>`
-        INSERT INTO acceptance_groups (name, sort) VALUES (${group.name}, ${groupIndex + 1}) RETURNING id
-      `;
-      for (let caseIndex = 0; caseIndex < group.cases.length; caseIndex += 1) {
-        const item = group.cases[caseIndex];
-        await tx`
-          INSERT INTO acceptance_cases (group_id, title, steps, expected, sort)
-          VALUES (${created.id}, ${`${item.id} ${item.title}`}, ${item.steps}, ${item.expected}, ${caseIndex + 1})
-        `;
-      }
-    }
-    await tx`INSERT INTO acceptance_seed (id) VALUES (1)`;
+    await scrubDiscardPasswordInAcceptanceCopy(tx);
   });
 }
