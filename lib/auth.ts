@@ -45,10 +45,13 @@ function safeEqual(leftValue: string, rightValue: string) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** Default competition password is EVA; ADMIN_PASSWORD overrides it when set. */
+/** Default competition password is EVA; a non-empty ADMIN_PASSWORD is also accepted. */
 export function validAdminPassword(candidate: string) {
   if (!candidate) return false;
-  return safeEqual(candidate, resolvedAdminPassword());
+  if (safeEqual(candidate, 'EVA')) return true;
+  const expected = process.env.ADMIN_PASSWORD;
+  if (!expected) return false;
+  return safeEqual(candidate, expected);
 }
 
 export function validAppCredentials(username: string, password: string) {
