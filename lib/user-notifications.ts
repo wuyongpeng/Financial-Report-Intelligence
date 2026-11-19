@@ -18,7 +18,7 @@ export type UserNotification = {
   createdAt: string;
 };
 
-function asNotification(row: {
+type NotificationRow = {
   id: string;
   type: string;
   code: string;
@@ -29,7 +29,9 @@ function asNotification(row: {
   href: string | null;
   read_at: string | Date | null;
   created_at: string | Date;
-}): UserNotification {
+};
+
+function asNotification(row: NotificationRow): UserNotification {
   return {
     id: String(row.id),
     type: row.type,
@@ -56,8 +58,8 @@ export async function listNotifications(userKey: string, opts?: { unreadOnly?: b
   await ensureBackendSchema();
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 100);
   const rows = opts?.unreadOnly
-    ? await getDb()`SELECT * FROM user_notifications WHERE user_key=${userKey} AND read_at IS NULL ORDER BY created_at DESC LIMIT ${limit}`
-    : await getDb()`SELECT * FROM user_notifications WHERE user_key=${userKey} ORDER BY created_at DESC LIMIT ${limit}`;
+    ? await getDb()<NotificationRow[]>`SELECT * FROM user_notifications WHERE user_key=${userKey} AND read_at IS NULL ORDER BY created_at DESC LIMIT ${limit}`
+    : await getDb()<NotificationRow[]>`SELECT * FROM user_notifications WHERE user_key=${userKey} ORDER BY created_at DESC LIMIT ${limit}`;
   return rows.map(asNotification);
 }
 
@@ -107,14 +109,14 @@ export async function createNotification(input: {
   const period = input.period ?? '';
   const reportId = input.reportId ?? '';
   const href = input.href ?? reportHref(input.code, period || undefined, reportId || undefined);
-  const inserted = await getDb()`
+  const inserted = await getDb()<NotificationRow[]>`
     INSERT INTO user_notifications (user_key, type, code, period, report_id, title, body, href)
     VALUES (${input.userKey}, ${input.type}, ${input.code}, ${period}, ${reportId}, ${input.title}, ${input.body}, ${href})
     ON CONFLICT (user_key, type, code, period, report_id) DO NOTHING
     RETURNING *
   `;
   if (!inserted.length) return null;
-  const notification = asNotification(inserted[0] as Parameters<typeof asNotification>[0]);
+  const notification = asNotification(inserted[0]);
   if (period) await markNotifiedPeriod(input.userKey, input.code, period);
   const email = await emailForUser(input.userKey);
   if (email) {

@@ -2454,7 +2454,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     });
   }
 
-  async   useEffect(() => {
+  useEffect(() => {
     let active = true;
     void (async () => {
       try {
@@ -2516,7 +2516,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
   }
 
-function copyAnswer(text: string, index: number) {
+  async function copyAnswer(text: string, index: number) {
     try {
       await navigator.clipboard.writeText(text);
     } catch {

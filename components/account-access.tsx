@@ -111,15 +111,17 @@ export function AccountMenu() {
           <h2>{guest ? '访客模式' : account.username}</h2>
           <p>{guest ? '当前为访客，数据仅本地 / 会话有效，关闭页面会丢失' : remaining}</p>
           {guest ? (
-            <div className="acc-panel-actions">
-              <button type="button" className="acc-btn-secondary" onClick={() => { setOpen(false); openAccountDialog('login'); }}>登录</button>
-              <button type="button" className="acc-btn-primary" onClick={() => { setOpen(false); openAccountDialog('register'); }}>注册</button>
-            </div>
-            <div className="acc-legal">
-              {LEGAL_PAGES.map((page) => (
-                <Link key={page.slug} href={legalPath(page.slug)} onClick={() => setOpen(false)}>{page.title}</Link>
-              ))}
-            </div>
+            <>
+              <div className="acc-panel-actions">
+                <button type="button" className="acc-btn-secondary" onClick={() => { setOpen(false); openAccountDialog('login'); }}>登录</button>
+                <button type="button" className="acc-btn-primary" onClick={() => { setOpen(false); openAccountDialog('register'); }}>注册</button>
+              </div>
+              <div className="acc-legal">
+                {LEGAL_PAGES.map((page) => (
+                  <Link key={page.slug} href={legalPath(page.slug)} onClick={() => setOpen(false)}>{page.title}</Link>
+                ))}
+              </div>
+            </>
           ) : (
             <div className="acc-panel-links">
               <button type="button" onClick={() => { setOpen(false); setWorkspace('history'); }}>对话历史</button>
