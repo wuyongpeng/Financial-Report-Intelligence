@@ -1,6 +1,7 @@
 'use client';
 
 import { type CSSProperties, type FormEvent, useState } from 'react';
+import { PasswordInput } from '@/components/password-input';
 
 export function AdminLoginForm() {
   const [password, setPassword] = useState('');
@@ -41,9 +42,8 @@ export function AdminLoginForm() {
       <p style={muted}>请输入密码后进入</p>
       <form onSubmit={onSubmit} style={form}>
         <label htmlFor="admin-password" style={label}>密码</label>
-        <input
+        <PasswordInput
           id="admin-password"
-          type="password"
           autoFocus
           autoComplete="current-password"
           value={password}

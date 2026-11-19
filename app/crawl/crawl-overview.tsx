@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { PasswordInput } from '@/components/password-input';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type AnimationEvent, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import {
@@ -2377,8 +2378,7 @@ export default function CrawlOverview({ embedded = false }: { embedded?: boolean
             {actionConfirm.mode === 'discard' ? (
               <label className="co-confirm-password">
                 <span>删除密码</span>
-                <input
-                  type="password"
+                <PasswordInput
                   autoComplete="off"
                   autoFocus
                   placeholder="请输入删除密码"

@@ -62,8 +62,28 @@ test('home page hides the data-ops entry, and every /admin page is gated by the 
   assert.match(layout, /AdminLoginForm/);
   const form = await source('app/admin/_components/admin-login-form.tsx');
   assert.match(form, /\/api\/admin\/login/);
-  assert.match(form, /type="password"/);
+  assert.match(form, /PasswordInput/);
   assert.doesNotMatch(form, /EVA/);
+});
+
+test('password fields hide plaintext by default and reveal it from the trailing eye button', async () => {
+  const component = await source('components/password-input.tsx');
+  assert.match(component, /useState\(false\)/);
+  assert.match(component, /visible \? 'text' : 'password'/);
+  assert.match(component, /显示密码/);
+  assert.match(component, /隐藏密码/);
+  for (const file of [
+    'app/admin/_components/admin-login-form.tsx',
+    'app/admin/check/check-client.tsx',
+    'app/admin/metrics/metrics-client.tsx',
+    'app/admin/tests/tests-client.tsx',
+    'app/[code]/company-code-client.tsx',
+    'app/crawl/crawl-overview.tsx',
+  ]) {
+    const text = await source(file);
+    assert.match(text, /PasswordInput/);
+    assert.doesNotMatch(text, /type="password"/);
+  }
 });
 
 test('delete password stays server-side, and is not imported into either browser delete UI', async () => {
@@ -73,7 +93,7 @@ test('delete password stays server-side, and is not imported into either browser
   for (const file of ['app/admin/metrics/metrics-client.tsx', 'app/crawl/crawl-overview.tsx']) {
     const text = await source(file);
     assert.doesNotMatch(text, /DISCARD_CONFIRM_PASSWORD|from ['"].*discard-password/);
-    assert.match(text, /type="password"/);
+    assert.match(text, /PasswordInput/);
     assert.match(text, /password/);
   }
 });

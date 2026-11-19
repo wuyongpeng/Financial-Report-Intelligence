@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'r
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ACCEPTANCE_STATUSES, ACCEPTANCE_STATUS_LABEL, RUN_PHASE_ACTION, RUN_PHASE_LABEL, runPhase, type AcceptanceStatus } from '@/lib/acceptance-tests';
 import { AdminHeader, AdminMain, adminStyles as s } from '../_components/admin-shell';
+import { PasswordInput } from '@/components/password-input';
 
 type CaseItem = { id: number; title: string; steps: string; expected: string };
 type GroupItem = { id: number; name: string; cases: CaseItem[] };
@@ -274,8 +275,7 @@ export function TestsAdminClient() {
           <div role="dialog" aria-label="确认删除测试记录" style={dialog} onClick={(event) => event.stopPropagation()}>
             <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>删除整轮测试记录？</h3>
             <p style={{ ...s.muted, margin: '0 0 10px' }}>删除后不能恢复。请输入删除密码。</p>
-            <input
-              type="password"
+            <PasswordInput
               autoComplete="off"
               placeholder="删除密码"
               value={password}

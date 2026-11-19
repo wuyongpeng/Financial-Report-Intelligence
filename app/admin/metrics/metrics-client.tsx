@@ -18,6 +18,7 @@ import {
   type OverviewSummary,
 } from '@/lib/metrics-overview';
 import { splitTitleAttention, titleHasAttentionKeyword } from '@/lib/metrics-title-attention';
+import { PasswordInput } from '@/components/password-input';
 import { buildBatchParseTriggerBodies, type HeadlineMetricName } from '@/lib/crawl-display';
 import {
   REVIEW_REASON_LABEL,
@@ -858,8 +859,7 @@ export function MetricsAdminClient() {
             ) : null}
             <label style={{ display: 'block', marginBottom: 12 }}>
               <span style={{ ...s.muted, display: 'block', marginBottom: 6 }}>删除密码</span>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="off"
                 autoFocus
                 style={{ ...s.input, width: '100%', boxSizing: 'border-box' }}

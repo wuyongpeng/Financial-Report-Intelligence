@@ -17,6 +17,7 @@ import {
   type CheckSummary,
 } from '@/lib/metrics-check';
 import { checkReviewKey, isPendingCheck, type ManagedCheckCell, type CheckProgressStatus, CHECK_PROGRESS_LABEL, summarizeCheckProgress, type CheckReviewStatus, summarizeCheckReviews } from '@/lib/metrics-check-review';
+import { PasswordInput } from '@/components/password-input';
 
 type CheckPayload = {
   periodNote: string;
@@ -394,7 +395,7 @@ export function CheckAdminClient() {
           <div role="dialog" aria-label="确认删除" style={{ width: 320, background: '#fff', borderRadius: 12, padding: 16 }} onClick={(event) => event.stopPropagation()}>
             <h3 style={{ margin: '0 0 8px', fontSize: 16 }}>确认删除？</h3>
             <p style={{ ...s.muted, margin: '0 0 10px' }}>{discardTarget.code} {discardTarget.name || ''} · {discardTarget.period}</p>
-            <input type="password" autoComplete="off" placeholder="删除密码" value={discardPassword} onChange={(event) => { setDiscardPassword(event.target.value); setDiscardPasswordError(''); }} style={{ ...s.input, width: '100%', boxSizing: 'border-box' }} />
+            <PasswordInput autoComplete="off" placeholder="删除密码" value={discardPassword} onChange={(event) => { setDiscardPassword(event.target.value); setDiscardPasswordError(''); }} style={{ ...s.input, width: '100%', boxSizing: 'border-box' }} />
             {discardPasswordError ? <p style={{ ...s.err, margin: '8px 0 0' }}>{discardPasswordError}</p> : null}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
               <button type="button" style={textAct} onClick={() => setDiscardTarget(null)}>取消</button>

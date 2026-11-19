@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import CompanyDetail from '../company-detail';
+import { PasswordInput } from '@/components/password-input';
 import type { Report } from '@/lib/detail-model';
 import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
@@ -284,9 +285,8 @@ export default function CompanyCodeClient({ code }: { code: string }) {
             <p style={{ fontSize: 12, color: '#68758a', lineHeight: 1.65 }}>请确认已核对 PDF 原文、指标数值、单位与页码。操作会记录复核事件。</p>
             <label style={{ display: 'block', fontSize: 12, marginTop: 16 }}>
               管理员密码
-              <input
+              <PasswordInput
                 autoFocus
-                type="password"
                 value={adminPassword}
                 onChange={(event) => setAdminPassword(event.target.value)}
                 onKeyDown={(event) => { if (event.key === 'Enter') void loginAndApprove(); }}
