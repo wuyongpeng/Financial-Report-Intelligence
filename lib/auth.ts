@@ -4,10 +4,15 @@ const cookieName = 'fri_admin_session';
 const appCookieName = 'fri_app_session';
 const maxAgeSeconds = 8 * 60 * 60;
 
+function resolvedAdminPassword() {
+  const expected = process.env.ADMIN_PASSWORD;
+  return expected && expected.length > 0 ? expected : 'EVA';
+}
+
 function secret() {
   const value = process.env.ADMIN_SESSION_SECRET;
-  if (!value || value.length < 24) throw new Error('ADMIN_SESSION_SECRET must be at least 24 characters');
-  return value;
+  if (value && value.length >= 24) return value;
+  return createHmac('sha256', 'eva-admin-session-v1').update(resolvedAdminPassword()).digest('hex');
 }
 
 function sign(payload: string) {
@@ -40,13 +45,10 @@ function safeEqual(leftValue: string, rightValue: string) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** Built-in competition password EVA; env ADMIN_PASSWORD still accepted when set. */
+/** Default competition password is EVA; ADMIN_PASSWORD overrides it when set. */
 export function validAdminPassword(candidate: string) {
   if (!candidate) return false;
-  if (safeEqual(candidate, 'EVA')) return true;
-  const expected = process.env.ADMIN_PASSWORD;
-  if (!expected) return false;
-  return safeEqual(candidate, expected);
+  return safeEqual(candidate, resolvedAdminPassword());
 }
 
 export function validAppCredentials(username: string, password: string) {
@@ -114,9 +116,13 @@ export function isAdmin(request: Request) {
   const [role, expiresAt, signature] = value.split('.');
   if (role !== 'admin' || !expiresAt || !signature || Number(expiresAt) < Math.floor(Date.now() / 1000)) return false;
   const payload = `${role}.${expiresAt}`;
-  const expected = Buffer.from(sign(payload));
-  const actual = Buffer.from(signature);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
+  try {
+    const expected = Buffer.from(sign(payload));
+    const actual = Buffer.from(signature);
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
 }
 
 /** Secure only when COOKIE_SECURE=true. NODE_ENV=production alone must not force it,

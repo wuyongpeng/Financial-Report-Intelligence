@@ -2,6 +2,7 @@ import { apiError } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
 import { writeOverviewReview } from '@/lib/metrics-review-record';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,8 @@ export const dynamic = 'force-dynamic';
  * Optional short note. Appends one event; does not erase earlier passes.
  */
 export async function POST(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   let body: {
     announcementId?: unknown;
     code?: unknown;

@@ -3,6 +3,7 @@ import { ApiError, apiError, readObject } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
 import { countMap, isValidSurveyToken } from '@/lib/survey';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,8 @@ type ResponseRow = {
 };
 
 export async function GET(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const db = getDb();
@@ -124,6 +127,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const body = await readObject(request);
@@ -177,6 +182,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const body = await readObject(request);

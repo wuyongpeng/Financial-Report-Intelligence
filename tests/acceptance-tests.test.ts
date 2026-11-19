@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createAdminCookie } from '../lib/auth';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { buildAcceptanceConclusionPrompt, cleanAcceptanceConclusion } from '../lib/acceptance-conclusion';
@@ -69,11 +70,20 @@ test('deleting a test run rejects a missing or wrong password before any databas
   const post = route.slice(route.indexOf('export async function POST'));
   assert.ok(post.indexOf('matchesDiscardPassword(body.password)') < post.indexOf('ensureBackendSchema()'));
   assert.doesNotMatch(await source('app/admin/tests/tests-client.tsx'), /DISCARD_CONFIRM_PASSWORD|from ['"].*discard-password/);
+  const previousSecret = process.env.ADMIN_SESSION_SECRET;
+  process.env.ADMIN_SESSION_SECRET = 'test-admin-secret-at-least-24-chars';
   const { POST } = await import('../app/api/admin/tests/route');
+  const anonymous = await POST(new Request('http://localhost/api/admin/tests', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ op: 'run.delete', id: 1 }),
+  }));
+  assert.equal(anonymous.status, 401);
+  const cookie = `fri_admin_session=${createAdminCookie()}`;
   for (const payload of [{ op: 'run.delete', id: 1 }, { op: 'run.delete', id: 1, password: 'eva' }]) {
     const response = await POST(new Request('http://localhost/api/admin/tests', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', cookie },
       body: JSON.stringify(payload),
     }));
     assert.equal(response.status, 403);
@@ -82,8 +92,9 @@ test('deleting a test run rejects a missing or wrong password before any databas
   }
   const invalid = await POST(new Request('http://localhost/api/admin/tests', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie },
     body: JSON.stringify({ op: 'nope' }),
   }));
   assert.equal(invalid.status, 400);
+  if (previousSecret === undefined) delete process.env.ADMIN_SESSION_SECRET; else process.env.ADMIN_SESSION_SECRET = previousSecret;
 });

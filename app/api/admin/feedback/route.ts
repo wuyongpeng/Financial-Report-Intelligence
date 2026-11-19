@@ -1,10 +1,13 @@
 import { apiError, ApiError, readObject } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const url = new URL(request.url);
@@ -41,6 +44,8 @@ export async function GET(request: Request) {
 const HANDLING = new Set(['open', 'in_progress', 'resolved', 'archived']);
 
 export async function PATCH(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const body = await readObject(request);

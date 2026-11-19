@@ -4,11 +4,14 @@ import { getDb } from '@/lib/db';
 import { loadMetricsOverview } from '@/lib/metrics-overview-server';
 import { loadReviewLog } from '@/lib/metrics-review-record';
 import type { ReviewReason } from '@/lib/metrics-review-log';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 /** Open read for operations console; deletion has a separate server-side password gate. */
-export async function GET(_request: Request) {
+export async function GET(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const db = getDb();

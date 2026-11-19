@@ -1,12 +1,15 @@
 import { apiError, ApiError } from '@/lib/api';
 import { listClientAudit, type ClientAuditRow } from '@/lib/list-client-audit';
 import type { AuditEventType } from '@/lib/client-audit';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 const EVENT_TYPES = new Set<AuditEventType>(['visit', 'ask', 'answer_feedback']);
 
 export async function GET(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     const url = new URL(request.url);
     const eventTypeRaw = url.searchParams.get('eventType');

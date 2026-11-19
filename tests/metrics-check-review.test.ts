@@ -101,7 +101,8 @@ test('server persistence is independent and snapshot-validated; UI actions use e
   assert.match(route, /findCheckReviewTarget\(snapshot.cells, input\)/);
   assert.match(route, /ON CONFLICT \(code, period, metric\) DO UPDATE SET fingerprint=EXCLUDED.fingerprint/);
   assert.match(route, /isolation level repeatable read/);
-  assert.doesNotMatch(route, /metrics_overview|password|requireAdmin/);
+  assert.doesNotMatch(route, /metrics_overview|matchesDiscardPassword/);
+  assert.match(route, /requireAdmin\(request\)/);
   assert.match(client, /isPendingCheck\(cell\)/);
   const actions = client.slice(client.indexOf("display: 'inline-flex', alignItems: 'center', gap: 2"));
   assert.ok(actions.indexOf("reviewRow(cell, 'approved')") < actions.indexOf("reviewRow(cell, 'flagged')"));

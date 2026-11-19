@@ -5,6 +5,7 @@ import { ApiError, apiError, readObject } from '@/lib/api';
 import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
 import { matchesDiscardPassword, redactDiscardPasswordCopy } from '@/lib/discard-password';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -120,6 +121,8 @@ async function snapshot() {
 }
 
 export async function GET(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     await ensureBackendSchema();
     await ensureAcceptanceTemplate();
@@ -166,6 +169,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   let body: Record<string, unknown>;
   try {
     body = await readObject(request);

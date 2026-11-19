@@ -3,11 +3,14 @@ import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
 import { loadCheckSnapshot } from '@/lib/metrics-check-server';
 import { applyCheckReviews, summarizeCheckReviews, parseCheckReviewInput, findCheckReviewTarget, type CheckReview, type CheckProgress, applyCheckProgress, summarizeCheckProgress, parseCheckProgressInput } from '@/lib/metrics-check-review';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
-/** Open ops console; independent from metrics overview and deletion authorization. */
-export async function GET() {
+/** Ops console; requires admin session. Independent from metrics overview and deletion authorization. */
+export async function GET(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     await ensureBackendSchema();
     const db = getDb();
@@ -24,6 +27,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   let body: unknown;
   try { body = await request.json(); }
   catch { return Response.json({ error: '请求体无效' }, { status: 400 }); }

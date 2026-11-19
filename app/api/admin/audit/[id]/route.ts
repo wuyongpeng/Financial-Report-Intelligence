@@ -1,5 +1,6 @@
 import { apiError, ApiError } from '@/lib/api';
 import { deleteClientAudit, readClientAuditDetail } from '@/lib/list-client-audit';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +10,9 @@ function auditId(raw: string) {
   return id;
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     const { id } = await context.params;
     const detail = await readClientAuditDetail(auditId(id));
@@ -20,7 +23,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   try {
     const { id } = await context.params;
     const removed = await deleteClientAudit(auditId(id));

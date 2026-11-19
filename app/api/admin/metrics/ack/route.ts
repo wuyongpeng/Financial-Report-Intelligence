@@ -3,6 +3,7 @@ import { ensureBackendSchema } from '@/lib/backend-schema';
 import { getDb } from '@/lib/db';
 import { REVIEW_REASON_LABEL, parseReviewReason } from '@/lib/metrics-review-log';
 import { writeOverviewReview } from '@/lib/metrics-review-record';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,8 @@ export const dynamic = 'force-dynamic';
  * Also appends one event with the optional reason and the rule hits at this moment.
  */
 export async function POST(request: Request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
   let body: {
     announcementId?: unknown;
     code?: unknown;
