@@ -29,6 +29,7 @@ import { AnswerFeedback, type AnswerFeedbackPayload } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
+import { handleQuotaFailure, refreshAccount } from '@/lib/account-client';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { reflectReaderMemory } from '@/lib/reader-memory-client';
 import { CONVERSATION_DELETED_EVENT, MEMORY_CLEARED_EVENT, readReaderPrefs, readerChatFields } from '@/lib/reader-prefs-client';
@@ -47,6 +48,7 @@ import { correctAsrHomophones } from '@/lib/voice/asr-correct';
 import { nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT, VOICE_PDF_ZOOM_MIN, VOICE_PDF_ZOOM_MAX } from '@/lib/voice/zoom-intent';
 import { VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
 import { voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
+import { AccountMenu } from '@/components/account-access';
 import HomeOverflowMenu from './home-overflow-menu';
 import { findTocPage, matchSection, buildSectionReadChunks } from '@/lib/voice/section-match';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
@@ -2715,7 +2717,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       const rewrite = extra?.rewrite ?? styleRewrite;
       const chatPrefs = readerChatFields(question);
       const response = await fetch('/api/chat', { method:'POST', signal:controller.signal, credentials:'same-origin', headers:{ 'content-type':'application/json' },body:JSON.stringify({ reportId:id, ...(conversationId ? { conversationId } : {}), requestId:clientUuid(), question, ...(focusPayload.length ? { focus: focusPayload } : {}), ...(rewrite ? { rewrite } : {}), ...(spoken ? { spoken: true } : {}), readingLevel: chatPrefs.readingLevel, ...(chatPrefs.modelId ? { modelId: chatPrefs.modelId } : {}), ...(chatPrefs.readerMemory ? { readerMemory: chatPrefs.readerMemory } : {}), stream:true }) });
-      if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})); throw new Error(failure.error ?? '问答服务暂时不可用'); }
+      if (!response.ok || !response.body) { const failure = await response.json().catch(()=>({})) as { error?: string; code?: string; quota?: unknown }; if (handleQuotaFailure(failure)) throw new Error(failure.error ?? '已超过对话限额'); throw new Error(failure.error ?? '问答服务暂时不可用'); } else { void refreshAccount(); }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
         const {done,value:chunk} = await reader.read();
@@ -2961,7 +2963,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const collapseGate = paneCollapseGate({ source: sourceCollapsed, middle: middleCollapsed, chat: chatCollapsed });
   const paneFlex = effectivePaneFlex(colRatios, { middleCollapsed });
   return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''} ${middleCollapsed?'cd-middle-collapsed':''}`} >
-    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions">{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}<HomeOverflowMenu showSources={false} pageLabel={`${selected.company_name} ${period(selected)}`} /></div></header>
+    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions">{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}<AccountMenu /><HomeOverflowMenu showSources={false} pageLabel={`${selected.company_name} ${period(selected)}`} /></div></header>
     {hasReportAuditRisk(selected) ? (
       <button
         type="button"

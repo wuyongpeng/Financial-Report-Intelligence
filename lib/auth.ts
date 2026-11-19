@@ -89,14 +89,32 @@ export function appUserRole(request: Request): 'user' | 'guest' | null {
   try { if (!safeEqual(signature, signApp(payload))) return null; } catch { return null; }
   if (role === 'guest') return encodedUsername === 'demo' && demoAccessEnabled() ? 'guest' : null;
   if (role !== 'user') return null;
-  const expectedUsername = process.env.APP_USERNAME;
-  const username = Buffer.from(encodedUsername, 'base64url').toString();
-  return expectedUsername && safeEqual(username, expectedUsername) ? 'user' : null;
+  try {
+    const username = Buffer.from(encodedUsername, 'base64url').toString();
+    return username ? 'user' : null;
+  } catch { return null; }
 }
 
-// Private conversations belong to one signed browser login session. Legacy
-// cookies remain valid for reading but must be refreshed before enabling memory.
+export function appSessionUsername(request: Request) {
+  if (appUserRole(request) !== 'user') return null;
+  const value = namedCookieValue(request, appCookieName);
+  if (!value) return null;
+  const encodedUsername = value.split('.')[1];
+  try {
+    return Buffer.from(encodedUsername, 'base64url').toString() || null;
+  } catch { return null; }
+}
+
+// Registered users keep a stable conversation owner across logins. Legacy demo
+// cookies still key private memory to one signed browser session.
 export function appSessionOwner(request: Request) {
+  const username = appSessionUsername(request);
+  const sharedEnvUser = process.env.APP_USERNAME;
+  // A unique registered account keeps memory across logins. The shared
+  // APP_USERNAME env login stays session-scoped so two browsers do not mix.
+  if (username && !(sharedEnvUser && username === sharedEnvUser)) {
+    return createHmac('sha256', appSecret()).update(`conversation:user:${username.trim().toLowerCase()}`).digest('hex');
+  }
   if (!appUserRole(request)) return null;
   const value = namedCookieValue(request, appCookieName)!;
   if (value.split('.').length !== 5) return null;

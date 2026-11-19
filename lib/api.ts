@@ -1,9 +1,9 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public extra?: Record<string, unknown>) { super(message); }
 }
 
 export function apiError(error: unknown) {
-  if (error instanceof ApiError) return Response.json({ error: error.message }, { status: error.status, headers: { 'cache-control': 'no-store' } });
+  if (error instanceof ApiError) return Response.json({ error: error.message, ...(error.extra ?? {}) }, { status: error.status, headers: { 'cache-control': 'no-store' } });
   console.error('[api] request failed', { message: error instanceof Error ? error.message : 'Unknown error' });
   return Response.json({ error: '服务暂时不可用，请稍后重试。' }, { status: 503, headers: { 'cache-control': 'no-store' } });
 }

@@ -1,4 +1,5 @@
 import { apiError, ApiError, readObject, requiredText } from '@/lib/api';
+import { consumeAskQuota, QuotaError } from '@/lib/app-account';
 import { sanitizeModelId, sanitizeReadingLevel } from '@/lib/reader-prefs';
 import { generateHomeAskAnswer } from '@/lib/home-ask';
 import type { HomeRosterRow } from '@/lib/home-roster-snapshot';
@@ -51,6 +52,7 @@ export async function POST(request: Request) {
     }
     const history = parseHistory(body.history);
     const mode = body.mode === 'chitchat' ? 'chitchat' as const : 'roster' as const;
+    const quota = await consumeAskQuota(request);
     const result = await generateHomeAskAnswer({
       question,
       rosterSnapshot,
@@ -62,11 +64,20 @@ export async function POST(request: Request) {
       readingLevel: sanitizeReadingLevel(body.readingLevel),
       readerMemory: typeof body.readerMemory === 'string' ? body.readerMemory.replace(/\s+/g, ' ').trim().slice(0, 400) : undefined,
     });
-    return Response.json(
-      { answer: result.answer, openCode: result.openCode ?? null, mode: result.mode },
-      { headers: { 'cache-control': 'no-store' } },
-    );
+    const headers = new Headers({ 'cache-control': 'no-store', 'content-type': 'application/json' });
+    if (quota.setCookie) headers.append('set-cookie', quota.setCookie);
+    return new Response(JSON.stringify({
+      answer: result.answer,
+      openCode: result.openCode ?? null,
+      mode: result.mode,
+      quota: quota.state,
+    }), { status: 200, headers });
   } catch (error) {
+    if (error instanceof QuotaError) {
+      const response = apiError(error);
+      if (error.setCookie) response.headers.append('set-cookie', error.setCookie);
+      return response;
+    }
     if (error instanceof ApiError) return apiError(error);
     return apiError(error);
   }

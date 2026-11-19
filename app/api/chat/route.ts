@@ -1,5 +1,6 @@
 import { ensureConversationOwner } from '@/lib/auth';
 import { apiError, ApiError, readObject } from '@/lib/api';
+import { consumeAskQuota, QuotaError } from '@/lib/app-account';
 import {
   CHAT_STREAM_DONE,
   encodeChatStreamEvent,
@@ -35,7 +36,21 @@ export async function POST(request: Request) {
       setCookie = guest.setCookie;
       const turn = await beginTurn(guest.owner, conversationId, reportId, requestId, question);
       history = turn.history; replay = turn.replay;
-      if (!replay) lease = { owner: guest.owner, conversationId, requestId };
+      if (!replay) {
+        try {
+          const quota = await consumeAskQuota(request);
+          setCookie = quota.setCookie ?? setCookie;
+        } catch (error) {
+          if (error instanceof QuotaError) {
+            const response = apiError(error);
+            const cookie = error.setCookie ?? setCookie;
+            if (cookie) response.headers.append('set-cookie', cookie);
+            return response;
+          }
+          throw error;
+        }
+        lease = { owner: guest.owner, conversationId, requestId };
+      }
       void (async () => {
         const reportMeta = await resolveAuditReportMeta(reportId);
         await recordClientAudit({
@@ -59,6 +74,20 @@ export async function POST(request: Request) {
           },
         }, request);
       })();
+    }
+    if (!conversationId && !replay) {
+      try {
+        const quota = await consumeAskQuota(request);
+        setCookie = quota.setCookie ?? setCookie;
+      } catch (error) {
+        if (error instanceof QuotaError) {
+          const response = apiError(error);
+          const cookie = error.setCookie ?? setCookie;
+          if (cookie) response.headers.append('set-cookie', cookie);
+          return response;
+        }
+        throw error;
+      }
     }
     const context = replay ? null : await loadRagContext(reportId, question, history, input.summary, focus);
     const persist = async (result: AnswerResult) => {

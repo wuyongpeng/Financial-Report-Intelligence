@@ -68,6 +68,7 @@ import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
+import { handleAskResponse } from '@/lib/account-client';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { reflectReaderMemory } from '@/lib/reader-memory-client';
 import { MEMORY_CLEARED_EVENT, readerChatFields, readerHistory } from '@/lib/reader-prefs-client';
@@ -1152,9 +1153,11 @@ export default function ReportHome() {
           ...(readerChatFields(raw).readerMemory ? { readerMemory: readerChatFields(raw).readerMemory } : {}),
         }),
       });
-      if (!response.ok) throw new Error(`home ask ${response.status}`);
+      const handled = await handleAskResponse(response);
       assertHomeVoiceTurn(turn);
-      const payload = await response.json() as { answer?: string; openCode?: string | null };
+      if (handled.kind === 'quota') return;
+      if (handled.kind !== 'ok') throw new Error(`home ask ${response.status}`);
+      const payload = handled.body as { answer?: string; openCode?: string | null };
       assertHomeVoiceTurn(turn);
       const answer = typeof payload.answer === 'string' ? payload.answer.trim() : '';
       if (!answer) throw new Error('empty home ask');
@@ -1215,9 +1218,11 @@ export default function ReportHome() {
           spoken: Boolean(opts?.fromVoice || voice.active),
         }),
       });
-      if (!response.ok) throw new Error(`home chitchat ${response.status}`);
+      const handled = await handleAskResponse(response);
       assertHomeVoiceTurn(turn);
-      const payload = await response.json() as { answer?: string };
+      if (handled.kind === 'quota') return;
+      if (handled.kind !== 'ok') throw new Error(`home chitchat ${response.status}`);
+      const payload = handled.body as { answer?: string };
       assertHomeVoiceTurn(turn);
       const answer = typeof payload.answer === 'string' ? payload.answer.trim() : '';
       if (!answer) throw new Error('empty home chitchat');

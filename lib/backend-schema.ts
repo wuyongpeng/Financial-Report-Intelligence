@@ -227,5 +227,19 @@ async function migrate() {
       id INTEGER PRIMARY KEY,
       seeded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
+    await tx`CREATE TABLE IF NOT EXISTS app_users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      username TEXT NOT NULL,
+      username_key TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      quota_limit INTEGER NOT NULL DEFAULT 100,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE TABLE IF NOT EXISTS ask_counters (
+      subject_key TEXT PRIMARY KEY,
+      count INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
   });
 }
