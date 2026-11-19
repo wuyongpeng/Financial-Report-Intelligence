@@ -93,7 +93,7 @@ export function formatHomeRosterSnapshot(
   const header = meta?.parsedOnly
     ? '已解析公司清单（可以打开详情细读；问「支持哪些公司 / 已经解析了哪些」时只根据本节总结，按行业概括，不要逐家念完，禁止投资排名）：'
     : [
-      '首页公司清单快照（与用户当前首页所见一致；问「有哪些公司 / 在不在 / 监控池」时优先依据本节；',
+      '首页公司清单快照（与用户当前首页所见一致；问「有哪些公司 / 在不在 / 自选 / 监控池」时优先依据本节；',
       '「哪些值得分析」只许用客观信号如已可读、新期待更新、已收藏、解析中，禁止投资排名或买卖建议）：',
     ].join('');
 
@@ -103,7 +103,7 @@ export function formatHomeRosterSnapshot(
     if (meta.filteredCount !== meta.visibleCount) {
       scopeBits.push(`筛选后 ${meta.filteredCount} 家`);
     }
-    scopeBits.push(`监控池共 ${meta.poolCount} 家`);
+    scopeBits.push(`自选共 ${meta.poolCount} 家`);
     if (meta.industry && meta.industry !== '全部') scopeBits.push(`行业筛选：${meta.industry}`);
     if (meta.viewMode) scopeBits.push(meta.viewMode === 'list' ? '列表视图' : '卡片视图');
   }

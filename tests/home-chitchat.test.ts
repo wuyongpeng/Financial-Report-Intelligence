@@ -73,13 +73,14 @@ test('sanitizeHomeAssistantText drops think and planning', () => {
 test('parseVoiceJoinReply / buildVoiceJoinPrompt', () => {
   assert.equal(parseVoiceJoinReply('加入'), 'yes');
   assert.equal(parseVoiceJoinReply('加入监控池'), 'yes');
+  assert.equal(parseVoiceJoinReply('加入自选'), 'yes');
   assert.equal(parseVoiceJoinReply('确定'), 'yes');
   assert.equal(parseVoiceJoinReply('是'), 'yes');
   assert.equal(parseVoiceJoinReply('取消'), 'no');
   assert.equal(parseVoiceJoinReply('否'), 'no');
   assert.equal(parseVoiceJoinReply('东鹏饮料'), null);
   const prompt = buildVoiceJoinPrompt({ code: '605499', name: '东鹏饮料' });
-  assert.match(prompt, /是否加入监控池/);
+  assert.match(prompt, /是否加入自选/);
   assert.match(prompt, /东鹏饮料/);
   assert.match(prompt, /605499/);
 });

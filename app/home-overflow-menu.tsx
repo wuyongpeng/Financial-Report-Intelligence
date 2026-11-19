@@ -10,6 +10,7 @@ import {
 import './home-overflow-menu.css';
 import { preserveFeedbackDraft, publishFeedbackState, subscribeFeedbackDraft, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import ReaderPrefsDialog from './reader-prefs-dialog';
+import { LEGAL_PAGES, legalPath } from '@/lib/legal-content';
 
 export type HomeOverflowMenuProps = {
   /** Home shows 数据采集; detail hides it. Default true. */
@@ -204,6 +205,17 @@ export default function HomeOverflowMenu({
           >
             关于 Eva
           </button>
+          {LEGAL_PAGES.map((page) => (
+            <Link
+              key={page.slug}
+              role="menuitem"
+              className="hom-item"
+              href={legalPath(page.slug)}
+              onClick={() => setOpen(false)}
+            >
+              {page.title}
+            </Link>
+          ))}
           {showSources ? (
             <Link
               role="menuitem"

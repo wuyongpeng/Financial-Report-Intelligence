@@ -68,7 +68,10 @@ import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
-import { handleAskResponse } from '@/lib/account-client';
+import { handleAskResponse, requestLoginForRestricted, getAccountView } from '@/lib/account-client';
+import { ProductFooter, WatchDigestCard, WatchlistEmpty } from '@/components/product-workspace';
+import { productCollectStatus } from '@/lib/product-status';
+import type { WatchlistDigest } from '@/lib/watchlist-digest';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { reflectReaderMemory } from '@/lib/reader-memory-client';
 import { MEMORY_CLEARED_EVENT, readerChatFields, readerHistory } from '@/lib/reader-prefs-client';
@@ -148,14 +151,7 @@ function isConnected(item: CrawlCompanyCoverage) {
 }
 
 function statusMeta(item: CrawlCompanyCoverage) {
-  if (hasReadableMetrics(item)) return '已接入';
-  if (hasDownloadedPdf(item) && (item.parseStatus === 'failed' || item.parseError)) return '解析失败';
-  if (hasDownloadedPdf(item) && item.parseStatus === 'parsing') return '已下载·解析中';
-  if (hasDownloadedPdf(item) && item.parseStatus === 'queued') return '已下载·排队解析';
-  if (hasDownloadedPdf(item)) return '已接入·待解析';
-  if (item.parseStatus === 'failed') return '抓取失败';
-  if (item.covered) return '已发现·待下载';
-  return '等待抓取';
+  return productCollectStatus(item).label;
 }
 
 function coverageToPlaceholderSeeds(coverage: CrawlCompanyCoverage[]): PlaceholderSeed[] {
@@ -181,7 +177,7 @@ function recentPeriodsLabel(item: CrawlCompanyCoverage) {
 }
 
 function shortParseError(err: string | null | undefined) {
-  if (!err) return '解析未完成，可在数据运营·采集页重试';
+  if (!err) return '解析尚未完成，完成后会通知你';
   const one = err.replace(/\s+/g, ' ').trim();
   return one.length > 72 ? `${one.slice(0, 72)}…` : one;
 }
@@ -295,8 +291,9 @@ function StarButton({
 export default function ReportHome() {
   const router = useRouter();
   const [coverage, setCoverage] = useState<CrawlCompanyCoverage[]>([]);
+  const [watchDigest, setWatchDigest] = useState<WatchlistDigest | null>(null);
   const [stats, setStats] = useState<CrawlStats | null>(null);
-  const [source, setSource] = useState<'postgresql' | 'crawl-mock' | ''>('');
+  const [source, setSource] = useState<'postgresql' | 'crawl-mock' | 'watchlist' | ''>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -690,23 +687,33 @@ export default function ReportHome() {
 
   const refreshCoverage = useCallback(async (): Promise<CrawlCompanyCoverage[]> => {
     try {
-      const response = await fetch('/api/crawl', { cache: 'no-store' });
-      if (!response.ok) throw new Error(`抓取接口 ${response.status}`);
+      const response = await fetch('/api/me/coverage', { cache: 'no-store', credentials: 'same-origin' });
+      if (response.status === 401) {
+        setCoverage([]);
+        setWatchDigest(null);
+        setStats(null);
+        setSource('watchlist');
+        setError('');
+        return [];
+      }
+      if (!response.ok) throw new Error(`自选接口 ${response.status}`);
       const payload = await response.json() as {
-        source?: 'postgresql' | 'crawl-mock';
+        source?: 'postgresql' | 'crawl-mock' | 'watchlist';
         stats: CrawlStats;
         companies: CrawlCompanyCoverage[];
         warning?: string;
+        digest?: WatchlistDigest;
       };
       const companies = payload.companies ?? [];
       setCoverage(companies);
+      setWatchDigest(payload.digest ?? null);
       setStats(payload.stats ?? null);
-      setSource(payload.source ?? '');
-      setError(payload.warning ?? (payload.source === 'crawl-mock' ? '当前展示为演示兜底数据（库为空或暂不可用）。' : ''));
+      setSource(payload.source ?? 'watchlist');
+      setError(payload.warning ?? '');
       return companies;
     } catch (err) {
-      setSource('');
-      setError(`真实数据暂时无法读取：${String(err)}`);
+      setSource('watchlist');
+      setError(`自选数据暂时无法读取：${String(err)}`);
       return coverageRef.current;
     } finally {
       setLoading(false);
@@ -715,7 +722,7 @@ export default function ReportHome() {
 
   useEffect(() => {
     const kick = window.setTimeout(() => { void refreshCoverage(); }, 0);
-    const timer = window.setInterval(() => { void refreshCoverage(); }, 5 * 60 * 1000);
+    const timer = window.setInterval(() => { void refreshCoverage(); }, 20 * 1000);
     return () => {
       window.clearTimeout(kick);
       window.clearInterval(timer);
@@ -1683,9 +1690,14 @@ export default function ReportHome() {
       const response = await fetch('/api/companies/watch', {
         method: 'POST',
         signal: turn?.signal,
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ code: listed.code, name: listed.name }),
       });
+      if (response.status === 401) {
+        requestLoginForRestricted();
+        return;
+      }
       const payload = await response.json() as {
         ok?: boolean;
         error?: string;
@@ -1694,10 +1706,10 @@ export default function ReportHome() {
       };
       assertHomeVoiceTurn(turn);
       if (!response.ok) {
-        setWaitToast(payload.error ?? '加入监控池失败，请稍后重试');
+        setWaitToast(payload.error ?? '加入自选失败，请稍后重试');
         return;
       }
-      setWaitToast(payload.note ?? `已将「${listed.name}」加入监控池`);
+      setWaitToast(payload.note ?? `已将「${listed.name}」加入自选`);
       dialogRef.current = null;
       setDialog(null);
       const companies = await refreshCoverage();
@@ -1734,7 +1746,7 @@ export default function ReportHome() {
         paused?: boolean;
       };
       if (!response.ok) {
-        setWaitToast(payload.error ?? '采集触发失败，请稍后在「数据运营」重试');
+        setWaitToast(payload.error ?? '采集尚未完成，完成后会通知你，无需反复刷新');
         closeBlockingDialog({ resumeListen: true });
         return;
       }
@@ -2013,7 +2025,7 @@ export default function ReportHome() {
         </div>
       )}
 
-      {source === 'crawl-mock' && (
+      {source === 'crawl-mock' && coverage.length > 0 && (
         <div className="rh-mock-banner" role="status">
           ⚠️ 实时数据暂时不可用，当前为示例数据
           {error ? <span>{error}</span> : null}
@@ -2025,7 +2037,10 @@ export default function ReportHome() {
         </div>
       )}
 
+      <WatchDigestCard digest={watchDigest} />
+
       <section className="rh-companies" id="rh-companies" aria-labelledby="rh-list-title">
+        <h2 id="rh-list-title" className="sr-only">我的自选</h2>
         <div className="rh-filters" aria-label="筛选与排序">
           <div className="rh-filter-bar">
             <div className="rh-chip-row" role="radiogroup" aria-label="行业筛选">
@@ -2100,7 +2115,9 @@ export default function ReportHome() {
           </div>
         </div>
 
-        {loading ? (
+        {!loading && coverage.length === 0 ? (
+          <WatchlistEmpty guest={getAccountView().role !== 'user'} />
+        ) : loading ? (
           <div className="rh-card-grid rh-card-grid-all" aria-hidden="true">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="rh-skeleton-card">
@@ -2258,14 +2275,12 @@ export default function ReportHome() {
                   className={`rh-company-card rh-company-card-connected${cardState}`}
                 >
                   {parseFailed ? (
-                    <Link
-                      href={`/admin/sources?focus=${item.code}&parse=failed`}
+                    <span
                       className="rh-connected-badge rh-connected-badge-failed"
-                      title="打开数据运营·采集处理解析失败"
-                      onClick={(e) => e.stopPropagation()}
+                      title="本期报告暂不可用，完成后会通知你"
                     >
-                      解析失败
-                    </Link>
+                      暂不可用
+                    </span>
                   ) : (
                     <span className="rh-connected-badge" title="财报 PDF 已下载">
                       已接入
@@ -2302,7 +2317,7 @@ export default function ReportHome() {
                         <div className="rh-metric-empty">
                           <span>指标</span>
                           <strong>{parseFailed ? '解析失败' : '解析中'}</strong>
-                          <small>{parseFailed ? shortParseError(item.parseError) : 'PDF 已下载，核心指标尚未就绪'}</small>
+                          <small>{parseFailed ? shortParseError(item.parseError) : '正在抓取并解析，完成后会通知你，无需反复刷新'}</small>
                         </div>
                       ) : null}
                       {previewMetrics.map((metric) => {
@@ -2369,9 +2384,9 @@ export default function ReportHome() {
         ) : null}
 
         {filtered.length > 0 && !loading && listedOutsidePoolCandidates.length > 0 ? (
-          <div className="rh-sibling-candidates" role="region" aria-label="未在监控池的相关公司">
+          <div className="rh-sibling-candidates" role="region" aria-label="未在自选中的相关公司">
             <p className="rh-sibling-candidates-title">
-              还有 {listedOutsidePoolCandidates.length} 家相关公司未在监控池，点选加入：
+              还有 {listedOutsidePoolCandidates.length} 家相关公司还未加入自选，点选加入：
             </p>
             <ul className="rh-listed-candidates rh-listed-candidates-inline">
               {listedOutsidePoolCandidates.map((listed) => (
@@ -2394,7 +2409,7 @@ export default function ReportHome() {
             <b>没有符合条件的公司</b>
             {listedOutsidePoolCandidates.length > 1 ? (
               <>
-                <p>识别到多家相关公司，但不在当前监控池。点选要加入的一家：</p>
+                <p>识别到多家相关公司，但还不在自选中。点选要加入的一家：</p>
                 <ul className="rh-listed-candidates">
                   {listedOutsidePoolCandidates.map((listed) => (
                     <li key={listed.code}>
@@ -2412,20 +2427,20 @@ export default function ReportHome() {
             ) : listedOutsidePool ? (
               <>
                 <p>
-                  已识别到「{listedOutsidePool.name}」（{listedOutsidePool.code}），但不在当前监控池。
+                  已识别到「{listedOutsidePool.name}」（{listedOutsidePool.code}），但还不在自选中。
                 </p>
                 <button
                   type="button"
                   onClick={() => { void openMissingCompanyDialog({ listed: listedOutsidePool, query: search.trim(), fromVoice: voice.active }); }}
                 >
-                  加入监控池
+                  加入自选
                 </button>
               </>
             ) : (
               <>
                 <p>
                   {keyword
-                    ? '未匹配到监控池或识别名录中的公司。可换简称 / 六位代码；名录缺漏可上报管理员。'
+                    ? '未匹配到自选或识别名录中的公司。可换简称或六位代码，搜到即可加入自选。'
                     : '试试调整行业，或换一个公司简称 / 六位代码；完整问题请点发送走追问路径。'}
                 </p>
                 <div className="rh-empty-actions">
@@ -2478,9 +2493,9 @@ export default function ReportHome() {
           >
             {dialog.kind === 'missing-company' ? (
               <>
-                <h2 id="rh-dialog-title">加入监控池</h2>
+                <h2 id="rh-dialog-title">加入自选</h2>
                 <p>
-                  已识别到「{dialog.listed.name}」（{dialog.listed.code}），但不在当前监控池。
+                  已识别到「{dialog.listed.name}」（{dialog.listed.code}），但还不在自选中。
                   {dialog.query && hasQuestionIntent(dialog.query) ? ' 加入后将继续用刚才的问题进入详情。' : ''}
                   {dialog.fromVoice ? ' 可以说「加入」或「取消」。' : ''}
                 </p>
@@ -2489,7 +2504,7 @@ export default function ReportHome() {
                     取消
                   </button>
                   <button type="button" className="rh-dialog-confirm" disabled={dialogBusy} onClick={() => void confirmMissingCompany()}>
-                    {dialogBusy ? '加入中…' : '加入监控池'}
+                    {dialogBusy ? '加入中…' : '加入自选'}
                   </button>
                 </div>
               </>
@@ -2545,7 +2560,7 @@ export default function ReportHome() {
                   {periodLabelZh(dialog.period)}尚未下载，是否立即采集？
                 </h2>
                 <p>
-                  {dialog.company.name}（{dialog.company.code}）在监控池内，但未找到匹配的
+                  {dialog.company.name}（{dialog.company.code}）已在自选中，但未找到匹配的
                   {periodLabelZh(dialog.period)}可读财报。确认后将对该代码触发一轮温和积压处理（每次最多下载/解析 1 份）。
                 </p>
                 <div className="rh-dialog-actions">
@@ -2610,6 +2625,7 @@ export default function ReportHome() {
           ) : null}
         </div>
       )}
+      <ProductFooter />
     </section>
   );
 }

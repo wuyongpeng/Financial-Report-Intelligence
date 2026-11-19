@@ -58,6 +58,14 @@ export default function CompanyCodeClient({ code }: { code: string }) {
     if (page < 1 && !quote) return null;
     return { page: page >= 1 ? page : 1, quote };
   }, [searchParams]);
+  const preferredConversation = useMemo(() => {
+    const value = searchParams.get('conversation');
+    return value && value.trim() ? value.trim() : null;
+  }, [searchParams]);
+  const preferredReport = useMemo(() => {
+    const value = searchParams.get('report');
+    return value && value.trim() ? value.trim() : null;
+  }, [searchParams]);
   const meta = (companiesJson as CompanyMeta[]).find((item) => item.code === code) ?? null;
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,7 +89,10 @@ export default function CompanyCodeClient({ code }: { code: string }) {
       const real = reports.filter((item) => item.id && !isPendingReportId(item.id));
       const periodParam = preferredPeriod;
       let preferred = real[0];
-      if (periodParam) {
+      if (preferredReport) {
+        preferred = real.find((item) => item.id === preferredReport) ?? preferred;
+      }
+      if (periodParam && (!preferredReport || !real.some((item) => item.id === preferredReport))) {
         const hint = parsePeriodHints(periodParam);
         if (!hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(periodParam)) {
           hint.token = periodParam.toUpperCase();
@@ -92,7 +103,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
           || item.title.includes(periodParam)
         ) ?? preferred;
       }
-      if (!preferred || (preferred && !periodParam)) {
+      if (!preferredReport && (!preferred || !periodParam)) {
         preferred = real.find((item) => item.metrics?.length) ?? real[0] ?? preferred;
       }
       return preferred ?? null;
@@ -140,7 +151,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
         if (elapsed < WATCH_COLLECT_TIMEOUT_MS) {
           timer = window.setTimeout(() => { void load(true); }, WATCH_COLLECT_POLL_MS);
         } else {
-          setCollectError('财报还在采集中，请稍后刷新，或再试一次。');
+          setCollectError('抓取比预期更久。完成后会通知你，无需反复刷新。');
         }
       } catch (err) {
         if (!active) return;
@@ -161,7 +172,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
       active = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [code, meta, preferredPeriod]);
+  }, [code, meta, preferredPeriod, preferredReport]);
 
   function approveReport(reportId: string) {
     setReviewReportId(reportId);
@@ -220,7 +231,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
           <div className="honest-empty page-opening" role="status" aria-live="polite">
             <span className="page-opening-spin" aria-hidden="true" />
             <b>正在抓取并解析 {openingCompanyLabel(code, meta?.name ?? report?.company_name)}</b>
-            <p>{collectError || '加入监控池后会自动采集财报，完成后将自动打开。无需到数据运营页操作。'}</p>
+            <p>{collectError || '加入自选后会自动采集财报，完成后会通知你并自动打开，无需反复刷新。'}</p>
             {collectError ? (
               <button
                 className="primary"
@@ -249,7 +260,7 @@ export default function CompanyCodeClient({ code }: { code: string }) {
         <section className="lane-page">
           <div className="honest-empty">
             <b>未找到公司 {code}</b>
-            <p>请确认六位 A 股代码，或返回首页从监控池进入。</p>
+            <p>请确认六位 A 股代码，或返回首页搜索后加入自选。</p>
             <button className="primary" onClick={() => router.push('/')}>返回首页</button>
           </div>
         </section>
@@ -270,9 +281,11 @@ export default function CompanyCodeClient({ code }: { code: string }) {
         onBack={() => router.push('/')}
         onSelect={() => undefined}
         onApprove={adminMode ? approveReport : undefined}
-        autoAskQuestion={autoAskQuestion}
+        autoAskQuestion={preferredConversation ? null : autoAskQuestion}
         preferredPeriod={preferredPeriod}
         preferredCite={preferredCite}
+        preferredConversation={preferredConversation}
+        preferredReport={preferredReport}
       />
       {adminDialogOpen && (
         <div className="drawer-backdrop" onClick={() => !adminSubmitting && setAdminDialogOpen(false)}>

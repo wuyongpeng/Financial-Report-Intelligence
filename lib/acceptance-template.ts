@@ -67,7 +67,7 @@ export const ACCEPTANCE_TEMPLATE: AcceptanceTemplateGroup[] = [
       {
         id: 'A2',
         title: '池外加入（可选）',
-        steps: '搜一家未入库公司，加入监控池，并立即抓取。',
+        steps: '搜一家未入库公司，加入自选，并立即抓取。',
         expected: '有成功提示。数据采集页能看到这条任务。',
       },
       {

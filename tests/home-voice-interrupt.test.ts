@@ -66,9 +66,9 @@ test('echo/filler do not interrupt, distinct new questions do; dialog choices re
   assert.equal(acceptsHomeBargeSpeech('你想选择哪一个', prompt), false);
   assert.equal(acceptsHomeBargeSpeech('换个问题，茅台利润多少', prompt), true);
   assert.equal(acceptsHomeBargeSpeech('东鹏饮料', prompt, ['东鹏饮料']), true);
-  assert.equal(acceptsHomeBargeSpeech('是', '是否加入监控池', ['是', '加入', '取消']), true);
-  assert.equal(acceptsHomeBargeSpeech('加入', '是否加入监控池', ['是', '加入', '取消']), true);
-  assert.equal(acceptsHomeBargeSpeech('是否加入监控池', '是否加入监控池', ['加入', '取消']), false);
+  assert.equal(acceptsHomeBargeSpeech('是', '是否加入自选', ['是', '加入', '取消']), true);
+  assert.equal(acceptsHomeBargeSpeech('加入', '是否加入自选', ['是', '加入', '取消']), true);
+  assert.equal(acceptsHomeBargeSpeech('是否加入自选', '是否加入自选', ['加入', '取消']), false);
 });
 
 test('interrupted picker/join answers retain existing original-question routing contracts', () => {

@@ -54,6 +54,45 @@ export async function listConversations(owner: string, reportId: string | null) 
     WHERE owner_key=${owner} AND (${reportId}::text IS NULL OR report_id=${reportId}) ORDER BY updated_at DESC LIMIT 50`;
 }
 
+export type OwnerConversation = {
+  id: string;
+  report_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  code: string | null;
+  company_name: string | null;
+  period: string | null;
+};
+
+export async function listOwnerConversations(owner: string): Promise<OwnerConversation[]> {
+  await ensureBackendSchema();
+  const rows = await getDb()<Array<{
+    id: string; report_id: string; title: string; created_at: string | Date; updated_at: string | Date;
+    code: string | null; company_name: string | null; period: string | null; report_title: string | null; published_at: string | Date | null;
+  }>>`
+    SELECT c.id, c.report_id, c.title, c.created_at, c.updated_at,
+      a.code, a.company_name, a.title AS report_title, a.published_at,
+      (SELECT fm.period FROM financial_metrics fm WHERE fm.announcement_id=a.id LIMIT 1) AS period
+    FROM chat_conversations c
+    LEFT JOIN announcements a ON a.id=c.report_id
+    WHERE c.owner_key=${owner}
+    ORDER BY c.updated_at DESC
+    LIMIT 50
+  `;
+  const { canonicalPeriodFromTitle } = await import('./ingest-period');
+  return rows.map((row) => ({
+    id: String(row.id),
+    report_id: String(row.report_id),
+    title: String(row.title),
+    created_at: new Date(row.created_at).toISOString(),
+    updated_at: new Date(row.updated_at).toISOString(),
+    code: row.code,
+    company_name: row.company_name,
+    period: row.period || (row.report_title ? canonicalPeriodFromTitle(row.report_title, row.published_at) : null),
+  }));
+}
+
 export async function readConversation(owner: string, id: string) {
   await ensureBackendSchema();
   const db = getDb();

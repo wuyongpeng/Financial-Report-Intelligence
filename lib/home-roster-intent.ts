@@ -7,10 +7,10 @@ import { normalizeVoiceText } from './voice/text-normalize';
 
 /** List / presence / objective “worth analyzing” / open-by-name on home. */
 const LIST_RE =
-  /(?:首页|主页|当前|现在|监控池|列表|卡片).{0,20}(?:有哪些|都有哪些|收入了哪些|展示|哪些公司|有什么公司)|有哪些公司|都有哪些公司|都收入了哪些|监控池里有什么|首页上有什么|当前都?收入了哪些/;
+  /(?:首页|主页|当前|现在|监控池|自选|列表|卡片).{0,20}(?:有哪些|都有哪些|收入了哪些|展示|哪些公司|有什么公司)|有哪些公司|都有哪些公司|都收入了哪些|监控池里有什么|自选里有什么|首页上有什么|当前都?收入了哪些/;
 
 const PRESENCE_RE =
-  /在不在|有没有|在吗|在不在(?:首页|列表|监控池|里面)|首页有没有|列表里有没有|监控池有没有/;
+  /在不在|有没有|在吗|在不在(?:首页|列表|监控池|自选|里面)|首页有没有|列表里有没有|监控池有没有|自选有没有/;
 
 const WORTH_RE =
   /哪些值得(?:分析|看|买)|值得分析一下|值得买|推荐(?:先)?看哪|推荐买|先看哪(?:家|个)|哪家值得|哪些可以先看|客观信号|买哪个|买哪家/;
@@ -19,7 +19,7 @@ const OPEN_RE =
   /^(?:打开|进入|跳到|跳转|打开公司)(.+)$/;
 
 const HOME_SCOPE_RE =
-  /首页|主页|监控池|列表里|卡片上|当前展示|现在展示/;
+  /首页|主页|监控池|自选|列表里|卡片上|当前展示|现在展示/;
 
 const DISCOVERY_LIST_RE =
   /有哪些|哪些公司|什么公司|哪几家|哪家|有谁|有什么|相关的公司|有关的公司|同行|同业|做.{0,10}的|从事|涉及.{0,8}公司|找.{0,6}公司/;
@@ -132,7 +132,7 @@ export function homeRosterSourcePreference(
   text: string,
 ): 'pool' | 'filtered' | 'visible' {
   const q = normalizeVoiceText(text);
-  if (/监控池|全部公司|都收入|收入了哪些/.test(q)) return 'pool';
+  if (/监控池|自选|全部公司|都收入|收入了哪些/.test(q)) return 'pool';
   // Theme scans need the whole pool. A plain 「首页有哪些公司」stays on what's on screen.
   if (isHomeDiscoveryQuestion(q) && !isHomeRosterListQuestion(q)) return 'pool';
   if (/筛选|当前列表|列表里/.test(q)) return 'filtered';

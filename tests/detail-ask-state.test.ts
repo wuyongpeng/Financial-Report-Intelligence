@@ -22,7 +22,7 @@ test('slow history hydration cannot replace active new answer, cancelled navigat
 test('removing q never rehydrates the current thread; actual unfinished history and failures are not globally hidden', () => {
   const source = readFileSync(new URL('../app/company-detail.tsx', import.meta.url), 'utf8');
   const hydrate = source.slice(source.indexOf('const hydrationReportId ='), source.indexOf('  useEffect(() => {\n    const abort = new AbortController();\n    // eslint-disable-next-line react-hooks/set-state-in-effect'));
-  assert.ok(hydrate.includes('  }, [selected.id]);'));
+  assert.ok(hydrate.includes('  }, [selected.id, preferredConversation]);'));
   assert.ok(!hydrate.includes('[selected.id, autoAskQuestion]'));
   assert.ok(hydrate.includes('if (!canHydrate()) return;'));
   assert.ok(hydrate.includes('这次回答尚未完成，可重新提问。'), 'real interrupted historical answer remains honest');

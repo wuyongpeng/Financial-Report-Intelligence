@@ -29,7 +29,7 @@ import { AnswerFeedback, type AnswerFeedbackPayload } from './answer-feedback';
 import PdfEvidence from './pdf-evidence';
 import { Icon } from './ui-icons';
 import { clientUuid } from '@/lib/client-uuid';
-import { handleQuotaFailure, refreshAccount } from '@/lib/account-client';
+import { handleQuotaFailure, refreshAccount, requestLoginForRestricted } from '@/lib/account-client';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { reflectReaderMemory } from '@/lib/reader-memory-client';
 import { CONVERSATION_DELETED_EVENT, MEMORY_CLEARED_EVENT, readReaderPrefs, readerChatFields } from '@/lib/reader-prefs-client';
@@ -49,6 +49,7 @@ import { nextPdfZoom, VOICE_PDF_ZOOM_DEFAULT, VOICE_PDF_ZOOM_MIN, VOICE_PDF_ZOOM
 import { VOICE_CITE_MISSING_LINE } from '@/lib/voice/cite-intent';
 import { voiceStyleConfirmLine, type VoiceAnswerStyle } from '@/lib/voice/style-intent';
 import { AccountMenu } from '@/components/account-access';
+import { CollectStatusNote, NotificationBell, shareCurrentAnswer } from '@/components/product-workspace';
 import HomeOverflowMenu from './home-overflow-menu';
 import { findTocPage, matchSection, buildSectionReadChunks } from '@/lib/voice/section-match';
 import { useVoiceSession, type VoiceUtteranceResult } from '@/components/voice-session-provider';
@@ -288,9 +289,12 @@ function FocusShown({ note, items }: { note: string; items: FocusItem[] }) {
   );
 }
 
-export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null, preferredCite = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null; preferredCite?: { page: number; quote: string } | null }) {
+export default function CompanyDetail({ initialReport, onBack, onSelect, onApprove, autoAskQuestion = null, preferredPeriod = null, preferredCite = null, preferredConversation = null, preferredReport = null }: { initialReport: Report; onBack: () => void; onSelect: (id: string) => void; onApprove?: (reportId: string) => void; autoAskQuestion?: string | null; preferredPeriod?: string | null; preferredCite?: { page: number; quote: string } | null; preferredConversation?: string | null; preferredReport?: string | null }) {
   const [reports, setReports] = useState<Report[]>([initialReport]);
   const [selected, setSelected] = useState(initialReport);
+  const [watching, setWatching] = useState(false);
+  const [watchBusy, setWatchBusy] = useState(false);
+  const [sharedSlot, setSharedSlot] = useState<number | null>(null);
   const [outline, setOutline] = useState<Outline>(emptyOutline);
   const [analysis, setAnalysis] = useState<Analysis>({});
   const [loading, setLoading] = useState(() => !initialReport.id.startsWith('pending:') && Boolean(initialReport.parsed_at || initialReport.metrics.length));
@@ -467,9 +471,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       if (preferredPeriod && !hint.token && /^20\d{2}(FY|H1|Q[1-3])$/i.test(preferredPeriod)) {
         hint.token = preferredPeriod.toUpperCase();
       }
-      const matched = preferredPeriod
+      const reportMatch = preferredReport ? all.find(r => r.id === preferredReport) : null;
+      const matched = reportMatch ?? (preferredPeriod
         ? all.find(r => reportMatchesPeriod(r, hint) || r.metrics.some(m => m.period === preferredPeriod) || r.title.includes(preferredPeriod))
-        : null;
+        : null);
       if (matched) {
         selectReport(matched);
         setPeriodMiss(null);
@@ -527,7 +532,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }, [selected.id, selected.parsed_at, canLoadReportData]);
   useEffect(() => {
     if (!quietToast) return;
-    const timer = window.setTimeout(() => setQuietToast(null), 2000);
+    const timer = window.setTimeout(() => setQuietToast(null), 5000);
     return () => window.clearTimeout(timer);
   }, [quietToast]);
   useEffect(() => {
@@ -546,7 +551,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     }
     const toastTimer = first ? window.setTimeout(() => {
       if (!abort.signal.aborted) {
-        setQuietToast({ text: downloading ? '正在抓取并解析本期财报' : '正在解析本期财报', at: Date.now() });
+        setQuietToast({ text: downloading ? '正在抓取并解析本期财报，完成后会通知你，无需反复刷新' : '正在解析本期财报，完成后会通知你，无需反复刷新', at: Date.now() });
       }
     }, 0) : 0;
     void (async () => {
@@ -638,6 +643,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
         // Guest cookie must land before hydrate so Postgres owner_key stays stable on HTTP demos.
         await ensureGuestCookie();
         if (abort.signal.aborted) return;
+        if (preferredConversation) {
+          const detail = await fetch(`/api/conversations/${encodeURIComponent(preferredConversation)}`, { signal: abort.signal, cache: 'no-store', credentials: 'same-origin' });
+          const payload = await readContractJson(detail, parseConversationDetailResponse);
+          if (!canHydrate()) return;
+          conversationIds.current.set(selected.id, preferredConversation);
+          setMessages(payload.messages.map(m => ({ role: m.role, text: m.content || (m.role === 'assistant' ? '这次回答尚未完成，可重新提问。' : ''), citations: m.evidence })));
+          return;
+        }
         if (!readReaderPrefs().memory) {
           conversationIds.current.delete(selected.id);
           if (canHydrate()) setMessages([]);
@@ -690,7 +703,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
       finally { if (!abort.signal.aborted) { memoryReady.current = true; setMemoryLoading(false); } }
     })();
     return () => abort.abort();
-  }, [selected.id]);
+  }, [selected.id, preferredConversation]);
   useEffect(() => {
     const onCleared = () => {
       conversationIds.current.clear();
@@ -2441,7 +2454,69 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     });
   }
 
-  async function copyAnswer(text: string, index: number) {
+  async   useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch('/api/companies/watch', { cache: 'no-store', credentials: 'same-origin' });
+        if (!response.ok) return;
+        const payload = await response.json() as { companies?: Array<{ code: string }> };
+        if (active) setWatching((payload.companies ?? []).some((item) => item.code === selected.code));
+      } catch {
+        /* guest or network */
+      }
+    })();
+    return () => { active = false; };
+  }, [selected.code]);
+
+  async function toggleWatch() {
+    if (watchBusy) return;
+    if (requestLoginForRestricted()) return;
+    setWatchBusy(true);
+    try {
+      if (watching) {
+        const response = await fetch(`/api/companies/watch?code=${encodeURIComponent(selected.code)}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (response.status === 401) { requestLoginForRestricted(); return; }
+        if (response.ok) setWatching(false);
+      } else {
+        const response = await fetch('/api/companies/watch', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code: selected.code, name: selected.company_name }),
+        });
+        if (response.status === 401) { requestLoginForRestricted(); return; }
+        if (response.ok) setWatching(true);
+      }
+    } finally {
+      setWatchBusy(false);
+    }
+  }
+
+  async function shareAnswerAt(index: number) {
+    const message = messages[index];
+    if (!message) return;
+    const question = [...messages.slice(0, index)].reverse().find((item) => item.role === 'user')?.text ?? '';
+    try {
+      const url = await shareCurrentAnswer({
+        question,
+        answer: message.text,
+        evidence: message.citations,
+        code: selected.code,
+        companyName: selected.company_name,
+        period: period(selected),
+        reportId: selected.id,
+        conversationId: conversationIds.current.get(selected.id) ?? null,
+      });
+      if (!url) return;
+      setSharedSlot(index);
+      window.setTimeout(() => setSharedSlot((slot) => slot === index ? null : slot), 2000);
+    } catch {
+      setQuietToast({ text: '分享暂时无法完成，请稍后重试', at: Date.now() });
+    }
+  }
+
+function copyAnswer(text: string, index: number) {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -2963,7 +3038,10 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const collapseGate = paneCollapseGate({ source: sourceCollapsed, middle: middleCollapsed, chat: chatCollapsed });
   const paneFlex = effectivePaneFlex(colRatios, { middleCollapsed });
   return <section className={`company-workspace ${sourceDrawerOpen?'cd-reading-open':''} ${chatCollapsed?'cd-chat-collapsed':''} ${sourceCollapsed&&!sourceDrawerOpen?'cd-source-collapsed':''} ${middleCollapsed?'cd-middle-collapsed':''}`} >
-    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions">{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}<AccountMenu /><HomeOverflowMenu showSources={false} pageLabel={`${selected.company_name} ${period(selected)}`} /></div></header>
+    <header className="cd-company-head"><div className="cd-company-identity"><button className="cd-back" onClick={onBack} aria-label="返回公司列表"><Icon name="arrowLeft" size={16} /></button><div className="cd-monogram">{selected.company_name.slice(0,1)}</div><div className="cd-company-meta"><h1>{selected.company_name}<span>{selected.code}</span></h1><p>{selected.industry}</p><div className="cd-period-wrap"><button type="button" className="cd-period-switch" aria-expanded={reportListOpen} aria-controls="cd-report-periods" onClick={()=>setReportListOpen(open=>!open)}>{period(selected)} {reportTypeLabel(selected)} <span className="cd-picker-chevron" aria-hidden="true"><Icon name={reportListOpen?'chevronUp':'chevronDown'} size={14} /></span></button>{reportListOpen && <div className="cd-report-list cd-report-popover" id="cd-report-periods" aria-label="选择报告期">{reports.map((r,i) => <button key={r.id} aria-pressed={r.id===selected.id} className={r.id===selected.id?'selected':''} onClick={()=>selectReport(r)}><span><b>{period(r)} {reportTypeLabel(r)}</b><small>{r.metrics.length} 项指标 · {r.parsed_at?'已解析':'解析中'}</small></span>{i===0 && <em>最新</em>}</button>)}</div>}</div></div></div><div className="cd-head-actions">{onApprove && selected.status !== 'online' && <button className="cd-button" onClick={() => onApprove(selected.id)}>复核上线</button>}<button type="button" className="cd-button" disabled={watchBusy} onClick={() => void toggleWatch()}>{watching ? '移出自选' : '加入自选'}</button><NotificationBell /><AccountMenu /><HomeOverflowMenu showSources={false} pageLabel={`${selected.company_name} ${period(selected)}`} /></div></header>
+    {!selected.parsed_at || selected.metrics.length === 0 ? (
+      <CollectStatusNote status={{ kind: 'running', label: '正在抓取并解析', detail: '完成后会通知你，无需反复刷新。' }} />
+    ) : null}
     {hasReportAuditRisk(selected) ? (
       <button
         type="button"
@@ -3295,7 +3373,11 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 <button type="button" aria-label="复制" title="复制" onClick={()=>void copyAnswer(m.text, i)}>
                   <ActIcon><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></ActIcon>
                 </button>
+                <button type="button" aria-label="分享" title="分享" onClick={()=>void shareAnswerAt(i)}>
+                  <ActIcon><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" /></ActIcon>
+                </button>
                 {copiedSlot===i && <span className="cd-copied" role="status">已复制</span>}
+                {sharedSlot===i && <span className="cd-copied" role="status">链接已复制</span>}
                 </div>
                 <AnswerFeedback
                   kind={m.feedback}

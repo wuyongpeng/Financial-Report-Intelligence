@@ -241,5 +241,45 @@ async function migrate() {
       count INTEGER NOT NULL DEFAULT 0,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
+    await tx`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email TEXT`;
+    await tx`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_notify BOOLEAN NOT NULL DEFAULT TRUE`;
+    await tx`CREATE TABLE IF NOT EXISTS user_watchlist (
+      user_key TEXT NOT NULL,
+      code TEXT NOT NULL REFERENCES companies(code) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_notified_period TEXT,
+      PRIMARY KEY (user_key, code)
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS user_watchlist_code_idx ON user_watchlist (code)`;
+    await tx`CREATE TABLE IF NOT EXISTS user_notifications (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_key TEXT NOT NULL,
+      type TEXT NOT NULL,
+      code TEXT NOT NULL,
+      period TEXT NOT NULL DEFAULT '',
+      report_id TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      href TEXT,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS user_notifications_user_idx ON user_notifications (user_key, created_at DESC)`;
+    await tx`CREATE UNIQUE INDEX IF NOT EXISTS user_notifications_dedupe_idx
+      ON user_notifications (user_key, type, code, period, report_id)`;
+    await tx`CREATE TABLE IF NOT EXISTS shared_answers (
+      id TEXT PRIMARY KEY,
+      owner_key TEXT NOT NULL,
+      conversation_id UUID,
+      report_id TEXT,
+      code TEXT,
+      company_name TEXT,
+      period TEXT,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await tx`CREATE INDEX IF NOT EXISTS shared_answers_owner_idx ON shared_answers (owner_key, created_at DESC)`;
   });
 }

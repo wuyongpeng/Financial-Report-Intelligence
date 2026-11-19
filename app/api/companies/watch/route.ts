@@ -2,10 +2,11 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import ashareUniverse from '@/data/ashare-universe.json';
 import { after } from 'next/server';
-import { authorizeProductWrite } from '@/lib/auth';
 import { classifyCompany } from '@/lib/company-classify';
 import { getDb } from '@/lib/db';
 import { prioritizeCompanyCrawl } from '@/lib/ingest';
+import { jsonOk, loginRequired, registeredUserKey } from '@/lib/user-key';
+import { addToWatchlist, listWatchlist, removeFromWatchlist } from '@/lib/user-watchlist';
 import { watchJoinCrawlOptions } from '@/lib/watch-collect';
 
 export const dynamic = 'force-dynamic';
@@ -22,10 +23,6 @@ type CompanyFileRow = {
   heat?: 'S' | 'A' | 'B';
   weight: number;
 };
-
-function authorized(request: Request) {
-  return Boolean(authorizeProductWrite(request));
-}
 
 function companiesJsonPath() {
   return path.join(process.cwd(), 'data', 'companies.json');
@@ -75,10 +72,26 @@ async function lookupName(code: string, exchange: 'SSE' | 'SZSE'): Promise<strin
   }
 }
 
-export async function POST(request: Request) {
-  if (!authorized(request)) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+export async function GET(request: Request) {
+  const userKey = registeredUserKey(request);
+  if (!userKey) return loginRequired();
+  return jsonOk({ companies: await listWatchlist(userKey) });
+}
+
+export async function DELETE(request: Request) {
+  const userKey = registeredUserKey(request);
+  if (!userKey) return loginRequired();
+  const code = String(new URL(request.url).searchParams.get('code') ?? '').trim();
+  if (!/^\d{6}$/.test(code)) {
+    return Response.json({ error: '请提供六位股票代码' }, { status: 400 });
   }
+  const removed = await removeFromWatchlist(userKey, code);
+  return jsonOk({ ok: true, removed });
+}
+
+export async function POST(request: Request) {
+  const userKey = registeredUserKey(request);
+  if (!userKey) return loginRequired();
 
   let body: { code?: string; name?: string } = {};
   try { body = await request.json(); } catch { /* empty */ }
@@ -190,6 +203,8 @@ export async function POST(request: Request) {
       updated_at=EXCLUDED.updated_at
   `;
 
+  await addToWatchlist(userKey, code);
+
   const enabled = await db<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM companies WHERE enabled=true`;
 
   // User-facing join must start collect immediately; do not wait for the ops poll.
@@ -216,6 +231,6 @@ export async function POST(request: Request) {
     enabledCount: enabled[0]?.n ?? null,
     fromUniverse: Boolean(listed),
     tagSource: classified.source,
-    note: `已将「${finalName}」加入监控池`,
+    note: `已将「${finalName}」加入自选`,
   }, { headers: { 'cache-control': 'no-store' } });
 }

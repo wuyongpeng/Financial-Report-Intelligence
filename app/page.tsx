@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import ReportHome from './report-home';
 import { AccountMenu } from '@/components/account-access';
+import { NotificationBell } from '@/components/product-workspace';
 import HomeOverflowMenu from './home-overflow-menu';
 
 export default async function HomePage({
@@ -17,6 +18,7 @@ export default async function HomePage({
       <header className="topbar home-topbar">
         <div className="home-topbar-spacer" aria-hidden="true" />
         <div className="top-actions">
+          <NotificationBell />
           <AccountMenu />
           <HomeOverflowMenu showSources={false} />
         </div>

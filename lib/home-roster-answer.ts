@@ -32,7 +32,7 @@ function shortList(rows: HomeRosterRow[], limit = 12): string {
 
 function presenceNeedle(text: string): string {
   return normalizeVoiceText(text)
-    .replace(/(?:在不在|有没有|在吗|在不在首页|在不在列表|在不在监控池|首页有没有|列表里有没有|监控池有没有)/g, ' ')
+    .replace(/(?:在不在|有没有|在吗|在不在首页|在不在列表|在不在监控池|在不在自选|首页有没有|列表里有没有|监控池有没有|自选有没有)/g, ' ')
     .replace(/首页|主页|监控池|列表|里面|吗|呢|啊|呀|吧|的|公司/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -79,7 +79,7 @@ export function answerHomeRosterLocally(
   if (isHomeRosterListQuestion(q)) {
     if (!rows.length) {
       return {
-        answer: '当前首页可见清单是空的。换个行业筛选，或稍后再问监控池收入了哪些公司。',
+        answer: '当前还没有自选公司。搜索公司或代码后即可加入自选。',
         mode: 'local',
       };
     }

@@ -22,3 +22,15 @@
 .acc-error{margin:10px 0 0;font-size:13px;color:#4b5563}
 .acc-switch{display:block;margin:10px 0 0 auto;border:0;background:none;color:#6b7280;font-size:12px}
 .acc-dialog-actions{margin-top:16px}
+
+.acc-panel{width:260px}
+.acc-panel-links{display:flex;flex-direction:column;align-items:stretch;gap:2px}
+.acc-panel-links>button{height:auto;padding:8px 0;border:0;background:transparent;color:#4b5563;font-size:13px;text-align:left}
+.acc-legal{display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:10px;padding-top:8px;border-top:1px solid #e6e8ec}
+.acc-legal a{font-size:12px;color:#6b7280;text-decoration:none}
+.acc-history{list-style:none;margin:0;padding:0;max-height:360px;overflow:auto}
+.acc-history-item{width:100%;border:0;border-bottom:1px solid #e6e8ec;background:transparent;padding:10px 0;text-align:left}
+.acc-history-item strong{display:block;font-size:13px;color:#3f4650}
+.acc-history-item span{display:block;margin-top:2px;font-size:12px;color:#6b7280}
+.acc-check{display:flex;align-items:center;gap:8px;margin:12px 0 0;font-size:13px;color:#4b5563}
+.acc-notice{margin:10px 0 0;font-size:13px;color:#4b5563}

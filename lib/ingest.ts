@@ -589,6 +589,17 @@ async function parseStoredAnnouncement(
       `;
     });
     clearIngestProgress(record.id);
+    try {
+      const { notifyWatchersOfNewReport } = await import('./user-notifications');
+      await notifyWatchersOfNewReport({
+        code: record.code,
+        companyName: record.company_name,
+        period,
+        reportId: record.id,
+      });
+    } catch (error) {
+      console.error('[notify] new report failed', record.id, error);
+    }
     return 'parsed';
   } catch (error) {
     clearIngestProgress(record.id);

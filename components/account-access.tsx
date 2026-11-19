@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { PasswordInput } from '@/components/password-input';
@@ -16,6 +18,7 @@ import {
   subscribeAccount,
   type AccountView,
 } from '@/lib/account-client';
+import { LEGAL_PAGES, legalPath } from '@/lib/legal-content';
 import './account-access.css';
 
 function useAccountView() {
@@ -56,6 +59,7 @@ export function AccountMenu() {
   const pathname = usePathname();
   const account = useAccountView();
   const [open, setOpen] = useState(false);
+  const [workspace, setWorkspace] = useState<'history' | 'email' | 'delete' | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const hidden = isAdminPath(pathname);
@@ -88,6 +92,7 @@ export function AccountMenu() {
         : '注册后可对话 100 次';
 
   return (
+    <>
     <div className="acc-menu" ref={rootRef}>
       <button
         type="button"
@@ -110,13 +115,215 @@ export function AccountMenu() {
               <button type="button" className="acc-btn-secondary" onClick={() => { setOpen(false); openAccountDialog('login'); }}>登录</button>
               <button type="button" className="acc-btn-primary" onClick={() => { setOpen(false); openAccountDialog('register'); }}>注册</button>
             </div>
+            <div className="acc-legal">
+              {LEGAL_PAGES.map((page) => (
+                <Link key={page.slug} href={legalPath(page.slug)} onClick={() => setOpen(false)}>{page.title}</Link>
+              ))}
+            </div>
           ) : (
-            <div className="acc-panel-actions">
-              <button type="button" className="acc-btn-secondary" onClick={() => { setOpen(false); void submitLogout(); }}>退出</button>
+            <div className="acc-panel-links">
+              <button type="button" onClick={() => { setOpen(false); setWorkspace('history'); }}>对话历史</button>
+              <button type="button" onClick={() => { setOpen(false); setWorkspace('email'); }}>提醒邮箱</button>
+              <button type="button" onClick={() => { setOpen(false); void submitLogout(); }}>退出</button>
+              <button type="button" onClick={() => { setOpen(false); setWorkspace('delete'); }}>注销账号</button>
+              <div className="acc-legal">
+                {LEGAL_PAGES.map((page) => (
+                  <Link key={page.slug} href={legalPath(page.slug)} onClick={() => setOpen(false)}>{page.title}</Link>
+                ))}
+              </div>
             </div>
           )}
         </div>
       ) : null}
+    </div>
+    {workspace ? <AccountWorkspace panel={workspace} onClose={() => setWorkspace(null)} /> : null}
+    </>
+  );
+}
+
+
+type HistoryItem = {
+  id: string;
+  report_id: string;
+  title: string;
+  code: string | null;
+  company_name: string | null;
+  period: string | null;
+};
+
+function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'email' | 'delete'; onClose: () => void }) {
+  const router = useRouter();
+  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(panel === 'history');
+  const [email, setEmail] = useState('');
+  const [emailNotify, setEmailNotify] = useState(true);
+  const [password, setPassword] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    if (panel === 'history') {
+      void (async () => {
+        try {
+          const response = await fetch('/api/me/conversations', { cache: 'no-store', credentials: 'same-origin' });
+          const payload = await response.json().catch(() => ({})) as { conversations?: HistoryItem[]; error?: string };
+          if (!active) return;
+          if (!response.ok) {
+            setError(payload.error || '对话历史暂时无法读取');
+            setLoading(false);
+            return;
+          }
+          setItems(payload.conversations ?? []);
+        } catch {
+          if (active) setError('对话历史暂时无法读取');
+        } finally {
+          if (active) setLoading(false);
+        }
+      })();
+    }
+    if (panel === 'email') {
+      void (async () => {
+        try {
+          const response = await fetch('/api/me/profile', { cache: 'no-store', credentials: 'same-origin' });
+          const payload = await response.json().catch(() => ({})) as { email?: string | null; emailNotify?: boolean; error?: string };
+          if (!active) return;
+          if (!response.ok) {
+            setError(payload.error || '账号信息暂时无法读取');
+            return;
+          }
+          setEmail(payload.email ?? '');
+          setEmailNotify(payload.emailNotify !== false);
+        } catch {
+          if (active) setError('账号信息暂时无法读取');
+        }
+      })();
+    }
+    return () => { active = false; };
+  }, [panel]);
+
+  async function saveEmail() {
+    setPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const response = await fetch('/api/me/profile', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, emailNotify }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) {
+        setError(payload.error || '保存失败');
+        return;
+      }
+      setNotice('提醒邮箱已保存。新报告准备好后会发到这个邮箱。');
+    } catch {
+      setError('保存失败，请稍后重试');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function deleteAccount() {
+    setPending(true);
+    setError('');
+    try {
+      const response = await fetch('/api/auth/account', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) {
+        setError(payload.error || '注销失败');
+        return;
+      }
+      await refreshAccount();
+      onClose();
+    } catch {
+      setError('注销失败，请稍后重试');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const title = panel === 'history' ? '对话历史' : panel === 'email' ? '提醒邮箱' : '注销账号';
+
+  return (
+    <div className="acc-backdrop" onClick={() => { if (!pending) onClose(); }}>
+      <div className="acc-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
+        <h2>{title}</h2>
+        {panel === 'history' ? (
+          <>
+            <p>换设备后也可以继续查看已保存的追问。</p>
+            {loading ? <p>正在读取…</p> : null}
+            {error ? <p className="acc-error">{error}</p> : null}
+            {!loading && !error && items.length === 0 ? <p>还没有保存的对话。</p> : null}
+            {items.length ? (
+              <ul className="acc-history">
+                {items.map((item) => {
+                  const href = item.code
+                    ? `/${item.code}?${new URLSearchParams({
+                        ...(item.period ? { period: item.period } : {}),
+                        ...(item.report_id ? { report: item.report_id } : {}),
+                        conversation: item.id,
+                      }).toString()}`
+                    : `/`;
+                  const label = [item.company_name, item.code, item.period].filter(Boolean).join(' · ') || '未关联报告';
+                  return (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        className="acc-history-item"
+                        onClick={() => { onClose(); router.push(href); }}
+                      >
+                        <strong>{item.title || '未命名对话'}</strong>
+                        <span>{label}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            <div className="acc-dialog-actions">
+              <button type="button" className="acc-btn-ghost" onClick={onClose}>关闭</button>
+            </div>
+          </>
+        ) : null}
+        {panel === 'email' ? (
+          <>
+            <p>选填。填了以后，自选公司有新报告或抓取完成时，会同时发到站内提醒和这个邮箱。</p>
+            <label className="acc-label" htmlFor="acc-notify-email">邮箱</label>
+            <input id="acc-notify-email" className="acc-input" type="email" value={email} autoComplete="email" disabled={pending} onChange={(event) => setEmail(event.target.value)} />
+            <label className="acc-check">
+              <input type="checkbox" checked={emailNotify} disabled={pending} onChange={(event) => setEmailNotify(event.target.checked)} />
+              发送邮件提醒
+            </label>
+            {error ? <p className="acc-error">{error}</p> : null}
+            {notice ? <p className="acc-notice">{notice}</p> : null}
+            <div className="acc-dialog-actions">
+              <button type="button" className="acc-btn-ghost" disabled={pending} onClick={onClose}>关闭</button>
+              <button type="button" className="acc-btn-primary" disabled={pending} onClick={() => void saveEmail()}>{pending ? '保存中…' : '保存'}</button>
+            </div>
+          </>
+        ) : null}
+        {panel === 'delete' ? (
+          <>
+            <p>注销后将删除该账号的自选、对话、通知和账号本身，已公开分享的答案也会移除。公开公告数据不会删除。此操作不可恢复。</p>
+            <label className="acc-label" htmlFor="acc-delete-password">输入密码以确认</label>
+            <PasswordInput id="acc-delete-password" className="acc-input" value={password} autoComplete="current-password" disabled={pending} onChange={(event) => setPassword(event.target.value)} />
+            {error ? <p className="acc-error">{error}</p> : null}
+            <div className="acc-dialog-actions">
+              <button type="button" className="acc-btn-ghost" disabled={pending} onClick={onClose}>取消</button>
+              <button type="button" className="acc-btn-secondary" disabled={pending || !password} onClick={() => void deleteAccount()}>{pending ? '注销中…' : '确认注销'}</button>
+            </div>
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }
