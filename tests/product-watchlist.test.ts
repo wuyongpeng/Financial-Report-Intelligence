@@ -43,7 +43,9 @@ test('home inventory lists enabled coverage from the public crawl pool', () => {
   const home = source('app/report-home.tsx');
   assert.match(home, /fetch\('\/api\/crawl'/);
   assert.match(home, /5 \* 60 \* 1000/);
-  assert.match(home, /WatchDigestCard/);
+  assert.doesNotMatch(home, /WatchDigestCard/);
+  assert.doesNotMatch(home, /自选摘要/);
+  assert.match(home, /setWatchOnly\(true\)/);
   assert.match(home, /fetch\('\/api\/me\/coverage'/);
   assert.doesNotMatch(home, /我的自选/);
   assert.doesNotMatch(home, /WatchlistEmpty/);
@@ -157,4 +159,14 @@ describe('coverage API stays personal', () => {
     assert.match(route, /allowMock: false/);
     assert.match(route, /buildWatchlistDigest/);
   });
+});
+
+test('notification bell matches the account avatar size', () => {
+  const css = source('components/product-workspace.css');
+  const bell = source('components/product-workspace.tsx');
+  const avatar = source('components/account-access.css');
+  assert.match(css, /\.pw-bell-btn\{[^}]*width:28px;height:28px/);
+  assert.match(avatar, /\.acc-avatar\{[^}]*width:28px;height:28px/);
+  assert.match(bell, /width="16" height="16"/);
+  assert.doesNotMatch(css, /pw-digest/);
 });

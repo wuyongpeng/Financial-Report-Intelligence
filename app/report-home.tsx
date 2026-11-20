@@ -69,9 +69,8 @@ import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
 import { handleAskResponse, requestLoginForRestricted } from '@/lib/account-client';
-import { ProductFooter, WatchDigestCard } from '@/components/product-workspace';
+import { ProductFooter } from '@/components/product-workspace';
 import { productCollectStatus } from '@/lib/product-status';
-import type { WatchlistDigest } from '@/lib/watchlist-digest';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
 import { reflectReaderMemory } from '@/lib/reader-memory-client';
 import { MEMORY_CLEARED_EVENT, readerChatFields, readerHistory } from '@/lib/reader-prefs-client';
@@ -291,7 +290,9 @@ function StarButton({
 export default function ReportHome() {
   const router = useRouter();
   const [coverage, setCoverage] = useState<CrawlCompanyCoverage[]>([]);
-  const [watchDigest, setWatchDigest] = useState<WatchlistDigest | null>(null);
+  const [watchCompanies, setWatchCompanies] = useState<CrawlCompanyCoverage[]>([]);
+  const [watchSignedIn, setWatchSignedIn] = useState(false);
+  const [watchOnly, setWatchOnly] = useState(false);
   const [stats, setStats] = useState<CrawlStats | null>(null);
   const [source, setSource] = useState<'postgresql' | 'crawl-mock' | 'watchlist' | ''>('');
   const [loading, setLoading] = useState(true);
@@ -714,14 +715,16 @@ export default function ReportHome() {
     try {
       const response = await fetch('/api/me/coverage', { cache: 'no-store', credentials: 'same-origin' });
       if (response.status === 401) {
-        setWatchDigest(null);
+        setWatchCompanies([]);
+        setWatchSignedIn(false);
         return;
       }
       if (!response.ok) return;
-      const payload = await response.json() as { digest?: WatchlistDigest };
-      setWatchDigest(payload.digest ?? null);
+      const payload = await response.json() as { companies?: CrawlCompanyCoverage[]; digest?: unknown };
+      setWatchCompanies(payload.companies ?? []);
+      setWatchSignedIn(payload.digest != null);
     } catch {
-      /* inventory list does not depend on the personal digest */
+      /* inventory list does not depend on the personal watchlist */
     }
   }, []);
 
@@ -813,7 +816,7 @@ export default function ReportHome() {
   const keyword = search.trim();
   const ignoreCompanyFilter = shouldIgnoreHomeCompanyFilter(keyword);
   const filtered = useMemo(() => {
-    let rows = coverage;
+    let rows = watchOnly ? watchCompanies : coverage;
     if (!ignoreCompanyFilter && recognizedListedCandidates.length) {
       rows = coverage.filter((item) => recognizedListedCodes.has(item.code));
     } else if (keyword && !ignoreCompanyFilter) {
@@ -868,12 +871,12 @@ export default function ReportHome() {
     // Starred companies first; keep relative order within each group.
     rows.sort((a, b) => Number(starredSet.has(b.code)) - Number(starredSet.has(a.code)));
     return rows;
-  }, [coverage, keyword, ignoreCompanyFilter, industry, sortMode, listSort, viewMode, starredSet, recognizedListedCandidates, recognizedListedCodes, parsedSearch]);
+  }, [coverage, watchCompanies, watchOnly, keyword, ignoreCompanyFilter, industry, sortMode, listSort, viewMode, starredSet, recognizedListedCandidates, recognizedListedCodes, parsedSearch]);
 
   const gridCols = viewMode === 'list' ? 1 : 3;
   const initialRows = 3;
   const initialCards = gridCols * initialRows;
-  const cardResetKey = `${initialCards}|${keyword}|${industry}|${sortMode}|${viewMode}|${listSort?.key ?? ''}|${listSort?.dir ?? ''}`;
+  const cardResetKey = `${initialCards}|${keyword}|${industry}|${watchOnly}|${sortMode}|${viewMode}|${listSort?.key ?? ''}|${listSort?.dir ?? ''}`;
   const [visibleForKey, setVisibleForKey] = useState(cardResetKey);
   if (cardResetKey !== visibleForKey) {
     setVisibleForKey(cardResetKey);
@@ -1724,6 +1727,7 @@ export default function ReportHome() {
       dialogRef.current = null;
       setDialog(null);
       const companies = await refreshCoverage();
+      await refreshWatchDigest();
       assertHomeVoiceTurn(turn);
       await afterJoinContinue({
         code: listed.code,
@@ -2048,29 +2052,43 @@ export default function ReportHome() {
         </div>
       )}
 
-      <WatchDigestCard digest={watchDigest} />
-
       <section className="rh-companies" id="rh-companies" aria-label="公司列表">
         <div className="rh-filters" aria-label="筛选与排序">
           <div className="rh-filter-bar">
-            <div className="rh-chip-row" role="radiogroup" aria-label="行业筛选">
+            <div className="rh-chip-row" role="radiogroup" aria-label="列表筛选">
               <button
                 type="button"
                 role="radio"
-                aria-checked={industry === '全部'}
-                className={industry === '全部' ? 'rh-chip active' : 'rh-chip'}
-                onClick={() => setIndustry('全部')}
+                aria-checked={industry === '全部' && !watchOnly}
+                className={industry === '全部' && !watchOnly ? 'rh-chip active' : 'rh-chip'}
+                onClick={() => { setWatchOnly(false); setIndustry('全部'); }}
               >
                 全部
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={watchOnly}
+                className={watchOnly ? 'rh-chip active' : 'rh-chip'}
+                onClick={() => {
+                  if (!watchSignedIn) {
+                    requestLoginForRestricted();
+                    return;
+                  }
+                  setIndustry('全部');
+                  setWatchOnly(true);
+                }}
+              >
+                自选{watchSignedIn ? ` ${watchCompanies.length}` : ''}
               </button>
               {INDUSTRY_CHIPS.map((chip) => (
                 <button
                   key={chip}
                   type="button"
                   role="radio"
-                  aria-checked={industry === chip}
-                  className={industry === chip ? 'rh-chip active' : 'rh-chip'}
-                  onClick={() => setIndustry(chip)}
+                  aria-checked={industry === chip && !watchOnly}
+                  className={industry === chip && !watchOnly ? 'rh-chip active' : 'rh-chip'}
+                  onClick={() => { setWatchOnly(false); setIndustry(chip); }}
                 >
                   {chip}
                 </button>
@@ -2444,6 +2462,22 @@ export default function ReportHome() {
                   加入自选
                 </button>
               </>
+            ) : watchOnly && watchCompanies.length === 0 ? (
+              <>
+                <p>还没有自选公司。搜索后即可加入，加入后会自动抓取，完成后会通知你。</p>
+                <div className="rh-empty-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      setIndustry('全部');
+                      setWatchOnly(false);
+                    }}
+                  >
+                    查看全部公司
+                  </button>
+                </div>
+              </>
             ) : (
               <>
                 <p>
@@ -2457,6 +2491,7 @@ export default function ReportHome() {
                     onClick={() => {
                       setSearch('');
                       setIndustry('全部');
+                      setWatchOnly(false);
                     }}
                   >
                     清除筛选

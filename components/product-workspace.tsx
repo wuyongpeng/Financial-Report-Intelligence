@@ -5,7 +5,6 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { requestLoginForRestricted } from '@/lib/account-client';
 import { LEGAL_PAGES, legalPath } from '@/lib/legal-content';
-import type { WatchlistDigest } from '@/lib/watchlist-digest';
 import type { ProductCollectStatus } from '@/lib/product-status';
 import './product-workspace.css';
 
@@ -104,7 +103,7 @@ export function NotificationBell() {
         aria-controls={menuId}
         onClick={() => { setOpen((value) => !value); if (!open) void load(); }}
       >
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
           <path d="M18 8a6 6 0 10-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
           <path d="M10 19a2 2 0 004 0" />
         </svg>
@@ -124,29 +123,6 @@ export function NotificationBell() {
         </div>
       ) : null}
     </div>
-  );
-}
-
-export function WatchDigestCard({ digest }: { digest: WatchlistDigest | null }) {
-  if (!digest || (!digest.ready.length && !digest.waiting.length && !digest.summary)) return null;
-  if (!digest.ready.length && !digest.waiting.length) return null;
-  return (
-    <section className="pw-digest" aria-label="自选摘要">
-      <h2>自选摘要</h2>
-      <p>{digest.summary}</p>
-      {digest.ready.length ? (
-        <ul>
-          {digest.ready.map((item) => (
-            <li key={item.code}>
-              <Link href={item.href}>
-                <strong>{item.name} {item.period ?? ''}</strong>
-                {item.points.map((point) => <small key={point}>{point}</small>)}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </section>
   );
 }
 
