@@ -284,3 +284,11 @@ font-size:11px!important;font-weight:600!important;line-height:1!important;lette
 .rh-dialog-pick-list button:hover{border-color:#93c5fd;background:#eff6ff}
 
 .rh-eva-notice{max-width:min(360px,calc(100vw - 24px));padding:10px 14px;border:1px solid #d4e2ff;border-radius:16px;background:#f5f8ff;color:#415e8c;font-size:13px;line-height:1.5;box-shadow:0 4px 16px #24344c0d}
+
+@media(max-width:760px){
+  .rh-home{max-width:100%;overflow-x:clip}
+  .rh-search input{font-size:16px}
+  .rh-table-wrap{max-width:100%}
+  .topbar.home-topbar{overflow:visible}
+  .home-topbar .top-actions{gap:6px;min-width:0}
+}

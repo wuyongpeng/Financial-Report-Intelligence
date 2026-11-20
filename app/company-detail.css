@@ -899,3 +899,88 @@ html.dark .cd-fb,.dark .cd-fb{
 .cd-period-compare .cd-period-value:hover{color:#3064db}
 .cd-period-compare .cd-period-value .cd-cite{vertical-align:baseline;opacity:.65;background:#eef2f9;color:#7387a6;font-size:10px!important;padding:1px 4px;margin:0;line-height:1.3}
 .cd-period-compare .cd-period-value:hover .cd-cite{opacity:1;background:#eff4ff;color:#376dd7}
+
+/* Phone core flows: keep search, detail, follow-up, and alerts usable. */
+@media(max-width:900px){
+  .cd-columns{
+    display:flex;
+    flex-direction:column;
+    flex:1 1 auto;
+    min-height:0;
+    height:auto;
+  }
+  .cd-pane{display:none}
+  .cd-pane.mobile-active{
+    display:flex;
+    flex-direction:column;
+    flex:1 1 auto;
+    min-height:0;
+    height:auto;
+    overflow:hidden;
+  }
+  .cd-source-slot{display:none}
+  .cd-source-slot.mobile-active{
+    display:flex;
+    flex-direction:column;
+    flex:1 1 auto;
+    min-height:0;
+    height:auto;
+    overflow:hidden;
+  }
+  .cd-source-slot.mobile-active>.cd-sources,
+  .cd-source-slot.mobile-active>.cd-pane{
+    flex:1 1 auto;
+    min-height:0;
+    height:auto;
+    max-height:none;
+  }
+  .cd-source-slot:has(.cd-source-drawer):not(.mobile-active){
+    display:block;
+    flex:none;
+    height:0;
+    overflow:visible;
+  }
+  .cd-company-identity,
+  .cd-company-meta{min-width:0;overflow:visible}
+  .cd-company-meta h1{
+    min-width:0;
+    flex-shrink:1;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .cd-company-meta p{
+    min-width:0;
+    flex-shrink:1;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .cd-head-actions{gap:6px;min-width:0}
+  .cd-head-actions .cd-button{padding:0 8px;white-space:nowrap}
+  .cd-mobile-tabs button{min-height:40px}
+  .cd-chat-input{padding-bottom:calc(13px + env(safe-area-inset-bottom,0px))}
+  .cd-actions{flex-wrap:wrap;gap:4px;align-items:center}
+  .cd-actions button{width:36px;height:36px;border-radius:8px}
+  .cd-actions .cd-regen-menu button{width:auto;height:auto;min-width:108px}
+  .cd-table-scroll.cd-period-compare,
+  .cd-period-compare{
+    max-width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+  .cd-period-compare table{font-size:11px}
+  .cd-table-scroll.cd-period-compare td,
+  .cd-table-scroll.cd-period-compare th,
+  .cd-period-compare td,
+  .cd-period-compare th{padding:8px}
+  .cd-period-compare .cd-period-value{min-height:32px;align-items:center}
+  .cd-period-compare .cd-period-value .cd-cite{padding:4px 6px;font-size:11px!important}
+  .cd-chart-tabs{flex-wrap:wrap;min-width:0}
+  .cd-report-popover{max-width:min(320px,calc(100vw - 24px))}
+}
+@media(max-width:640px){
+  .cd-company-meta p{display:none}
+  .cd-company-identity h1{font-size:16px}
+  .cd-company-identity h1 span{margin-left:6px;font-size:12px}
+  .cd-period-switch{padding:5px 6px;font-size:11px;gap:4px;height:32px}
+}

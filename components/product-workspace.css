@@ -43,3 +43,18 @@
 .pw-legal-index{list-style:none;margin:0 0 32px;padding:0;display:flex;flex-direction:column;gap:8px}
 .pw-legal-index a{display:block;padding:12px 14px;border:1px solid #e6e8ec;border-radius:10px;color:#3f4650;text-decoration:none;background:#fff}
 .pw-legal-index a:hover{background:#f3f4f6}
+
+@media(max-width:640px){
+  .pw-bell-panel{
+    position:fixed;
+    top:64px;
+    left:12px;
+    right:12px;
+    width:auto;
+    max-width:none;
+    z-index:80;
+    max-height:min(70vh,420px);
+  }
+  .pw-share-tools{flex-wrap:wrap}
+  .pw-legal,.pw-share{padding-left:16px;padding-right:16px}
+}

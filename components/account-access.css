@@ -39,3 +39,11 @@
 .acc-history-item{width:100%;border:0;border-bottom:1px solid #e6e8ec;background:transparent;padding:10px 0;text-align:left}
 .acc-history-item strong{display:block;font-size:13px;color:#3f4650}
 .acc-history-item span{display:block;margin-top:2px;font-size:12px;color:#6b7280}
+
+@media(max-width:640px){
+  .acc-backdrop{padding:12px;align-items:center}
+  .acc-dialog{width:min(400px,100%);max-height:calc(100dvh - 24px);overflow:auto}
+  .acc-panel{max-width:min(260px,calc(100vw - 24px))}
+  .acc-panel-head h2,.acc-panel-head p{overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .acc-banner{padding:6px 36px 6px 12px}
+}
