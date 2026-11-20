@@ -14,6 +14,7 @@ import { requestReportVerdict } from '@/lib/request-report-verdict';
 import { parsePeriodHints, reportMatchesPeriod } from '@/lib/home-search';
 import { assembleFocusPrompt, displayFocusPrompt, focusAttachNote, mergeLiveSelectionFocus, readSourceSelection, FOCUS_MAX_ITEMS, FOCUS_QUOTE_MAX, type FocusItem, type FocusKind } from '@/lib/focus-prompt';
 import { citeFilingLabel, citeHoverText, embedAttributionPageCites, filingPageHref, matchAnswerCitation, parseFilingHref, tokenizeAnswerCites, uniqueAnswerSources, uniqueCitationsByPage } from '@/lib/answer-cite';
+import { copyAndDownloadAnswerExport } from '@/lib/answer-export';
 import { placeCiteTip } from '@/lib/cite-tip';
 import { type PdfPageLabel } from '@/lib/pdf-pages';
 import { readContractJson } from '@/contracts/common';
@@ -340,6 +341,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const [pick, setPick] = useState<{ quote: string; page: number; x: number; y: number } | null>(null);
   const [clipToast, setClipToast] = useState<string | null>(null);
   const [copiedSlot, setCopiedSlot] = useState<number | null>(null);
+  const [exportedSlot, setExportedSlot] = useState<number | null>(null);
   const [clipsFlash, setClipsFlash] = useState(false);
   const pageEnter = useRef<'start' | 'next' | 'prev'>('start');
   const [asking, setAsking] = useState(false);
@@ -2553,6 +2555,26 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
     window.setTimeout(() => setCopiedSlot(slot => slot === index ? null : slot), 1600);
   }
 
+  async function exportAnswerAt(index: number) {
+    const message = messages[index];
+    if (!message) return;
+    const question = [...messages.slice(0, index)].reverse().find((item) => item.role === 'user')?.text ?? '';
+    const result = await copyAndDownloadAnswerExport({
+      companyName: selected.company_name,
+      code: selected.code,
+      period: period(selected),
+      question,
+      answer: message.text,
+      citations: message.citations,
+    });
+    if (result !== 'exported') {
+      setQuietToast({ text: '导出暂时无法完成，请稍后重试', at: Date.now() });
+      return;
+    }
+    setExportedSlot(index);
+    window.setTimeout(() => setExportedSlot((slot) => slot === index ? null : slot), 2000);
+  }
+
   function regenerate(index: number, rewrite: 'detailed' | 'brief' | 'retry') {
     const user = messages[index - 1];
     setRegenMenu(null);
@@ -3417,10 +3439,14 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
                 <button type="button" aria-label="复制" title="复制" onClick={()=>void copyAnswer(m.text, i)}>
                   <ActIcon><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></ActIcon>
                 </button>
+                <button type="button" aria-label="导出" title="导出" onClick={()=>void exportAnswerAt(i)}>
+                  <ActIcon><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></ActIcon>
+                </button>
                 <button type="button" aria-label="分享" title="分享" onClick={()=>void shareAnswerAt(i)}>
                   <ActIcon><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" /></ActIcon>
                 </button>
                 {copiedSlot===i && <span className="cd-copied" role="status">已复制</span>}
+                {exportedSlot===i && <span className="cd-copied" role="status">已导出</span>}
                 {sharedSlot===i && <span className="cd-copied" role="status">链接已复制</span>}
                 </div>
                 <AnswerFeedback

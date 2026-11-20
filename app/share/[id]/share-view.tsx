@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import AnswerMarkdown from '../../answer-markdown';
+import { copyAndDownloadAnswerExport } from '@/lib/answer-export';
 import { ProductFooter } from '@/components/product-workspace';
 import '@/components/product-workspace.css';
 
@@ -20,6 +21,7 @@ type SharePayload = {
 export default function ShareView({ id }: { id: string }) {
   const [share, setShare] = useState<SharePayload | null>(null);
   const [error, setError] = useState('');
+  const [exported, setExported] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -50,8 +52,27 @@ export default function ShareView({ id }: { id: string }) {
   if (!share) {
     return <main className="pw-share"><p>正在打开分享…</p></main>;
   }
-  const kicker = [share.companyName, share.code, share.period].filter(Boolean).join(' · ');
-  const href = share.code ? `/${share.code}${share.period ? `?period=${encodeURIComponent(share.period)}` : ''}` : '/';
+  const current = share;
+  const kicker = [current.companyName, current.code, current.period].filter(Boolean).join(' · ');
+  const href = current.code ? `/${current.code}${current.period ? `?period=${encodeURIComponent(current.period)}` : ''}` : '/';
+  async function exportShare() {
+    const result = await copyAndDownloadAnswerExport({
+      companyName: current.companyName,
+      code: current.code,
+      period: current.period,
+      question: current.question,
+      answer: current.answer,
+      citations: current.evidence.map((item) => ({
+        page: item.page ?? 0,
+        quote: item.quote,
+        companyName: item.companyName,
+        period: item.period,
+      })).filter((item) => item.page >= 1),
+    });
+    if (result !== 'exported') return;
+    setExported(true);
+    window.setTimeout(() => setExported(false), 2000);
+  }
   return (
     <main className="pw-share">
       <p className="pw-kicker">{kicker || 'Eva 问答分享'}</p>
@@ -59,6 +80,10 @@ export default function ShareView({ id }: { id: string }) {
       <article className="pw-share-answer">
         <AnswerMarkdown text={share.answer} renderCites={(chunk) => chunk} />
       </article>
+      <div className="pw-share-tools">
+        <button type="button" className="pw-share-export" aria-label="导出" title="导出" onClick={() => void exportShare()}>导出</button>
+        {exported ? <span className="pw-share-status" role="status">已导出</span> : null}
+      </div>
       {share.evidence.length ? (
         <section className="pw-share-sources">
           <h2>出处</h2>
