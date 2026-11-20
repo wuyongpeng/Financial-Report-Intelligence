@@ -78,17 +78,17 @@ test('notifications and share routes isolate owners; shares are public to read',
   assert.match(sharePage, /不构成投资建议/);
 });
 
-test('account panel exposes history, email, logout, deletion, and legal pages', () => {
+test('account panel exposes history, logout, deletion, and legal pages', () => {
   const account = source('components/account-access.tsx');
   const prefs = source('app/reader-prefs-dialog.tsx');
   assert.match(account, /对话历史/);
-  assert.match(account, /提醒邮箱/);
   assert.match(account, /注销账号/);
+  assert.doesNotMatch(account, /提醒邮箱/);
   assert.match(account, /\/api\/auth\/account/);
   assert.match(account, /submitLogout/);
   assert.match(prefs, /对话历史/);
-  assert.match(prefs, /提醒邮箱/);
   assert.match(prefs, /注销账号/);
+  assert.doesNotMatch(prefs, /提醒邮箱/);
   const legalIndex = source('app/legal/page.tsx');
   assert.match(legalIndex, /LEGAL_PAGES\.map/);
   assert.match(legalIndex, /服务条款/);

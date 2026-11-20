@@ -44,7 +44,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
   const titleId = useId();
   const [tab, setTab] = useState<PrefsTab>('account');
   const [account, setAccount] = useState<AccountView>(() => getAccountView());
-  const [workspace, setWorkspace] = useState<'history' | 'email' | 'delete' | null>(null);
+  const [workspace, setWorkspace] = useState<'history' | 'delete' | null>(null);
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => readReaderPrefs());
   const [models, setModels] = useState<ModelChoice[] | null>(null);
   const [modelsError, setModelsError] = useState('');
@@ -198,7 +198,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
               <h3>账户</h3>
               {account.role !== 'user' ? (
                 <>
-                  <p className="prefs-lead">登录或注册后，可以查看对话历史、设置提醒邮箱，或注销账号。</p>
+                  <p className="prefs-lead">登录或注册后，可以查看对话历史，或注销账号。</p>
                   <div className="prefs-account-actions">
                     <button type="button" className="prefs-account-btn" onClick={() => openAccountDialog('login')}>登录</button>
                     <button type="button" className="prefs-account-btn primary" onClick={() => openAccountDialog('register')}>立即注册</button>
@@ -206,10 +206,9 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                 </>
               ) : (
                 <>
-                  <p className="prefs-lead">管理对话历史、提醒邮箱和账号。</p>
+                  <p className="prefs-lead">管理对话历史和账号。</p>
                   <div className="prefs-account-list">
                     <button type="button" onClick={() => setWorkspace('history')}>对话历史</button>
-                    <button type="button" onClick={() => setWorkspace('email')}>提醒邮箱</button>
                     <button type="button" onClick={() => setWorkspace('delete')}>注销账号</button>
                   </div>
                 </>

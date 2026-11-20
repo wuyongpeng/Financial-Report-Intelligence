@@ -1,6 +1,5 @@
 import { ensureBackendSchema } from './backend-schema';
 import { getDb } from './db';
-import { absoluteAppUrl, sendMail } from './mailer';
 import { markNotifiedPeriod, watchersForCode } from './user-watchlist';
 
 export type NotificationType = 'new_report' | 'ready';
@@ -86,14 +85,6 @@ export async function deleteUserNotifications(userKey: string) {
   await getDb()`DELETE FROM user_notifications WHERE user_key=${userKey}`;
 }
 
-async function emailForUser(userKey: string) {
-  const [row] = await getDb()<Array<{ email: string | null; email_notify: boolean }>>`
-    SELECT email, email_notify FROM app_users WHERE username_key=${userKey} LIMIT 1
-  `;
-  if (!row?.email || row.email_notify === false) return null;
-  return row.email;
-}
-
 export async function createNotification(input: {
   userKey: string;
   type: NotificationType;
@@ -103,7 +94,6 @@ export async function createNotification(input: {
   title: string;
   body: string;
   href?: string;
-  emailSubject?: string;
 }) {
   await ensureBackendSchema();
   const period = input.period ?? '';
@@ -118,15 +108,6 @@ export async function createNotification(input: {
   if (!inserted.length) return null;
   const notification = asNotification(inserted[0]);
   if (period) await markNotifiedPeriod(input.userKey, input.code, period);
-  const email = await emailForUser(input.userKey);
-  if (email) {
-    const link = absoluteAppUrl(href);
-    void sendMail({
-      to: email,
-      subject: input.emailSubject ?? input.title,
-      text: `${input.body}\n\n${link}`,
-    });
-  }
   return notification;
 }
 
@@ -152,7 +133,6 @@ export async function notifyWatchersOfNewReport(input: {
       title,
       body,
       href,
-      emailSubject: title,
     });
     if (created) count += 1;
   }

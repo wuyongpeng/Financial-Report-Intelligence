@@ -19,13 +19,16 @@ test('home and company detail place the account avatar next to the overflow menu
   assert.match(detail, /HomeOverflowMenu showSources=\{false\}/);
 });
 
-test('guest avatar panel uses the specified copy and has login and register actions', () => {
+test('guest avatar panel uses the specified copy and has a login action', () => {
   const source = read('components/account-access.tsx');
   const css = read('components/account-access.css');
   assert.match(source, /title=\{guest \? '访客模式' :/);
   assert.match(source, /当前为访客，数据仅本地 \/ 会话有效，关闭页面会丢失/);
   assert.match(source, />登录</);
-  assert.match(source, />立即注册</);
+  assert.doesNotMatch(source, />立即注册</);
+  assert.match(source, /没有账号？去注册/);
+  assert.match(css, /acc-switch\.is-link/);
+  assert.match(css, /#3064db/);
   assert.match(source, /今日剩余对话/);
   assert.match(source, /今日可对话 9 次/);
   assert.match(source, /strokeDasharray/);
@@ -36,7 +39,7 @@ test('guest avatar panel uses the specified copy and has login and register acti
   assert.doesNotMatch(css, /#dc2626|#e11d48|#ef4444|cd-red/);
 });
 
-test('avatar menu absorbs overflow actions and opens 了解更多 to the left', () => {
+test('avatar menu absorbs overflow actions and expands 了解更多 downward in the same card', () => {
   const source = read('components/account-access.tsx');
   const css = read('components/account-access.css');
   const overflow = read('app/home-overflow-menu.tsx');
@@ -61,8 +64,12 @@ test('avatar menu absorbs overflow actions and opens 了解更多 to the left', 
   assert.match(source, /requestHomeMenuAction\('prefs'\)/);
   assert.match(source, /requestHomeMenuAction\('feedback'\)/);
   assert.match(source, /requestHomeMenuAction\('about'\)/);
-  assert.match(css, /acc-flyout/);
-  assert.match(css, /right:calc\(240px \+ 8px\)/);
+  assert.match(source, /acc-more-group/);
+  assert.match(css, /acc-more-group/);
+  assert.match(css, /acc-item-chevron\.is-open/);
+  assert.match(css, /width:max-content/);
+  assert.doesNotMatch(source, /acc-flyout/);
+  assert.doesNotMatch(css, /acc-flyout/);
 
   assert.match(overflow, /subscribeHomeMenuActions/);
   assert.match(overflow, /params.get\('feedback'\) === '1'/);

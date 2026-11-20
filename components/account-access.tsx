@@ -124,45 +124,41 @@ export function AccountMenu() {
         {guest ? <GuestAvatarIcon /> : <span>{(account.username || '用').slice(0, 1)}</span>}
       </button>
       {open ? (
-        <>
-          <div className="acc-panel" id={menuId} role="menu" aria-label={guest ? '访客模式' : '账户'}>
-            <div className="acc-panel-head">
-              <h2>{guest ? '访客模式' : account.username}</h2>
-              <p>{remaining}</p>
-            </div>
-            <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); requestHomeMenuAction('prefs'); }}>账号设置</button>
-            <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); requestHomeMenuAction('feedback'); }}>发送反馈</button>
-            <button
-              type="button"
-              role="menuitem"
-              className={`acc-item acc-item-more${moreOpen ? ' is-open' : ''}`}
-              aria-haspopup="menu"
-              aria-expanded={moreOpen}
-              aria-controls={moreId}
-              onClick={() => setMoreOpen((value) => !value)}
-            >
-              <span>了解更多</span>
-              <span className="acc-item-chevron" aria-hidden="true">&gt;</span>
-            </button>
-            {guest ? (
-              <div className="acc-panel-auth">
-                <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); openAccountDialog('login'); }}>登录</button>
-                <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); openAccountDialog('register'); }}>立即注册</button>
-              </div>
-            ) : (
-              <div className="acc-panel-auth">
-                <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); void submitLogout(); }}>退出登录</button>
-              </div>
-            )}
+        <div className="acc-panel" id={menuId} role="menu" aria-label={guest ? '访客模式' : '账户'}>
+          <div className="acc-panel-head">
+            <h2>{guest ? '访客模式' : account.username}</h2>
+            <p>{remaining}</p>
           </div>
+          <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); requestHomeMenuAction('prefs'); }}>账号设置</button>
+          <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); requestHomeMenuAction('feedback'); }}>发送反馈</button>
+          <button
+            type="button"
+            role="menuitem"
+            className={`acc-item acc-item-more${moreOpen ? ' is-open' : ''}`}
+            aria-expanded={moreOpen}
+            aria-controls={moreId}
+            onClick={() => setMoreOpen((value) => !value)}
+          >
+            <span>了解更多</span>
+            <span className={`acc-item-chevron${moreOpen ? ' is-open' : ''}`} aria-hidden="true">&gt;</span>
+          </button>
           {moreOpen ? (
-            <div className="acc-flyout" id={moreId} role="menu" aria-label="了解更多">
+            <div className="acc-more-group" id={moreId} role="group" aria-label="了解更多">
               <Link role="menuitem" className="acc-item" href="/docs" target="_blank" rel="noopener noreferrer" onClick={closeMenu}>帮助中心</Link>
               <Link role="menuitem" className="acc-item" href="/legal" onClick={closeMenu}>服务条款</Link>
               <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); requestHomeMenuAction('about'); }}>关于Eva</button>
             </div>
           ) : null}
-        </>
+          {guest ? (
+            <div className="acc-panel-auth">
+              <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); openAccountDialog('login'); }}>登录</button>
+            </div>
+          ) : (
+            <div className="acc-panel-auth">
+              <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); void submitLogout(); }}>退出登录</button>
+            </div>
+          )}
+        </div>
       ) : null}
     </div>
   );
@@ -178,16 +174,13 @@ type HistoryItem = {
   period: string | null;
 };
 
-export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'email' | 'delete'; onClose: () => void }) {
+export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'delete'; onClose: () => void }) {
   const router = useRouter();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(panel === 'history');
-  const [email, setEmail] = useState('');
-  const [emailNotify, setEmailNotify] = useState(true);
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -210,49 +203,8 @@ export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'email
         }
       })();
     }
-    if (panel === 'email') {
-      void (async () => {
-        try {
-          const response = await fetch('/api/me/profile', { cache: 'no-store', credentials: 'same-origin' });
-          const payload = await response.json().catch(() => ({})) as { email?: string | null; emailNotify?: boolean; error?: string };
-          if (!active) return;
-          if (!response.ok) {
-            setError(payload.error || '账号信息暂时无法读取');
-            return;
-          }
-          setEmail(payload.email ?? '');
-          setEmailNotify(payload.emailNotify !== false);
-        } catch {
-          if (active) setError('账号信息暂时无法读取');
-        }
-      })();
-    }
     return () => { active = false; };
   }, [panel]);
-
-  async function saveEmail() {
-    setPending(true);
-    setError('');
-    setNotice('');
-    try {
-      const response = await fetch('/api/me/profile', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, emailNotify }),
-      });
-      const payload = await response.json().catch(() => ({})) as { error?: string };
-      if (!response.ok) {
-        setError(payload.error || '保存失败');
-        return;
-      }
-      setNotice('提醒邮箱已保存。新报告准备好后会发到这个邮箱。');
-    } catch {
-      setError('保存失败，请稍后重试');
-    } finally {
-      setPending(false);
-    }
-  }
 
   async function deleteAccount() {
     setPending(true);
@@ -278,7 +230,7 @@ export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'email
     }
   }
 
-  const title = panel === 'history' ? '对话历史' : panel === 'email' ? '提醒邮箱' : '注销账号';
+  const title = panel === 'history' ? '对话历史' : '注销账号';
 
   return (
     <div className="acc-backdrop" onClick={() => { if (!pending) onClose(); }}>
@@ -318,23 +270,6 @@ export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'email
             ) : null}
             <div className="acc-dialog-actions">
               <button type="button" className="acc-btn-ghost" onClick={onClose}>关闭</button>
-            </div>
-          </>
-        ) : null}
-        {panel === 'email' ? (
-          <>
-            <p>选填。填了以后，自选公司有新报告或抓取完成时，会同时发到站内提醒和这个邮箱。</p>
-            <label className="acc-label" htmlFor="acc-notify-email">邮箱</label>
-            <input id="acc-notify-email" className="acc-input" type="email" value={email} autoComplete="email" disabled={pending} onChange={(event) => setEmail(event.target.value)} />
-            <label className="acc-check">
-              <input type="checkbox" checked={emailNotify} disabled={pending} onChange={(event) => setEmailNotify(event.target.checked)} />
-              发送邮件提醒
-            </label>
-            {error ? <p className="acc-error">{error}</p> : null}
-            {notice ? <p className="acc-notice">{notice}</p> : null}
-            <div className="acc-dialog-actions">
-              <button type="button" className="acc-btn-ghost" disabled={pending} onClick={onClose}>关闭</button>
-              <button type="button" className="acc-btn-primary" disabled={pending} onClick={() => void saveEmail()}>{pending ? '保存中…' : '保存'}</button>
             </div>
           </>
         ) : null}
@@ -439,7 +374,7 @@ function AccountDialogs({ account }: { account: AccountView }) {
               )}
             </div>
             {account.dialog === 'login' ? (
-              <button type="button" className="acc-switch" disabled={pending} onClick={() => openAccountDialog('register')}>没有账号？去注册</button>
+              <button type="button" className="acc-switch is-link" disabled={pending} onClick={() => openAccountDialog('register')}>没有账号？去注册</button>
             ) : account.dialog === 'register' ? (
               <button type="button" className="acc-switch" disabled={pending} onClick={() => openAccountDialog('login')}>已有账号？去登录</button>
             ) : null}

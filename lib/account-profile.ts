@@ -7,43 +7,6 @@ import { deleteUserShares } from './shared-answers';
 import { deleteUserWatchlist } from './user-watchlist';
 import { appSessionOwner } from './auth';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-export function normalizeEmail(value: string) {
-  return value.trim().toLowerCase();
-}
-
-export function validateEmail(value: string) {
-  const email = normalizeEmail(value);
-  if (!email) return { ok: true as const, email: null };
-  if (email.length > 120 || !EMAIL_RE.test(email)) return { ok: false as const, error: '请输入有效邮箱' };
-  return { ok: true as const, email };
-}
-
-export async function getAccountProfile(userKey: string) {
-  await ensureBackendSchema();
-  const [row] = await getDb()<Array<{ username: string; email: string | null; email_notify: boolean; created_at: string | Date }>>`
-    SELECT username, email, email_notify, created_at FROM app_users WHERE username_key=${userKey} LIMIT 1
-  `;
-  if (!row) return { username: userKey, email: null, emailNotify: true, createdAt: null as string | null, inDirectory: false };
-  return {
-    username: row.username,
-    email: row.email,
-    emailNotify: row.email_notify,
-    createdAt: new Date(row.created_at).toISOString(),
-    inDirectory: true,
-  };
-}
-
-export async function updateAccountEmail(userKey: string, email: string | null, emailNotify = true) {
-  await ensureBackendSchema();
-  const rows = await getDb()`
-    UPDATE app_users SET email=${email}, email_notify=${emailNotify}, updated_at=NOW()
-    WHERE username_key=${userKey} RETURNING username
-  `;
-  return rows.length > 0;
-}
-
 export async function deleteRegisteredAccount(request: Request, password: string) {
   await ensureBackendSchema();
   const { appSessionUsername } = await import('./auth');
