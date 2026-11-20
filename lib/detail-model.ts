@@ -148,6 +148,175 @@ export function priorYear(reports: Report[], selected: Report) {
   }
   return best;
 }
+
+const PERIOD_SEQ = ['Q1', 'H1', 'Q3', 'FY'] as const;
+
+/** Last-year same period token, e.g. 2025Q3 → 2024Q3. */
+export function priorYearPeriodToken(periodToken: string): string | null {
+  const year = periodToken.match(/20\d{2}/)?.[0];
+  if (!year) return null;
+  return periodToken.replace(year, String(Number(year) - 1));
+}
+
+/**
+ * Sequential previous A-share filing: Q1 → prior FY, H1 → Q1, Q3 → H1, FY → Q3.
+ * Q2 is treated as H1.
+ */
+export function previousPeriodToken(periodToken: string): string | null {
+  const m = periodToken.match(/^(20\d{2})(FY|H1|Q[1-3])$/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const suffix = m[2] === 'Q2' ? 'H1' : m[2];
+  const idx = PERIOD_SEQ.indexOf(suffix as typeof PERIOD_SEQ[number]);
+  if (idx < 0) return null;
+  if (idx === 0) return `${year - 1}FY`;
+  return `${year}${PERIOD_SEQ[idx - 1]}`;
+}
+
+function reportForPeriod(reports: Report[], token: string | null): Report | undefined {
+  if (!token) return undefined;
+  let best: Report | undefined;
+  for (const r of reports) {
+    if (period(r) !== token || !r.metrics.length) continue;
+    best = betterKeepCandidate(best, r);
+  }
+  return best;
+}
+
+/** Immediately previous filing in the Q1 / H1 / Q3 / FY sequence. */
+export function previousPeriod(reports: Report[], selected: Report) {
+  return reportForPeriod(reports, previousPeriodToken(period(selected)));
+}
+
+export type PeriodCompareSource = 'current' | 'adjusted' | 'report' | 'missing';
+
+export type PeriodCompareCell = {
+  metric: MetricName;
+  value: number | undefined;
+  source: PeriodCompareSource;
+  period: string | null;
+  reportId?: string;
+  page: number | null;
+  quote: string | null;
+};
+
+export type PeriodCompareColumn = {
+  role: 'current' | 'previous' | 'lastYear';
+  label: '本期' | '上一期' | '去年同期';
+  period: string | null;
+  reportId?: string;
+  cells: PeriodCompareCell[];
+};
+
+export type PeriodCompareView = {
+  current: PeriodCompareColumn;
+  previous: PeriodCompareColumn;
+  lastYear: PeriodCompareColumn;
+};
+
+/** Usable disclosed 上年同期 (调整后 when restated). Never imply a number from YoY%. */
+export function disclosedPriorValue(
+  current: number | undefined,
+  opts: {
+    disclosedPrior?: number | null;
+    disclosedYoyPct?: number | null;
+    metric?: MetricName | string | null;
+  },
+): number | undefined {
+  const dPrior = opts.disclosedPrior;
+  if (dPrior == null || !Number.isFinite(dPrior)) return undefined;
+  const hasCurrent = current !== undefined && Number.isFinite(current);
+  if (hasCurrent && isAbsurdDisclosedPrior(current as number, dPrior as number, opts.metric ?? null)) {
+    return undefined;
+  }
+  const zeroWithYoy = dPrior === 0
+    && opts.disclosedYoyPct != null
+    && Number.isFinite(opts.disclosedYoyPct)
+    && opts.disclosedYoyPct !== -100;
+  if (zeroWithYoy) return undefined;
+  return dPrior as number;
+}
+
+function metricItem(report: Report | undefined, metric: MetricName) {
+  return report?.metrics.find((item) => item.metric === metric);
+}
+
+function reportMetricCell(
+  metric: MetricName,
+  report: Report | undefined,
+  periodToken: string | null,
+  source: Exclude<PeriodCompareSource, 'missing'>,
+): PeriodCompareCell {
+  const item = metricItem(report, metric);
+  const raw = item?.value;
+  const usable = raw !== undefined && Number.isFinite(raw);
+  if (!report || !usable) {
+    return { metric, value: undefined, source: 'missing', period: periodToken, reportId: report?.id, page: null, quote: null };
+  }
+  return {
+    metric,
+    value: raw,
+    source,
+    period: period(report),
+    reportId: report.id,
+    page: item?.source_page ?? null,
+    quote: item?.source_label ?? labels[metric],
+  };
+}
+
+function lastYearMetricCell(selected: Report, lastYearReport: Report | undefined, metric: MetricName, lastYearToken: string | null): PeriodCompareCell {
+  const row = metricItem(selected, metric);
+  const adjusted = disclosedPriorValue(value(selected, metric), {
+    disclosedPrior: row?.prior_value,
+    disclosedYoyPct: row?.yoy_pct,
+    metric,
+  });
+  if (adjusted !== undefined) {
+    return {
+      metric,
+      value: adjusted,
+      source: 'adjusted',
+      period: lastYearToken ?? (lastYearReport ? period(lastYearReport) : null),
+      reportId: selected.id,
+      page: row?.source_page ?? null,
+      quote: row?.source_label ?? labels[metric],
+    };
+  }
+  return reportMetricCell(metric, lastYearReport, lastYearToken, 'report');
+}
+
+/** Same-company side-by-side: 本期, 上一期, 去年同期. Does not invent missing numbers. */
+export function buildPeriodCompare(reports: Report[], selected: Report): PeriodCompareView {
+  const currentToken = period(selected);
+  const previousToken = previousPeriodToken(currentToken);
+  const lastYearToken = priorYearPeriodToken(currentToken);
+  const previousReport = previousPeriod(reports, selected);
+  const lastYearReport = priorYear(reports, selected);
+
+  return {
+    current: {
+      role: 'current',
+      label: '本期',
+      period: currentToken,
+      reportId: selected.id,
+      cells: metricNames.map((metric) => reportMetricCell(metric, selected, currentToken, 'current')),
+    },
+    previous: {
+      role: 'previous',
+      label: '上一期',
+      period: previousToken,
+      reportId: previousReport?.id,
+      cells: metricNames.map((metric) => reportMetricCell(metric, previousReport, previousToken, 'report')),
+    },
+    lastYear: {
+      role: 'lastYear',
+      label: '去年同期',
+      period: lastYearToken,
+      reportId: lastYearReport?.id,
+      cells: metricNames.map((metric) => lastYearMetricCell(selected, lastYearReport, metric, lastYearToken)),
+    },
+  };
+}
 export function pickCanonicalReports(reports: Report[]) {
   const unique = new Map<string, Report>();
   for (const r of reports) unique.set(period(r), betterKeepCandidate(unique.get(period(r)), r));

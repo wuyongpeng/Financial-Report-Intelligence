@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { anomaliesConclusion, attributionConclusion, change, comparableHistory, sequentialHistory, historyConclusion, keyFindings, metricYoyDetail, metricYoyHoverDetail, moduleForQuestion, peersConclusion, period, periodConclusion, priorYear, profitBridge, resolveMetricPrior, sourceRange, type Report } from '../lib/detail-model';
+import { anomaliesConclusion, attributionConclusion, buildPeriodCompare, change, comparableHistory, sequentialHistory, disclosedPriorValue, historyConclusion, keyFindings, metricYoyDetail, metricYoyHoverDetail, moduleForQuestion, peersConclusion, period, periodConclusion, previousPeriod, previousPeriodToken, priorYear, priorYearPeriodToken, profitBridge, resolveMetricPrior, sourceRange, type Metric, type Report } from '../lib/detail-model';
 import { describeYoy, resolveYoy } from '../lib/crawl-display';
 import { rankEvidence, unsupportedYears } from '../lib/chat-evidence';
 function report(id: string, period: string, value: number, type='annual', published='2026-04-01'): Report { return { id, code:'1',company_name:'测试',title:period,report_type:type,published_at:published,parsed_at:published,industry:'测试',status:'online',metrics:[{metric:'revenue',value,unit:'元',source_page:2,source_label:'营业收入',confidence:1,verified:1,period}] }; }
@@ -254,4 +254,157 @@ test('metricYoyHoverDetail matches card tooltip and skips without prior', () => 
   );
   assert.equal(metricYoyHoverDetail('eps', 0.58, {}), undefined);
   assert.equal(metricYoyHoverDetail('net_profit', undefined, { disclosedPrior: 1 }), undefined);
+});
+
+function metric(name: Metric['metric'], value: number, extra: Partial<Metric> = {}): Metric {
+  return {
+    metric: name,
+    value,
+    unit: name === 'roe' ? '%' : '元',
+    source_page: extra.source_page ?? 6,
+    source_label: extra.source_label ?? name,
+    confidence: 1,
+    verified: 1,
+    period: extra.period ?? '',
+    prior_value: extra.prior_value,
+    yoy_pct: extra.yoy_pct,
+  };
+}
+
+function fullReport(id: string, token: string, values: Partial<Record<Metric['metric'], number>>, extras: Partial<Record<Metric['metric'], Partial<Metric>>> = {}): Report {
+  const kind = /FY/.test(token) ? 'annual' : /H1/.test(token) ? 'semiannual' : 'quarterly';
+  const year = token.slice(0, 4);
+  return {
+    id,
+    code: '600000',
+    company_name: '示例',
+    title: token,
+    report_type: kind,
+    published_at: `${year}-04-01`,
+    parsed_at: `${year}-04-02`,
+    industry: '银行',
+    status: 'online',
+    metrics: (Object.entries(values) as Array<[Metric['metric'], number]>).map(([name, value]) => (
+      metric(name, value, { period: token, ...extras[name] })
+    )),
+  };
+}
+
+test('previous and last-year period tokens follow the A-share Q1/H1/Q3/FY sequence', () => {
+  assert.equal(previousPeriodToken('2025Q3'), '2025H1');
+  assert.equal(previousPeriodToken('2025H1'), '2025Q1');
+  assert.equal(previousPeriodToken('2025Q1'), '2024FY');
+  assert.equal(previousPeriodToken('2025FY'), '2025Q3');
+  assert.equal(previousPeriodToken('2025Q2'), '2025Q1');
+  assert.equal(previousPeriodToken('not-a-period'), null);
+  assert.equal(priorYearPeriodToken('2025Q3'), '2024Q3');
+  assert.equal(priorYearPeriodToken('2025FY'), '2024FY');
+  assert.equal(priorYearPeriodToken('季报'), null);
+});
+
+test('previousPeriod picks the sequential filing and skips a missing period', () => {
+  const q1 = fullReport('q1', '2025Q1', { revenue: 1 });
+  const h1 = fullReport('h1', '2025H1', { revenue: 2 });
+  const q3 = fullReport('q3', '2025Q3', { revenue: 3 });
+  const fy = fullReport('fy', '2025FY', { revenue: 4 });
+  const empty = fullReport('empty-h1', '2025H1', {});
+  empty.metrics = [];
+  assert.equal(previousPeriod([q1, h1, q3, fy], q3)?.id, 'h1');
+  assert.equal(previousPeriod([q1, h1, q3, fy], q1)?.id, undefined);
+  assert.equal(previousPeriod([q1, empty, q3], q3)?.id, undefined);
+  const corrected = fullReport('h1-corrected', '2025H1', { revenue: 2.2 });
+  corrected.published_at = '2025-08-20';
+  assert.equal(previousPeriod([h1, corrected, q3], q3)?.id, 'h1-corrected');
+});
+
+test('buildPeriodCompare prefers 调整后 for 去年同期 and leaves missing periods empty', () => {
+  const lastYear = fullReport('ly', '2024Q3', {
+    revenue: 80e8,
+    net_profit: 10e8,
+    eps: 1.1,
+    roe: 12.45,
+  }, {
+    revenue: { source_page: 5, source_label: '营业收入' },
+    net_profit: { source_page: 5, source_label: '归母净利润' },
+    eps: { source_page: 5, source_label: 'EPS' },
+    roe: { source_page: 5, source_label: 'ROE' },
+  });
+  const previous = fullReport('prev', '2025H1', {
+    revenue: 90e8,
+    net_profit: 12e8,
+    eps: 0.6,
+    roe: 8.1,
+  }, {
+    revenue: { source_page: 7, source_label: '营业收入' },
+  });
+  const current = fullReport('cur', '2025Q3', {
+    revenue: 121e8,
+    net_profit: 20e8,
+    eps: 0.79,
+    roe: 20.81,
+  }, {
+    revenue: { source_page: 6, source_label: '营业收入', prior_value: 100e8, yoy_pct: 21 },
+    net_profit: { source_page: 6, source_label: '归母净利润', prior_value: 16e8, yoy_pct: 25 },
+    eps: { source_page: 6, source_label: 'EPS', prior_value: 0.79, yoy_pct: 0 },
+    roe: { source_page: 6, source_label: 'ROE', prior_value: 6.81, yoy_pct: 14 },
+  });
+
+  const view = buildPeriodCompare([lastYear, previous, current], current);
+  assert.equal(view.current.period, '2025Q3');
+  assert.equal(view.previous.period, '2025H1');
+  assert.equal(view.lastYear.period, '2024Q3');
+  assert.equal(view.previous.reportId, 'prev');
+  assert.equal(view.current.cells[0].value, 121e8);
+  assert.equal(view.current.cells[0].reportId, 'cur');
+  assert.equal(view.current.cells[0].page, 6);
+  assert.equal(view.previous.cells[0].value, 90e8);
+  assert.equal(view.previous.cells[0].reportId, 'prev');
+  assert.equal(view.previous.cells[0].page, 7);
+  assert.equal(view.previous.cells[0].source, 'report');
+
+  const lastYearRevenue = view.lastYear.cells[0];
+  assert.equal(lastYearRevenue.value, 100e8);
+  assert.equal(lastYearRevenue.source, 'adjusted');
+  assert.equal(lastYearRevenue.reportId, 'cur');
+  assert.equal(lastYearRevenue.page, 6);
+  assert.equal(lastYearRevenue.quote, '营业收入');
+  assert.equal(view.lastYear.cells[3].value, 6.81);
+  assert.notEqual(view.lastYear.cells[3].value, 12.45);
+
+  const missingPrevious = buildPeriodCompare([lastYear, current], current);
+  assert.equal(missingPrevious.previous.reportId, undefined);
+  assert.equal(missingPrevious.previous.cells[0].source, 'missing');
+  assert.equal(missingPrevious.previous.cells[0].value, undefined);
+  assert.equal(missingPrevious.lastYear.cells[0].value, 100e8);
+
+  const noDisclosed = fullReport('cur2', '2025Q3', {
+    revenue: 121e8,
+    net_profit: 20e8,
+    eps: 0.79,
+    roe: 20.81,
+  }, {
+    revenue: { source_page: 6, source_label: '营业收入' },
+  });
+  const fromFiling = buildPeriodCompare([lastYear, noDisclosed], noDisclosed);
+  assert.equal(fromFiling.lastYear.cells[0].value, 80e8);
+  assert.equal(fromFiling.lastYear.cells[0].source, 'report');
+  assert.equal(fromFiling.lastYear.cells[0].reportId, 'ly');
+  assert.equal(fromFiling.lastYear.cells[0].page, 5);
+
+  const onlyYoy = fullReport('cur3', '2025Q3', { revenue: 110e8 }, {
+    revenue: { source_page: 6, yoy_pct: 10 },
+  });
+  const implied = buildPeriodCompare([onlyYoy], onlyYoy);
+  assert.equal(implied.previous.cells[0].source, 'missing');
+  assert.equal(implied.lastYear.cells[0].source, 'missing');
+  assert.equal(implied.lastYear.cells[0].value, undefined);
+  assert.equal(disclosedPriorValue(110e8, { disclosedYoyPct: 10, metric: 'revenue' }), undefined);
+
+  const absurd = fullReport('cur4', '2025Q3', { revenue: 199.51e8 }, {
+    revenue: { source_page: 6, prior_value: 3.78, yoy_pct: 3.78 },
+  });
+  const skipped = buildPeriodCompare([lastYear, absurd], absurd);
+  assert.equal(skipped.lastYear.cells[0].value, 80e8);
+  assert.equal(skipped.lastYear.cells[0].source, 'report');
+  assert.equal(skipped.lastYear.cells[0].reportId, 'ly');
 });

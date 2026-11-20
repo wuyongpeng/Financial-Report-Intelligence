@@ -887,3 +887,15 @@ html.dark .cd-fb,.dark .cd-fb{
 .cd-period-miss b{display:block;margin-bottom:2px;font-size:13px}
 .cd-period-miss span{color:#9a3412;opacity:.92}
 .cd-period-miss .cd-button{flex:none;white-space:nowrap}
+
+.cd-period-compare{margin:2px 0 16px;border:1px solid var(--cd-line);border-radius:10px;background:#fff}
+.cd-period-compare table{width:100%}
+.cd-period-compare thead th{font-weight:500}
+.cd-period-compare thead small{display:block;margin-top:2px;font-size:11px;font-weight:400;color:#8b98ab}
+.cd-period-compare th.cd-period-primary,.cd-period-compare td.cd-period-primary{background:#f7faff;color:var(--cd-ink)}
+.cd-period-compare td.cd-period-primary{font-weight:500}
+.cd-period-empty{color:#9aa6b6}
+.cd-period-compare .cd-period-value{display:inline-flex;align-items:baseline;gap:4px;background:none;border:0;padding:0;color:inherit;font:inherit;font-variant-numeric:tabular-nums;cursor:pointer}
+.cd-period-compare .cd-period-value:hover{color:#3064db}
+.cd-period-compare .cd-period-value .cd-cite{vertical-align:baseline;opacity:.65;background:#eef2f9;color:#7387a6;font-size:10px!important;padding:1px 4px;margin:0;line-height:1.3}
+.cd-period-compare .cd-period-value:hover .cd-cite{opacity:1;background:#eff4ff;color:#376dd7}

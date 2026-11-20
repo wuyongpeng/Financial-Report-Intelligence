@@ -5,7 +5,7 @@ import { ASK_STOPPED_LINE, dropBlankInFlightTurn, isTransientAskError } from '@/
 import { requestAssistantTurn, FEEDBACK_REVIEW_LINE, assistantTurnFailureMessage } from '@/lib/assistant-turn';
 import { requestFeedbackDraft, subscribeFeedbackState, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { amount, anomaliesConclusion, attributionConclusion, comparableHistory, sequentialHistory, filingType, format, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, suggestClosestReport, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type Report } from '@/lib/detail-model';
+import { amount, anomaliesConclusion, attributionConclusion, buildPeriodCompare, comparableHistory, sequentialHistory, filingType, format, historyConclusion, keyFindings, labels, metricNames, metricYoyDetail, moduleForQuestion, peersConclusion, period, periodKey, pickCanonicalReports, priorYear, profitBridge, resolveMetricPrior, sourceRange, suggestClosestReport, unitOf, value, type Citation, type HeadlineMetric, type MetricName, type PeriodCompareCell, type Report } from '@/lib/detail-model';
 import { describeYoy, resolveYoy, yoyTone } from '@/lib/crawl-display';
 import { buildMetricRelationships } from '@/lib/metric-relationships';
 import MetricLinkage from './metric-linkage';
@@ -986,6 +986,7 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   const history = comparableHistory(reports, selected);
   const trendHistory = sequentialHistory(reports, selected);
   const defaultPrevious = priorYear(reports, selected);
+  const periodCompare = buildPeriodCompare(reports, selected);
   const baselineOptions = reports.filter(r => r.id !== selected.id && filingType(r) === filingType(selected) && periodKey(r) < periodKey(selected) && r.metrics.length);
   const previous = (baselineId ? reports.find(r => r.id === baselineId) : undefined) ?? defaultPrevious;
   const baselineIsDefault = !baselineId || previous?.id === defaultPrevious?.id;
@@ -1218,6 +1219,24 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
   }
   function metricCitation(m: MetricName, report = selected) { const item = report.metrics.find(x => x.metric === m); return item?.source_page ? { page: item.source_page, quote: item.source_label ?? labels[m] } : null; }
   function footnote(m: MetricName) { const c = metricCitation(m); return c && <button className="cd-cite" onClick={(e) => { e.stopPropagation(); cite(c, false, m); }} onDoubleClick={(e) => { e.stopPropagation(); cite(c, true, m); }} title={`单击定位原文，跳转PDF第 ${c.page} 页`}>[{pageChip(c.page)}]</button>; }
+  function compareCite(cell: PeriodCompareCell, metric: MetricName) {
+    if (cell.page == null || cell.value === undefined) return;
+    const c: Citation = { reportId: cell.reportId, companyName: selected.company_name, period: cell.period ?? undefined, code: selected.code, page: cell.page, quote: cell.quote ?? labels[metric] };
+    if (!c.reportId || c.reportId === selected.id) cite(c, false, metric);
+    else jumpCitation(c);
+  }
+  function comparePageChip(cell: PeriodCompareCell) {
+    if (cell.page == null) return '';
+    if (!cell.reportId || cell.reportId === selected.id) return pageChip(cell.page);
+    return `P${cell.page}`;
+  }
+  function periodCompareValue(cell: PeriodCompareCell, metric: MetricName) {
+    if (cell.value === undefined) return <span className="cd-period-empty">暂无</span>;
+    if (cell.page == null) return <span>{format(cell.value, metric)}</span>;
+    const cross = Boolean(cell.reportId && cell.reportId !== selected.id);
+    const hover = cross ? `打开 ${[cell.period, `第 ${cell.page} 页`].filter(Boolean).join(' ')} 原文` : `单击定位原文，跳转PDF第 ${cell.page} 页`;
+    return <button type="button" className={`cd-period-value${cross ? ' cd-cite-cross' : ''}`} onClick={(e) => { e.stopPropagation(); compareCite(cell, metric); }} title={hover}>{format(cell.value, metric)}<span className="cd-cite">[{comparePageChip(cell)}]</span></button>;
+  }
   const citedItem = citedMetric ? selected.metrics.find(m => m.metric === citedMetric) : undefined;
   // Low confidence or an unverified value must be visible before the reader trusts it.
   const citedCaveat = citedItem && (citedItem.confidence < 0.8 || !citedItem.verified)
@@ -3190,6 +3209,31 @@ export default function CompanyDetail({ initialReport, onBack, onSelect, onAppro
               <span className={`cd-pill ${pill}`} title={hover}>{delta}</span>
             </article>;
           })}</div>
+          <div className="cd-table-scroll cd-period-compare" aria-label="本期、上一期、去年同期">
+            <table>
+              <thead>
+                <tr>
+                  <th></th>
+                  {([periodCompare.current, periodCompare.previous, periodCompare.lastYear] as const).map((col) => (
+                    <th key={col.role} className={col.role === 'current' ? 'cd-period-primary' : undefined}>
+                      {col.label}
+                      <small>{col.period ?? '暂无'}</small>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {metricNames.map((m, i) => (
+                  <tr key={m}>
+                    <th>{labels[m]}</th>
+                    <td className="cd-period-primary">{periodCompareValue(periodCompare.current.cells[i], m)}</td>
+                    <td>{periodCompareValue(periodCompare.previous.cells[i], m)}</td>
+                    <td>{periodCompareValue(periodCompare.lastYear.cells[i], m)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           </div>
           <MetricLinkage
             key={`${selected.id}:${previous?.id ?? "default"}`}
