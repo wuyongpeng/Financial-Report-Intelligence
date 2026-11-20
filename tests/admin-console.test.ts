@@ -22,9 +22,9 @@ test('all historical entries use shared query-preserving redirect, not duplicate
   }
 });
 
-test('all six console pages use common width; login stays on the shared /admin layout', async () => {
+test('all console pages use common width; login stays on the shared /admin layout', async () => {
   for (const file of ['sources/sources-admin-client', 'metrics/metrics-client', 'check/check-client',
-    'audit/audit-admin-client', 'survey/survey-client', 'feedback/feedback-client']) {
+    'audit/audit-admin-client', 'survey/survey-client', 'feedback/feedback-client', 'users/users-admin-client']) {
     const text = await source(`app/admin/${file}.tsx`);
     assert.match(text, /<AdminMain>/, file);
     assert.doesNotMatch(text, /useAdminSession|AdminLoginForm|session\.|onLogout|showLogout/, file);
@@ -43,7 +43,7 @@ test('all six console pages use common width; login stays on the shared /admin l
 
 test('normal console APIs require an admin session, including survey edits and AI summarize', async () => {
   for (const file of ['audit', 'audit/[id]', 'feedback', 'survey', 'summarize', 'metrics', 'check',
-    'metrics/ack', 'metrics/flag', 'reports/[id]/review', 'tests']) {
+    'metrics/ack', 'metrics/flag', 'reports/[id]/review', 'tests', 'users']) {
     const text = await source(`app/api/admin/${file}/route.ts`);
     assert.match(text, /requireAdmin\(request\)/, file);
     assert.doesNotMatch(text, /validAdminPassword/, file);

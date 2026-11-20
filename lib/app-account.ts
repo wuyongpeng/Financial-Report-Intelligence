@@ -41,6 +41,14 @@ export class QuotaError extends ApiError {
   }
 }
 
+export const ACCOUNT_DISABLED_MESSAGE = '该账号已停用，如需恢复请联系管理员。';
+
+export class AccountDisabledError extends ApiError {
+  constructor() {
+    super(403, ACCOUNT_DISABLED_MESSAGE, { code: 'account_disabled' });
+  }
+}
+
 export function usernameKey(username: string) {
   return username.trim().toLowerCase();
 }
@@ -124,13 +132,38 @@ function subjectKey(role: AccountRole, username: string | null, ownerKey: string
   return `guest:${ownerKey}:${day}`;
 }
 
-async function userQuotaLimit(username: string) {
-  if (isUnlimitedUsername(username)) return null;
+type UserAccountRow = {
+  quota_limit: number;
+  unlimited: boolean;
+  disabled_at: string | Date | null;
+};
+
+function isDisabledAccount(disabledAt: string | Date | null | undefined) {
+  return disabledAt != null && disabledAt !== '';
+}
+
+export function generateTemporaryPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = randomBytes(12);
+  let out = '';
+  for (const byte of bytes) out += alphabet[byte % alphabet.length];
+  return out;
+}
+
+async function loadUserAccount(username: string) {
   const db = getDb();
-  const rows = await db<{ quota_limit: number }[]>`
-    SELECT quota_limit FROM app_users WHERE username_key = ${usernameKey(username)} LIMIT 1
+  const rows = await db<UserAccountRow[]>`
+    SELECT quota_limit, unlimited, disabled_at FROM app_users WHERE username_key = ${usernameKey(username)} LIMIT 1
   `;
-  return rows[0]?.quota_limit ?? DEFAULT_USER_QUOTA;
+  return rows[0] ?? null;
+}
+
+async function loadUserQuota(username: string) {
+  const account = await loadUserAccount(username);
+  if (account && isDisabledAccount(account.disabled_at)) throw new AccountDisabledError();
+  const unlimited = isUnlimitedUsername(username) || Boolean(account?.unlimited);
+  const askLimit = unlimited ? null : (account?.quota_limit ?? DEFAULT_USER_QUOTA);
+  return { askLimit, unlimited };
 }
 
 async function readCount(key: string) {
@@ -143,13 +176,9 @@ export async function peekAskQuota(request: Request): Promise<{ state: QuotaStat
   await ensureBackendSchema();
   const username = appSessionUsername(request);
   if (username) {
-    if (isUnlimitedUsername(username)) {
-      const askCount = await readCount(subjectKey('user', username, '', ''));
-      return { state: buildState({ role: 'user', username, askCount, askLimit: null, unlimited: true }) };
-    }
-    const askLimit = await userQuotaLimit(username);
+    const { askLimit, unlimited } = await loadUserQuota(username);
     const askCount = await readCount(subjectKey('user', username, '', ''));
-    return { state: buildState({ role: 'user', username, askCount, askLimit, unlimited: false }) };
+    return { state: buildState({ role: 'user', username, askCount, askLimit, unlimited }) };
   }
   const guest = ensureGuestSession(request);
   const day = shanghaiDate();
@@ -164,19 +193,14 @@ export async function consumeAskQuota(request: Request): Promise<{ state: QuotaS
   await ensureBackendSchema();
   const username = appSessionUsername(request);
   if (username) {
-    if (isUnlimitedUsername(username)) {
-      const key = subjectKey('user', username, '', '');
-      const askCount = await incrementCounter(key, null);
-      return { state: buildState({ role: 'user', username, askCount, askLimit: null, unlimited: true }) };
-    }
-    const askLimit = await userQuotaLimit(username);
+    const { askLimit, unlimited } = await loadUserQuota(username);
     const key = subjectKey('user', username, '', '');
     const result = await incrementCounter(key, askLimit);
     if (result == null) {
       const askCount = await readCount(key);
       throw new QuotaError(quotaMessage('user'), buildState({ role: 'user', username, askCount, askLimit, unlimited: false }));
     }
-    return { state: buildState({ role: 'user', username, askCount: result, askLimit, unlimited: false }) };
+    return { state: buildState({ role: 'user', username, askCount: result, askLimit, unlimited }) };
   }
 
   const guest = ensureGuestSession(request);
@@ -248,16 +272,43 @@ export async function registerAccount(username: string, password: string, confir
 export async function authenticateAccount(username: string, password: string) {
   const trimmed = username.trim();
   if (!trimmed || !password) return null;
-  if (validAppCredentials(trimmed, password)) return process.env.APP_USERNAME || trimmed;
+  if (validAppCredentials(trimmed, password)) {
+    await ensureBackendSchema();
+    const envAccount = await loadUserAccount(trimmed);
+    if (envAccount && isDisabledAccount(envAccount.disabled_at)) throw new AccountDisabledError();
+    return process.env.APP_USERNAME || trimmed;
+  }
   await ensureBackendSchema();
   const db = getDb();
-  const rows = await db<{ username: string; password_hash: string }[]>`
-    SELECT username, password_hash FROM app_users WHERE username_key = ${usernameKey(trimmed)} LIMIT 1
+  const rows = await db<{ username: string; password_hash: string; disabled_at: string | Date | null }[]>`
+    SELECT username, password_hash, disabled_at FROM app_users WHERE username_key = ${usernameKey(trimmed)} LIMIT 1
   `;
   const row = rows[0];
   if (!row) return null;
   if (!(await verifyPassword(password, row.password_hash))) return null;
+  if (isDisabledAccount(row.disabled_at)) throw new AccountDisabledError();
   return row.username;
+}
+
+export async function changeAccountPassword(request: Request, currentPassword: string, newPassword: string, confirmPassword: string) {
+  const username = appSessionUsername(request);
+  if (!username) throw new ApiError(401, '请先登录');
+  if (!currentPassword) throw new ApiError(400, '请输入当前密码');
+  const passwordError = validatePassword(newPassword);
+  if (passwordError) throw new ApiError(400, passwordError);
+  if (newPassword !== confirmPassword) throw new ApiError(400, '两次密码不一致');
+  if (currentPassword === newPassword) throw new ApiError(400, '新密码不能与当前密码相同');
+  await ensureBackendSchema();
+  const db = getDb();
+  const rows = await db<{ password_hash: string; disabled_at: string | Date | null }[]>`
+    SELECT password_hash, disabled_at FROM app_users WHERE username_key = ${usernameKey(username)} LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) throw new ApiError(400, '当前账号不支持在此修改密码');
+  if (isDisabledAccount(row.disabled_at)) throw new AccountDisabledError();
+  if (!(await verifyPassword(currentPassword, row.password_hash))) throw new ApiError(403, '当前密码不正确');
+  const passwordHash = await hashPassword(newPassword);
+  await db`UPDATE app_users SET password_hash=${passwordHash}, updated_at=NOW() WHERE username_key=${usernameKey(username)}`;
 }
 
 export function sessionPayload(state: QuotaState) {

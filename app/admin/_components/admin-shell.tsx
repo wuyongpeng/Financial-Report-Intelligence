@@ -19,6 +19,7 @@ export const ADMIN_NAV_GROUPS = [
     id: 'user',
     label: '用户运营',
     items: [
+      { href: '/admin/users', label: '账号管理' },
       { href: '/admin/audit', label: '访问审计' },
       { href: '/admin/survey', label: '用户调研' },
       { href: '/admin/feedback', label: '反馈收集' },

@@ -44,7 +44,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
   const titleId = useId();
   const [tab, setTab] = useState<PrefsTab>('account');
   const [account, setAccount] = useState<AccountView>(() => getAccountView());
-  const [workspace, setWorkspace] = useState<'history' | 'delete' | null>(null);
+  const [workspace, setWorkspace] = useState<'history' | 'delete' | 'password' | null>(null);
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => readReaderPrefs());
   const [models, setModels] = useState<ModelChoice[] | null>(null);
   const [modelsError, setModelsError] = useState('');
@@ -206,8 +206,9 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
                 </>
               ) : (
                 <>
-                  <p className="prefs-lead">管理对话历史和账号。</p>
+                  <p className="prefs-lead">管理密码、对话历史和账号。</p>
                   <div className="prefs-account-list">
+                    <button type="button" onClick={() => setWorkspace('password')}>修改密码</button>
                     <button type="button" onClick={() => setWorkspace('history')}>对话历史</button>
                     <button type="button" onClick={() => setWorkspace('delete')}>注销账号</button>
                   </div>

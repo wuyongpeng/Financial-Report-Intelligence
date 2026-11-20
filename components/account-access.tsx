@@ -174,13 +174,17 @@ type HistoryItem = {
   period: string | null;
 };
 
-export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'delete'; onClose: () => void }) {
+export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'delete' | 'password'; onClose: () => void }) {
   const router = useRouter();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(panel === 'history');
   const [password, setPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -230,7 +234,34 @@ export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'delet
     }
   }
 
-  const title = panel === 'history' ? '对话历史' : '注销账号';
+  async function changePassword() {
+    setPending(true);
+    setError('');
+    setSuccess('');
+    try {
+      const response = await fetch('/api/auth/account', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      });
+      const payload = await response.json().catch(() => ({})) as { error?: string; message?: string };
+      if (!response.ok) {
+        setError(payload.error || '密码未能更新');
+        return;
+      }
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setSuccess(payload.message || '密码已更新');
+    } catch {
+      setError('密码未能更新，请稍后重试');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const title = panel === 'history' ? '对话历史' : panel === 'password' ? '修改密码' : '注销账号';
 
   return (
     <div className="acc-backdrop" onClick={() => { if (!pending) onClose(); }}>
@@ -270,6 +301,23 @@ export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'delet
             ) : null}
             <div className="acc-dialog-actions">
               <button type="button" className="acc-btn-ghost" onClick={onClose}>关闭</button>
+            </div>
+          </>
+        ) : null}
+        {panel === 'password' ? (
+          <>
+            <p>请输入当前密码，并设置新密码。</p>
+            <label className="acc-label" htmlFor="acc-password-current">当前密码</label>
+            <PasswordInput id="acc-password-current" className="acc-input" value={currentPassword} autoComplete="current-password" disabled={pending} onChange={(event) => setCurrentPassword(event.target.value)} />
+            <label className="acc-label" htmlFor="acc-password-new">新密码</label>
+            <PasswordInput id="acc-password-new" className="acc-input" value={newPassword} autoComplete="new-password" disabled={pending} onChange={(event) => setNewPassword(event.target.value)} />
+            <label className="acc-label" htmlFor="acc-password-new-confirm">再次输入新密码</label>
+            <PasswordInput id="acc-password-new-confirm" className="acc-input" value={confirmPassword} autoComplete="new-password" disabled={pending} onChange={(event) => setConfirmPassword(event.target.value)} />
+            {error ? <p className="acc-error">{error}</p> : null}
+            {success ? <p className="acc-error">{success}</p> : null}
+            <div className="acc-dialog-actions">
+              <button type="button" className="acc-btn-ghost" disabled={pending} onClick={onClose}>关闭</button>
+              <button type="button" className="acc-btn-primary" disabled={pending || !currentPassword || !newPassword || !confirmPassword} onClick={() => void changePassword()}>{pending ? '提交中…' : '更新密码'}</button>
             </div>
           </>
         ) : null}

@@ -89,6 +89,14 @@ test('avatar menu absorbs overflow actions and expands 了解更多 downward in 
   assert.doesNotMatch(prefs, /偏好设置/);
   assert.match(prefs, /AccountWorkspace/);
   assert.match(prefs, /立即注册/);
+  assert.match(prefs, /修改密码/);
+  assert.match(prefs, /setWorkspace\('password'\)/);
+  assert.match(source, /panel: 'history' \| 'delete' \| 'password'/);
+  assert.match(source, /htmlFor="acc-password-current"/);
+  assert.match(source, /htmlFor="acc-password-new"/);
+  assert.match(source, /htmlFor="acc-password-new-confirm"/);
+  assert.match(source, /method: 'PATCH'/);
+  assert.match(source, /currentPassword, newPassword, confirmPassword/);
 
   assert.match(legal, /LEGAL_PAGES\.map/);
   assert.match(legal, /服务条款/);
@@ -116,4 +124,7 @@ test('ask routes enforce quota and register route exists', () => {
   assert.match(register, /registerAccount/);
   assert.match(register, /注册成功/);
   assert.match(login, /authenticateAccount/);
+  const account = read('app/api/auth/account/route.ts');
+  assert.match(account, /export async function PATCH/);
+  assert.match(account, /changeAccountPassword/);
 });

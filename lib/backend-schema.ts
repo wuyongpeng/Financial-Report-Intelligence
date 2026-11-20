@@ -243,6 +243,8 @@ async function migrate() {
     )`;
     await tx`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email TEXT`;
     await tx`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email_notify BOOLEAN NOT NULL DEFAULT TRUE`;
+    await tx`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS unlimited BOOLEAN NOT NULL DEFAULT FALSE`;
+    await tx`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ`;
     await tx`CREATE TABLE IF NOT EXISTS user_watchlist (
       user_key TEXT NOT NULL,
       code TEXT NOT NULL REFERENCES companies(code) ON DELETE CASCADE,
