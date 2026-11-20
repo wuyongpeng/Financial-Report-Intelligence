@@ -1,5 +1,5 @@
 .hom-root{position:relative;display:inline-flex;align-items:center}
-.hom-trigger{border:0;background:transparent;color:#68748a;width:32px;height:32px;border-radius:8px;font-size:20px;line-height:1;padding:0;display:inline-grid;place-items:center}
+.hom-trigger{display:none}
 .hom-trigger:hover{color:#1f4fad;background:transparent}
 .hom-trigger:focus-visible{outline:2px solid #82aaff;outline-offset:2px}
 .hom-menu{position:absolute;right:0;top:calc(100% + 6px);min-width:148px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 28px #13213b1a;padding:6px;z-index:80}

@@ -66,3 +66,10 @@
   .prefs-tabs{flex-direction:row;overflow:auto}
   .prefs-tab{white-space:nowrap}
 }
+
+.prefs-account-list{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.prefs-account-list button{height:auto;padding:10px 12px;border:1px solid #e6e8ec;border-radius:10px;background:#fff;color:#31465f;font:inherit;font-size:14px;text-align:left;cursor:pointer}
+.prefs-account-list button:hover{background:#f3f4f6}
+.prefs-account-actions{display:flex;gap:8px;margin-top:16px}
+.prefs-account-btn{height:36px;padding:0 14px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#4b5563;font:inherit;font-size:13px;cursor:pointer}
+.prefs-account-btn.primary{border-color:#9aa3b0;background:#5b6472;color:#fff}

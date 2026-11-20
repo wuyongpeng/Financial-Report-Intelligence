@@ -35,3 +35,7 @@
 .pw-share-sources h2{font-size:16px;margin:0 0 10px}
 .pw-share-sources li{font-size:13px;color:#4b5563;line-height:1.6;margin:0 0 8px}
 .pw-disclaimer{margin:24px 0 0;color:#6b7280;font-size:12px;line-height:1.6}
+
+.pw-legal-index{list-style:none;margin:0 0 32px;padding:0;display:flex;flex-direction:column;gap:8px}
+.pw-legal-index a{display:block;padding:12px 14px;border:1px solid #e6e8ec;border-radius:10px;color:#3f4650;text-decoration:none;background:#fff}
+.pw-legal-index a:hover{background:#f3f4f6}

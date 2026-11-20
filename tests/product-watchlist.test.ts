@@ -39,11 +39,14 @@ function coverage(partial: Partial<CrawlCompanyCoverage>): CrawlCompanyCoverage 
   } as CrawlCompanyCoverage;
 }
 
-test('personal watchlist replaces the public crawl feed on the home page', () => {
+test('home inventory lists enabled coverage from the public crawl pool', () => {
   const home = source('app/report-home.tsx');
+  assert.match(home, /fetch\('\/api\/crawl'/);
+  assert.match(home, /5 \* 60 \* 1000/);
+  assert.match(home, /WatchDigestCard/);
   assert.match(home, /fetch\('\/api\/me\/coverage'/);
-  assert.doesNotMatch(home, /fetch\('\/api\/crawl'/);
-  assert.match(home, /我的自选/);
+  assert.doesNotMatch(home, /我的自选/);
+  assert.doesNotMatch(home, /WatchlistEmpty/);
   assert.match(home, /加入自选/);
   assert.doesNotMatch(home, /加入监控池/);
   assert.doesNotMatch(home, /数据运营/);
@@ -77,12 +80,18 @@ test('notifications and share routes isolate owners; shares are public to read',
 
 test('account panel exposes history, email, logout, deletion, and legal pages', () => {
   const account = source('components/account-access.tsx');
+  const prefs = source('app/reader-prefs-dialog.tsx');
   assert.match(account, /对话历史/);
   assert.match(account, /提醒邮箱/);
   assert.match(account, /注销账号/);
   assert.match(account, /\/api\/auth\/account/);
   assert.match(account, /submitLogout/);
-  assert.match(account, /LEGAL_PAGES\.map/);
+  assert.match(prefs, /对话历史/);
+  assert.match(prefs, /提醒邮箱/);
+  assert.match(prefs, /注销账号/);
+  const legalIndex = source('app/legal/page.tsx');
+  assert.match(legalIndex, /LEGAL_PAGES\.map/);
+  assert.match(legalIndex, /服务条款/);
   for (const page of LEGAL_PAGES) {
     assert.equal(legalPath(page.slug), `/legal/${page.slug}`);
     assert.equal(findLegalPage(page.slug)?.title, page.title);

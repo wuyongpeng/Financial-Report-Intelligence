@@ -1,7 +1,6 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_FEEDBACK_CATEGORY,
   FEEDBACK_CATEGORIES,
@@ -9,8 +8,8 @@ import {
 } from '@/lib/feedback-input';
 import './home-overflow-menu.css';
 import { preserveFeedbackDraft, publishFeedbackState, subscribeFeedbackDraft, isFeedbackDrawerOpen } from '@/lib/feedback-draft-client';
+import { subscribeHomeMenuActions } from '@/lib/home-menu-actions';
 import ReaderPrefsDialog from './reader-prefs-dialog';
-import { LEGAL_PAGES, legalPath } from '@/lib/legal-content';
 
 export type HomeOverflowMenuProps = {
   /** Home shows 数据采集; detail hides it. Default true. */
@@ -20,10 +19,9 @@ export type HomeOverflowMenuProps = {
 };
 
 export default function HomeOverflowMenu({
-  showSources = false,
   pageLabel,
 }: HomeOverflowMenuProps) {
-  const [open, setOpen] = useState(false);
+
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const draftRef = useRef({ text: '', edited: false });
   const sendingRef = useRef(false);
@@ -45,6 +43,7 @@ export default function HomeOverflowMenu({
       window.history.replaceState({}, '', next);
     }
   }, []);
+
   const [category, setCategory] = useState<FeedbackCategory>(DEFAULT_FEEDBACK_CATEGORY);
   const [catOpen, setCatOpen] = useState(false);
   const [message, setMessage] = useState('');
@@ -52,24 +51,15 @@ export default function HomeOverflowMenu({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
-  const rootRef = useRef<HTMLDivElement>(null);
-  const menuId = useId();
 
-  useEffect(() => {
-    if (!open) return;
-    function onDoc(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+  useEffect(() => subscribeHomeMenuActions((action) => {
+    if (action === 'prefs') setPrefsOpen(true);
+    if (action === 'about') setAboutOpen(true);
+    if (action === 'feedback') {
+      changeFeedbackOpen(true);
+      setError('');
     }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  }), []);
 
   useEffect(() => {
     if (!toast) return;
@@ -108,7 +98,6 @@ export default function HomeOverflowMenu({
         setVoiceDraftHint(merged.preserved ? '已有未提交内容，已保留原稿。请确认内容，没问题后再点击发送。' : '已根据你的话整理草稿。请确认内容，没问题后再点击发送。');
       }
       request.accepted = true;
-      setOpen(false);
       changeFeedbackOpen(true);
     });
     return () => { unsubscribe(); if (isFeedbackDrawerOpen()) publishFeedbackState(false); };
@@ -157,80 +146,7 @@ export default function HomeOverflowMenu({
   }
 
   return (
-    <div className="hom-root" ref={rootRef}>
-      <button
-        type="button"
-        className="hom-trigger"
-        aria-label="更多"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={menuId}
-        onClick={() => setOpen((v) => !v)}
-      >
-        ⋯
-      </button>
-      {open ? (
-        <div className="hom-menu" role="menu" id={menuId}>
-          <button
-            type="button"
-            role="menuitem"
-            className="hom-item"
-            onClick={() => { setOpen(false); setPrefsOpen(true); }}
-          >
-            偏好设置
-          </button>
-          <Link
-            role="menuitem"
-            className="hom-item"
-            href="/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setOpen(false)}
-          >
-            帮助中心
-          </Link>
-          <button
-            type="button"
-            role="menuitem"
-            className="hom-item"
-            onClick={() => { setOpen(false); changeFeedbackOpen(true); setError(''); }}
-          >
-            发送反馈
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="hom-item"
-            onClick={() => { setOpen(false); setAboutOpen(true); }}
-          >
-            关于 Eva
-          </button>
-          {LEGAL_PAGES.map((page) => (
-            <Link
-              key={page.slug}
-              role="menuitem"
-              className="hom-item"
-              href={legalPath(page.slug)}
-              onClick={() => setOpen(false)}
-            >
-              {page.title}
-            </Link>
-          ))}
-          {showSources ? (
-            <Link
-              role="menuitem"
-              className="hom-item"
-              href="/admin/sources"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-            >
-              数据运营
-            </Link>
-          ) : null}
-        </div>
-      ) : null}
-
+    <div className="hom-root">
       {feedbackOpen ? (
         <div className="hom-drawer-backdrop" onClick={() => !sending && changeFeedbackOpen(false)}>
           <aside

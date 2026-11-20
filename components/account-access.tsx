@@ -18,7 +18,7 @@ import {
   subscribeAccount,
   type AccountView,
 } from '@/lib/account-client';
-import { LEGAL_PAGES, legalPath } from '@/lib/legal-content';
+import { requestHomeMenuAction } from '@/lib/home-menu-actions';
 import './account-access.css';
 
 function useAccountView() {
@@ -55,23 +55,42 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   );
 }
 
+function quotaCaption(account: AccountView, guest: boolean) {
+  if (account.quota?.unlimited) return '对话次数不限';
+  if (account.quota?.remaining != null) {
+    return guest
+      ? `今日剩余对话 ${account.quota.remaining} 次`
+      : `剩余对话 ${account.quota.remaining} 次`;
+  }
+  return guest ? '今日可对话 9 次' : '注册后可对话 100 次';
+}
+
 export function AccountMenu() {
   const pathname = usePathname();
   const account = useAccountView();
   const [open, setOpen] = useState(false);
-  const [workspace, setWorkspace] = useState<'history' | 'email' | 'delete' | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const moreId = useId();
   const hidden = isAdminPath(pathname);
   const guest = account.role !== 'user';
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setMoreOpen(false);
+      return;
+    }
     function onDoc(event: MouseEvent) {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key !== 'Escape') return;
+      if (moreOpen) {
+        setMoreOpen(false);
+        return;
+      }
+      setOpen(false);
     }
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
@@ -79,27 +98,25 @@ export function AccountMenu() {
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open]);
+  }, [open, moreOpen]);
 
   if (hidden) return null;
 
-  const remaining = account.quota?.unlimited
-    ? '对话次数不限'
-    : account.quota?.remaining != null
-      ? `剩余对话 ${account.quota.remaining} 次`
-      : guest
-        ? '每日可对话 9 次'
-        : '注册后可对话 100 次';
+  const remaining = quotaCaption(account, guest);
+
+  function closeMenu() {
+    setMoreOpen(false);
+    setOpen(false);
+  }
 
   return (
-    <>
     <div className="acc-menu" ref={rootRef}>
       <button
         type="button"
         className={`acc-avatar ${guest ? 'is-guest' : 'is-user'}`}
         aria-label={guest ? '访客模式' : account.username || '已登录'}
         title={guest ? '访客模式' : account.username || '已登录'}
-        aria-haspopup="dialog"
+        aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
         onClick={() => setOpen((value) => !value)}
@@ -107,39 +124,47 @@ export function AccountMenu() {
         {guest ? <GuestAvatarIcon /> : <span>{(account.username || '用').slice(0, 1)}</span>}
       </button>
       {open ? (
-        <div className="acc-panel" id={menuId} role="dialog" aria-label={guest ? '访客模式' : '账户'}>
-          <h2>{guest ? '访客模式' : account.username}</h2>
-          <p>{guest ? '当前为访客，数据仅本地 / 会话有效，关闭页面会丢失' : remaining}</p>
-          {guest ? (
-            <>
-              <div className="acc-panel-actions">
-                <button type="button" className="acc-btn-secondary" onClick={() => { setOpen(false); openAccountDialog('login'); }}>登录</button>
-                <button type="button" className="acc-btn-primary" onClick={() => { setOpen(false); openAccountDialog('register'); }}>注册</button>
-              </div>
-              <div className="acc-legal">
-                {LEGAL_PAGES.map((page) => (
-                  <Link key={page.slug} href={legalPath(page.slug)} onClick={() => setOpen(false)}>{page.title}</Link>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="acc-panel-links">
-              <button type="button" onClick={() => { setOpen(false); setWorkspace('history'); }}>对话历史</button>
-              <button type="button" onClick={() => { setOpen(false); setWorkspace('email'); }}>提醒邮箱</button>
-              <button type="button" onClick={() => { setOpen(false); void submitLogout(); }}>退出</button>
-              <button type="button" onClick={() => { setOpen(false); setWorkspace('delete'); }}>注销账号</button>
-              <div className="acc-legal">
-                {LEGAL_PAGES.map((page) => (
-                  <Link key={page.slug} href={legalPath(page.slug)} onClick={() => setOpen(false)}>{page.title}</Link>
-                ))}
-              </div>
+        <>
+          <div className="acc-panel" id={menuId} role="menu" aria-label={guest ? '访客模式' : '账户'}>
+            <div className="acc-panel-head">
+              <h2>{guest ? '访客模式' : account.username}</h2>
+              <p>{remaining}</p>
             </div>
-          )}
-        </div>
+            <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); requestHomeMenuAction('prefs'); }}>账号设置</button>
+            <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); requestHomeMenuAction('feedback'); }}>发送反馈</button>
+            <button
+              type="button"
+              role="menuitem"
+              className={`acc-item acc-item-more${moreOpen ? ' is-open' : ''}`}
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              aria-controls={moreId}
+              onClick={() => setMoreOpen((value) => !value)}
+            >
+              <span>了解更多</span>
+              <span className="acc-item-chevron" aria-hidden="true">&gt;</span>
+            </button>
+            {guest ? (
+              <div className="acc-panel-auth">
+                <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); openAccountDialog('login'); }}>登录</button>
+                <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); openAccountDialog('register'); }}>立即注册</button>
+              </div>
+            ) : (
+              <div className="acc-panel-auth">
+                <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); void submitLogout(); }}>退出登录</button>
+              </div>
+            )}
+          </div>
+          {moreOpen ? (
+            <div className="acc-flyout" id={moreId} role="menu" aria-label="了解更多">
+              <Link role="menuitem" className="acc-item" href="/docs" target="_blank" rel="noopener noreferrer" onClick={closeMenu}>帮助中心</Link>
+              <Link role="menuitem" className="acc-item" href="/legal" onClick={closeMenu}>服务条款</Link>
+              <button type="button" role="menuitem" className="acc-item" onClick={() => { closeMenu(); requestHomeMenuAction('about'); }}>关于Eva</button>
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
-    {workspace ? <AccountWorkspace panel={workspace} onClose={() => setWorkspace(null)} /> : null}
-    </>
   );
 }
 
@@ -153,7 +178,7 @@ type HistoryItem = {
   period: string | null;
 };
 
-function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'email' | 'delete'; onClose: () => void }) {
+export function AccountWorkspace({ panel, onClose }: { panel: 'history' | 'email' | 'delete'; onClose: () => void }) {
   const router = useRouter();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(panel === 'history');

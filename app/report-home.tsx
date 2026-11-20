@@ -68,8 +68,8 @@ import { readContractJson } from '@/contracts/common';
 import { parseReportListResponse } from '@/contracts/reports';
 import { buildHomePlaceholders, DEFAULT_HOME_PLACEHOLDERS, type PlaceholderSeed } from '@/lib/home-placeholders';
 import { prependPersonalizedPlaceholders } from '@/lib/home-prompts-shared';
-import { handleAskResponse, requestLoginForRestricted, getAccountView } from '@/lib/account-client';
-import { ProductFooter, WatchDigestCard, WatchlistEmpty } from '@/components/product-workspace';
+import { handleAskResponse, requestLoginForRestricted } from '@/lib/account-client';
+import { ProductFooter, WatchDigestCard } from '@/components/product-workspace';
 import { productCollectStatus } from '@/lib/product-status';
 import type { WatchlistDigest } from '@/lib/watchlist-digest';
 import { ensureGuestCookie } from '@/lib/guest-session-client';
@@ -687,47 +687,58 @@ export default function ReportHome() {
 
   const refreshCoverage = useCallback(async (): Promise<CrawlCompanyCoverage[]> => {
     try {
-      const response = await fetch('/api/me/coverage', { cache: 'no-store', credentials: 'same-origin' });
-      if (response.status === 401) {
-        setCoverage([]);
-        setWatchDigest(null);
-        setStats(null);
-        setSource('watchlist');
-        setError('');
-        return [];
-      }
-      if (!response.ok) throw new Error(`自选接口 ${response.status}`);
+      const response = await fetch('/api/crawl', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`抓取接口 ${response.status}`);
       const payload = await response.json() as {
-        source?: 'postgresql' | 'crawl-mock' | 'watchlist';
+        source?: 'postgresql' | 'crawl-mock';
         stats: CrawlStats;
         companies: CrawlCompanyCoverage[];
         warning?: string;
-        digest?: WatchlistDigest;
       };
       const companies = payload.companies ?? [];
       setCoverage(companies);
-      setWatchDigest(payload.digest ?? null);
       setStats(payload.stats ?? null);
-      setSource(payload.source ?? 'watchlist');
-      setError(payload.warning ?? '');
+      setSource(payload.source ?? '');
+      setError(payload.warning ?? (payload.source === 'crawl-mock' ? '当前展示为演示兜底数据（库为空或暂不可用）。' : ''));
       return companies;
     } catch (err) {
-      setSource('watchlist');
-      setError(`自选数据暂时无法读取：${String(err)}`);
+      setSource('');
+      setError(`真实数据暂时无法读取：${String(err)}`);
       return coverageRef.current;
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const refreshWatchDigest = useCallback(async () => {
+    try {
+      const response = await fetch('/api/me/coverage', { cache: 'no-store', credentials: 'same-origin' });
+      if (response.status === 401) {
+        setWatchDigest(null);
+        return;
+      }
+      if (!response.ok) return;
+      const payload = await response.json() as { digest?: WatchlistDigest };
+      setWatchDigest(payload.digest ?? null);
+    } catch {
+      /* inventory list does not depend on the personal digest */
+    }
+  }, []);
+
   useEffect(() => {
-    const kick = window.setTimeout(() => { void refreshCoverage(); }, 0);
-    const timer = window.setInterval(() => { void refreshCoverage(); }, 20 * 1000);
+    const kick = window.setTimeout(() => {
+      void refreshCoverage();
+      void refreshWatchDigest();
+    }, 0);
+    const timer = window.setInterval(() => {
+      void refreshCoverage();
+      void refreshWatchDigest();
+    }, 5 * 60 * 1000);
     return () => {
       window.clearTimeout(kick);
       window.clearInterval(timer);
     };
-  }, [refreshCoverage]);
+  }, [refreshCoverage, refreshWatchDigest]);
 
   useEffect(() => {
     if (!waitToast) return;
@@ -2039,8 +2050,7 @@ export default function ReportHome() {
 
       <WatchDigestCard digest={watchDigest} />
 
-      <section className="rh-companies" id="rh-companies" aria-labelledby="rh-list-title">
-        <h2 id="rh-list-title" className="sr-only">我的自选</h2>
+      <section className="rh-companies" id="rh-companies" aria-label="公司列表">
         <div className="rh-filters" aria-label="筛选与排序">
           <div className="rh-filter-bar">
             <div className="rh-chip-row" role="radiogroup" aria-label="行业筛选">
@@ -2115,9 +2125,7 @@ export default function ReportHome() {
           </div>
         </div>
 
-        {!loading && coverage.length === 0 ? (
-          <WatchlistEmpty guest={getAccountView().role !== 'user'} />
-        ) : loading ? (
+        {loading ? (
           <div className="rh-card-grid rh-card-grid-all" aria-hidden="true">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="rh-skeleton-card">
@@ -2409,7 +2417,7 @@ export default function ReportHome() {
             <b>没有符合条件的公司</b>
             {listedOutsidePoolCandidates.length > 1 ? (
               <>
-                <p>识别到多家相关公司，但还不在自选中。点选要加入的一家：</p>
+                <p>识别到多家相关公司，但不在当前已覆盖清单。点选要加入的一家：</p>
                 <ul className="rh-listed-candidates">
                   {listedOutsidePoolCandidates.map((listed) => (
                     <li key={listed.code}>
@@ -2427,7 +2435,7 @@ export default function ReportHome() {
             ) : listedOutsidePool ? (
               <>
                 <p>
-                  已识别到「{listedOutsidePool.name}」（{listedOutsidePool.code}），但还不在自选中。
+                  已识别到「{listedOutsidePool.name}」（{listedOutsidePool.code}），但不在当前已覆盖清单。
                 </p>
                 <button
                   type="button"
@@ -2440,7 +2448,7 @@ export default function ReportHome() {
               <>
                 <p>
                   {keyword
-                    ? '未匹配到自选或识别名录中的公司。可换简称或六位代码，搜到即可加入自选。'
+                    ? '未匹配到已覆盖清单或识别名录中的公司。可换简称 / 六位代码；名录缺漏可上报管理员。'
                     : '试试调整行业，或换一个公司简称 / 六位代码；完整问题请点发送走追问路径。'}
                 </p>
                 <div className="rh-empty-actions">

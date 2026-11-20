@@ -1,6 +1,13 @@
 'use client';
 
 import { useEffect, useId, useState, type FormEvent } from 'react';
+import { AccountWorkspace } from '@/components/account-access';
+import {
+  getAccountView,
+  openAccountDialog,
+  subscribeAccount,
+  type AccountView,
+} from '@/lib/account-client';
 import { clearHomeChatTurns } from '@/lib/chat-surface';
 import { type ReaderMemory } from '@/lib/reader-memory';
 import { READER_MEMORY_EVENT, addReaderMemory, clearReaderMemory, deleteReaderNote, readReaderMemory } from '@/lib/reader-memory-client';
@@ -19,9 +26,10 @@ import {
 } from '@/lib/reader-prefs';
 import './reader-prefs-dialog.css';
 
-type PrefsTab = 'general' | 'model' | 'voice' | 'profile' | 'cache';
+type PrefsTab = 'account' | 'general' | 'model' | 'voice' | 'profile' | 'cache';
 
 const TABS: Array<{ id: PrefsTab; label: string }> = [
+  { id: 'account', label: '账户' },
   { id: 'general', label: '常规' },
   { id: 'model', label: '模型' },
   { id: 'voice', label: '语音' },
@@ -34,7 +42,9 @@ type MemoryRow = { id: string; title: string; updated_at: string };
 
 export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) {
   const titleId = useId();
-  const [tab, setTab] = useState<PrefsTab>('general');
+  const [tab, setTab] = useState<PrefsTab>('account');
+  const [account, setAccount] = useState<AccountView>(() => getAccountView());
+  const [workspace, setWorkspace] = useState<'history' | 'email' | 'delete' | null>(null);
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => readReaderPrefs());
   const [models, setModels] = useState<ModelChoice[] | null>(null);
   const [modelsError, setModelsError] = useState('');
@@ -48,11 +58,18 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      if (workspace) {
+        setWorkspace(null);
+        return;
+      }
+      onClose();
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, workspace]);
+
+  useEffect(() => subscribeAccount(() => setAccount(getAccountView())), []);
 
   useEffect(() => {
     if (tab !== 'model') return;
@@ -157,8 +174,8 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
         aria-labelledby={titleId}
         onClick={(event) => event.stopPropagation()}
       >
-        <nav className="prefs-nav" aria-label="偏好分组">
-          <p className="prefs-kicker" id={titleId}>偏好设置</p>
+        <nav className="prefs-nav" aria-label="账号设置分组">
+          <p className="prefs-kicker" id={titleId}>账号设置</p>
           <div className="prefs-tabs" role="tablist" aria-orientation="vertical">
             {TABS.map((item) => (
               <button
@@ -176,7 +193,31 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
         </nav>
         <section className="prefs-main" role="tabpanel">
           <button type="button" className="prefs-close" aria-label="关闭" onClick={onClose}>×</button>
+          {tab === 'account' ? (
+            <>
+              <h3>账户</h3>
+              {account.role !== 'user' ? (
+                <>
+                  <p className="prefs-lead">登录或注册后，可以查看对话历史、设置提醒邮箱，或注销账号。</p>
+                  <div className="prefs-account-actions">
+                    <button type="button" className="prefs-account-btn" onClick={() => openAccountDialog('login')}>登录</button>
+                    <button type="button" className="prefs-account-btn primary" onClick={() => openAccountDialog('register')}>立即注册</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="prefs-lead">管理对话历史、提醒邮箱和账号。</p>
+                  <div className="prefs-account-list">
+                    <button type="button" onClick={() => setWorkspace('history')}>对话历史</button>
+                    <button type="button" onClick={() => setWorkspace('email')}>提醒邮箱</button>
+                    <button type="button" onClick={() => setWorkspace('delete')}>注销账号</button>
+                  </div>
+                </>
+              )}
+            </>
+          ) : null}
           {tab === 'general' ? (
+
             <>
               <h3>解读风格</h3>
               <p className="prefs-lead">调整表述风格，数据和引用来源保持不变。</p>
@@ -332,6 +373,7 @@ export default function ReaderPrefsDialog({ onClose }: { onClose: () => void }) 
       {notice ? (
         <div key={notice.at} className="prefs-toast" role="status" aria-live="polite" onClick={(event) => event.stopPropagation()}>{notice.text}</div>
       ) : null}
+      {workspace ? <AccountWorkspace panel={workspace} onClose={() => setWorkspace(null)} /> : null}
     </div>
   );
 }
