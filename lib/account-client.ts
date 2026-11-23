@@ -8,12 +8,10 @@ export type AccountView = {
   username: string | null;
   quota: QuotaState | null;
   dialog: AccountDialog;
-  bannerDismissed: boolean;
   error: string;
 };
 
 const SUGGEST_KEY = 'eva-suggest-register-dismissed';
-const BANNER_KEY = 'eva-guest-banner-dismissed';
 
 const listeners = new Set<() => void>();
 
@@ -23,7 +21,6 @@ let view: AccountView = {
   username: null,
   quota: null,
   dialog: null,
-  bannerDismissed: false,
   error: '',
 };
 
@@ -70,7 +67,7 @@ export async function refreshAccount() {
     const response = await fetch('/api/auth/session', { credentials: 'same-origin', cache: 'no-store' });
     const body = await response.json().catch(() => ({})) as { role?: string; username?: string | null; quota?: QuotaState };
     if (!response.ok) {
-      setView({ ready: true, bannerDismissed: readFlag(BANNER_KEY) });
+      setView({ ready: true });
       return view;
     }
     const role = body.role === 'user' ? 'user' as const : 'guest' as const;
@@ -79,12 +76,11 @@ export async function refreshAccount() {
       role,
       username: typeof body.username === 'string' ? body.username : null,
       quota: body.quota ?? null,
-      bannerDismissed: role === 'user' || readFlag(BANNER_KEY),
     });
     applyQuota(body.quota);
     return view;
   } catch {
-    setView({ ready: true, bannerDismissed: readFlag(BANNER_KEY) });
+    setView({ ready: true });
     return view;
   }
 }
@@ -118,11 +114,6 @@ export function openAccountDialog(dialog: Exclude<AccountDialog, null>) {
 export function closeAccountDialog() {
   if (view.dialog === 'suggest') writeFlag(SUGGEST_KEY);
   setView({ dialog: null, error: '' });
-}
-
-export function dismissGuestBanner() {
-  writeFlag(BANNER_KEY);
-  setView({ bannerDismissed: true });
 }
 
 export function requestLoginForRestricted() {
@@ -173,6 +164,6 @@ export async function submitRegister(username: string, password: string, confirm
 
 export async function submitLogout() {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined);
-  setView({ role: 'guest', username: null, quota: null, dialog: null, error: '', bannerDismissed: readFlag(BANNER_KEY) });
+  setView({ role: 'guest', username: null, quota: null, dialog: null, error: '' });
   await refreshAccount();
 }

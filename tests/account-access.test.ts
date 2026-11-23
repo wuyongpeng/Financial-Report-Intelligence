@@ -23,7 +23,11 @@ test('guest avatar panel uses the specified copy and has a login action', () => 
   const source = read('components/account-access.tsx');
   const css = read('components/account-access.css');
   assert.match(source, /title=\{guest \? '访客模式' :/);
-  assert.match(source, /当前为访客，数据仅本地 \/ 会话有效，关闭页面会丢失/);
+  assert.doesNotMatch(source, /当前为访客，数据仅本地 \/ 会话有效，关闭页面会丢失/);
+  assert.doesNotMatch(source, /acc-banner|dismissGuestBanner|bannerDismissed/);
+  assert.doesNotMatch(css, /acc-banner/);
+  const accountClient = read('lib/account-client.ts');
+  assert.doesNotMatch(accountClient, /bannerDismissed|dismissGuestBanner|eva-guest-banner-dismissed/);
   assert.match(source, />登录</);
   assert.doesNotMatch(source, />立即注册</);
   assert.match(source, /没有账号？去注册/);

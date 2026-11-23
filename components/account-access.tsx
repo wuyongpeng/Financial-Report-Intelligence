@@ -7,7 +7,6 @@ import { usePathname } from 'next/navigation';
 import { PasswordInput } from '@/components/password-input';
 import {
   closeAccountDialog,
-  dismissGuestBanner,
   getAccountView,
   openAccountDialog,
   refreshAccount,
@@ -43,12 +42,6 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   return (
     <>
-      {!hidden && account.ready && account.role === 'guest' && !account.bannerDismissed ? (
-        <div className="acc-banner" role="status">
-          <p>当前为访客，数据仅本地 / 会话有效，关闭页面会丢失</p>
-          <button type="button" className="acc-banner-close" aria-label="关闭提示" onClick={() => dismissGuestBanner()}>×</button>
-        </div>
-      ) : null}
       {children}
       {!hidden ? <AccountDialogs account={account} /> : null}
     </>
